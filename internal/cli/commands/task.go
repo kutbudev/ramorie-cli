@@ -1,13 +1,15 @@
 package commands
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
-	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
 	"github.com/terzigolu/josepshbrain-go/internal/cli/interactive"
 	"github.com/terzigolu/josepshbrain-go/pkg/models"
@@ -25,13 +27,13 @@ func NewTaskCmd(db *gorm.DB) *cobra.Command {
 
 	// Add subcommands with database
 	cmd.AddCommand(newTaskCreateCmd(db))
-	cmd.AddCommand(newTaskListCmd(db))
-	cmd.AddCommand(newTaskStartCmd(db))
-	cmd.AddCommand(newTaskDoneCmd(db))
-	cmd.AddCommand(newTaskInfoCmd(db))
-	cmd.AddCommand(newTaskProgressCmd(db))
-	cmd.AddCommand(newTaskDeleteCmd(db))
-	cmd.AddCommand(newTaskModifyCmd(db))
+	cmd.AddCommand(newTaskListCmd())
+	cmd.AddCommand(newTaskStartCmd())
+	cmd.AddCommand(newTaskDoneCmd())
+	cmd.AddCommand(newTaskInfoCmd())
+	cmd.AddCommand(newTaskProgressCmd())
+	cmd.AddCommand(newTaskDeleteCmd())
+	cmd.AddCommand(newTaskModifyCmd())
 
 	return cmd
 }
@@ -40,7 +42,7 @@ func NewTaskCmd(db *gorm.DB) *cobra.Command {
 func newTaskCreateCmd(db *gorm.DB) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "create [description]",
-		Short:   "Create a new task",
+		Short:   "Create a new task via API",
 		Aliases: []string{"add"},
 		Run: func(cmd *cobra.Command, args []string) {
 			isInteractive, _ := cmd.Flags().GetBool("interactive")
@@ -56,7 +58,7 @@ func newTaskCreateCmd(db *gorm.DB) *cobra.Command {
 				description = task.Description
 				// Priority from interactive mode overrides flag
 				if task.Priority != "" {
-					priority = task.Priority
+					priority = string(task.Priority)
 				}
 			} else {
 				// Traditional CLI mode
@@ -67,31 +69,52 @@ func newTaskCreateCmd(db *gorm.DB) *cobra.Command {
 				}
 				description = strings.Join(args, " ")
 			}
-			
+
 			// Get active project - require one to exist
+			// TODO: Refactor this to use a config file instead of a direct DB call
 			var project models.Project
 			result := db.Where("is_active = ? AND deleted_at IS NULL", true).First(&project)
 			if result.Error != nil {
 				fmt.Println("❌ No active project found")
-				fmt.Println("💡 Use 'jbraincli init <name>' to create a project first")
+				fmt.Println("💡 Use 'jbraincli project use <name>' to create or set an active project")
 				return
 			}
 
-			// Create new task
-			task := models.Task{
-				ProjectID:   project.ID,
-				Description: description,
-				Status:      string(models.TaskStatusTODO),
-				Priority:    strings.ToUpper(priority),
-				Progress:    0,
+			// Create JSON payload for the new task
+			payload := map[string]string{
+				"project_id":  project.ID.String(),
+				"description": description,
+				"priority":    strings.ToUpper(priority),
+			}
+			jsonPayload, err := json.Marshal(payload)
+			if err != nil {
+				log.Fatalf("Failed to create JSON payload: %v", err)
 			}
 
-			if err := db.Create(&task).Error; err != nil {
-				log.Fatalf("Failed to create task: %v", err)
+			// Send request to the API
+			resp, err := http.Post("http://localhost:8080/v1/tasks", "application/json", bytes.NewBuffer(jsonPayload))
+			if err != nil {
+				log.Fatalf("Failed to send request to API: %v", err)
+			}
+			defer resp.Body.Close()
+
+			// Check response
+			if resp.StatusCode != http.StatusCreated {
+				var apiError map[string]string
+				if err := json.NewDecoder(resp.Body).Decode(&apiError); err == nil {
+					log.Fatalf("API returned an error: %s (Status: %s)", apiError["error"], resp.Status)
+				}
+				log.Fatalf("API returned a non-201 status code: %s", resp.Status)
 			}
 
-			fmt.Printf("🔄 Created task: %s\n", description)
-			fmt.Printf("✅ Task ID: %s\n", task.ID.String())
+			// Decode the created task and print info
+			var createdTask models.Task
+			if err := json.NewDecoder(resp.Body).Decode(&createdTask); err != nil {
+				log.Fatalf("Failed to decode API response: %v", err)
+			}
+
+			fmt.Printf("🔄 Created task via API: %s\n", createdTask.Description)
+			fmt.Printf("✅ Task ID: %s\n", createdTask.ID)
 		},
 	}
 	
@@ -112,285 +135,246 @@ func newTaskCreateCmd(db *gorm.DB) *cobra.Command {
 }
 
 // task list
-func newTaskListCmd(db *gorm.DB) *cobra.Command {
+func newTaskListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
-		Short:   "List tasks for the active project",
+		Short:   "List tasks from the API",
 		Aliases: []string{"ls"},
 		Run: func(cmd *cobra.Command, args []string) {
-			allProjects, _ := cmd.Flags().GetBool("all")
 			status, _ := cmd.Flags().GetString("status")
-			
-			// Get active project unless --all flag is used
-			var project models.Project
-			if !allProjects {
-				result := db.Where("is_active = ? AND deleted_at IS NULL", true).First(&project)
-				if result.Error != nil {
-					fmt.Println("❌ No active project found")
-					fmt.Println("💡 Use 'jbraincli use <project>' to set an active project")
-					fmt.Println("💡 Or use --all flag to see tasks from all projects")
-					return
-				}
-			}
 
-			// Build query for tasks
-			query := db.Preload("Project")
-			if !allProjects {
-				query = query.Where("project_id = ?", project.ID)
+			// Fetch tasks from the API
+			// TODO: Add support for filtering by status and project via API query params
+			resp, err := http.Get("http://localhost:8080/v1/tasks")
+			if err != nil {
+				log.Fatalf("Failed to fetch tasks from API: %v", err)
 			}
-			if status != "" {
-				query = query.Where("status = ?", strings.ToUpper(status))
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
 			}
 
 			var tasks []models.Task
-			if err := query.Find(&tasks).Error; err != nil {
-				log.Fatalf("Failed to fetch tasks: %v", err)
+			if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+				log.Fatalf("Failed to decode API response: %v", err)
 			}
 
 			if len(tasks) == 0 {
-				if !allProjects {
-					fmt.Printf("📋 No tasks found in project '%s'\n", project.Name)
-				} else {
-					fmt.Println("📋 No tasks found in any project")
-				}
+				fmt.Println("📋 No tasks found.")
 				fmt.Println("💡 Create one with 'jbraincli task create <description>'")
 				return
 			}
 
 			// Display beautiful task list
-			displayTaskList(tasks, project.Name, allProjects, status)
+			// For now, we are listing from all projects, so projectName is empty and allProjects is true.
+			displayTaskList(tasks, "", true, status)
 		},
 	}
-	
-	cmd.Flags().BoolP("all", "a", false, "Show tasks from all projects")
-	cmd.Flags().StringP("status", "s", "", "Filter by status (TODO, IN_PROGRESS, IN_REVIEW, COMPLETED)")
-	
+
+	cmd.Flags().StringP("status", "s", "", "Filter by status (TODO, IN_PROGRESS, IN_REVIEW, COMPLETED) - (API support pending)")
+
 	return cmd
 }
 
 // task start
-func newTaskStartCmd(db *gorm.DB) *cobra.Command {
+func newTaskStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start [id]",
-		Short: "Start working on a task",
-		Args:  cobra.RangeArgs(0, 1),
+		Short: "Start working on a task via API",
+		Args:  cobra.ExactArgs(1), // Require exactly one argument: the task ID
 		Run: func(cmd *cobra.Command, args []string) {
-			isInteractive, _ := cmd.Flags().GetBool("interactive")
-			
-			var task models.Task
-			
-			if isInteractive {
-				// Interactive mode - select from TODO tasks
-				var todoTasks []models.Task
-				if err := db.Where("status = ?", "TODO").Find(&todoTasks).Error; err != nil {
-					log.Fatalf("Failed to fetch TODO tasks: %v", err)
-				}
-				
-				if len(todoTasks) == 0 {
-					fmt.Println("📋 No TODO tasks available to start")
-					return
-				}
-				
-				selectedTask, err := interactive.SelectTask(todoTasks, "Select task to start:")
-				if err != nil {
-					log.Fatalf("Task selection failed: %v", err)
-				}
-				task = *selectedTask
-			} else {
-				// Traditional CLI mode
-				if len(args) == 0 {
-					fmt.Println("❌ Task ID required (or use --interactive)")
-					return
-				}
-				taskID := args[0]
-				
-				if err := db.Where("id::text LIKE ?", taskID+"%").First(&task).Error; err != nil {
-					log.Fatalf("Task not found: %v", err)
-				}
+			taskID := args[0]
+
+			// Create the JSON payload
+			payload := map[string]string{"status": string(models.TaskStatusInProgress)}
+			jsonPayload, err := json.Marshal(payload)
+			if err != nil {
+				log.Fatalf("Failed to create JSON payload: %v", err)
 			}
 
-			task.Status = string(models.TaskStatusInProgress)
-			if err := db.Save(&task).Error; err != nil {
-				log.Fatalf("Failed to update task: %v", err)
+			// Create the PUT request
+			url := fmt.Sprintf("http://localhost:8080/v1/tasks/%s/status", taskID)
+			req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonPayload))
+			if err != nil {
+				log.Fatalf("Failed to create HTTP request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			// Send the request
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Fatalf("Failed to send request to API: %v", err)
+			}
+			defer resp.Body.Close()
+
+			// Check the response
+			if resp.StatusCode != http.StatusOK {
+				var apiError map[string]string
+				if err := json.NewDecoder(resp.Body).Decode(&apiError); err == nil {
+					log.Fatalf("API returned an error: %s (Status: %s)", apiError["error"], resp.Status)
+				}
+				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
 			}
 
-			fmt.Printf("▶️ Started task: %s\n", task.Description)
+			var updatedTask models.Task
+			if err := json.NewDecoder(resp.Body).Decode(&updatedTask); err != nil {
+				log.Fatalf("Failed to decode API response: %v", err)
+			}
+
+			fmt.Printf("▶️ Started task: %s\n", updatedTask.Description)
 			fmt.Println("✅ Task status updated to IN_PROGRESS!")
 		},
 	}
-	
-	// Add interactive flag
-	cmd.Flags().BoolP("interactive", "i", false, "Use interactive mode for task selection")
-	
+
+	// TODO: Re-implement interactive mode by fetching TODO tasks from the API
+	// cmd.Flags().BoolP("interactive", "i", false, "Use interactive mode for task selection")
+
 	return cmd
 }
 
 // task done
-func newTaskDoneCmd(db *gorm.DB) *cobra.Command {
+func newTaskDoneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "done [id]",
-		Short: "Mark task as completed",
-		Args:  cobra.RangeArgs(0, 1),
+		Short: "Mark task as completed via API",
+		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			isInteractive, _ := cmd.Flags().GetBool("interactive")
-			
-			var task models.Task
-			
-			if isInteractive {
-				// Interactive mode - select from active tasks
-				var activeTasks []models.Task
-				if err := db.Where("status IN (?)", []string{"IN_PROGRESS", "IN_REVIEW"}).Find(&activeTasks).Error; err != nil {
-					log.Fatalf("Failed to fetch active tasks: %v", err)
-				}
-				
-				if len(activeTasks) == 0 {
-					fmt.Println("📋 No active tasks to complete")
-					return
-				}
-				
-				selectedTask, err := interactive.SelectTask(activeTasks, "Select task to complete:")
-				if err != nil {
-					log.Fatalf("Task selection failed: %v", err)
-				}
-				task = *selectedTask
-			} else {
-				// Traditional CLI mode
-				if len(args) == 0 {
-					fmt.Println("❌ Task ID required (or use --interactive)")
-					return
-				}
-				taskID := args[0]
-				
-				if err := db.Where("id::text LIKE ?", taskID+"%").First(&task).Error; err != nil {
-					log.Fatalf("Task not found: %v", err)
-				}
+			taskID := args[0]
+
+			// Create the JSON payload
+			payload := map[string]string{"status": string(models.TaskStatusCompleted)}
+			jsonPayload, err := json.Marshal(payload)
+			if err != nil {
+				log.Fatalf("Failed to create JSON payload: %v", err)
 			}
 
-			task.Status = string(models.TaskStatusCompleted)
-			task.Progress = 100
-			if err := db.Save(&task).Error; err != nil {
-				log.Fatalf("Failed to update task: %v", err)
+			// Create the PUT request
+			url := fmt.Sprintf("http://localhost:8080/v1/tasks/%s/status", taskID)
+			req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonPayload))
+			if err != nil {
+				log.Fatalf("Failed to create HTTP request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			// Send the request
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Fatalf("Failed to send request to API: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				var apiError map[string]string
+				if err := json.NewDecoder(resp.Body).Decode(&apiError); err == nil {
+					log.Fatalf("API returned an error: %s", apiError["error"])
+				}
+				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
 			}
 
-			fmt.Printf("✅ Task completed: %s\n", task.Description)
-			fmt.Println("🎉 Great job!")
+			var updatedTask models.Task
+			if err := json.NewDecoder(resp.Body).Decode(&updatedTask); err != nil {
+				log.Fatalf("Failed to decode API response: %v", err)
+			}
+
+			fmt.Printf("✅ Completed task: %s\n", updatedTask.Description)
 		},
 	}
-	
-	// Add interactive flag
-	cmd.Flags().BoolP("interactive", "i", false, "Use interactive mode for task selection")
-	
+
+	// TODO: Re-implement interactive mode
 	return cmd
 }
 
 // task info
-func newTaskInfoCmd(db *gorm.DB) *cobra.Command {
-	return &cobra.Command{
+func newTaskInfoCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "info [id]",
-		Short: "Show detailed task information",
+		Short: "Get detailed information about a task from the API",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			taskID := args[0]
-			
-			var task models.Task
-			if err := db.Preload("Project").Preload("Annotations").Where("id::text LIKE ?", taskID+"%").First(&task).Error; err != nil {
-				log.Fatalf("Task not found: %v", err)
+			url := fmt.Sprintf("http://localhost:8080/v1/tasks/%s", taskID)
+
+			resp, err := http.Get(url)
+			if err != nil {
+				log.Fatalf("Failed to fetch task info from API: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
 			}
 
-			fmt.Println("🔍 Task Details:")
-			fmt.Println("================================================================================")
-			fmt.Printf("📝 ID:          %s\n", task.ID.String())
-			fmt.Printf("📋 Description: %s\n", task.Description)
-			fmt.Printf("📊 Status:      %s\n", task.Status)
-			fmt.Printf("⚡ Priority:    %s\n", task.Priority)
-			fmt.Printf("📈 Progress:    %d%%\n", task.Progress)
-			fmt.Printf("🏢 Project:     %s\n", task.Project.Name)
-			fmt.Printf("📅 Created:     %s\n", task.CreatedAt.Format("2006-01-02 15:04:05"))
-			fmt.Printf("🔄 Updated:     %s\n", task.UpdatedAt.Format("2006-01-02 15:04:05"))
-			
+			var task models.Task
+			if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+				log.Fatalf("Failed to decode API response: %v", err)
+			}
+
+			// Display detailed task information
+			fmt.Printf("## Task Details: %s\n\n", task.ID)
+			fmt.Printf("**Description:** %s\n", task.Description)
+			fmt.Printf("**Status:** %s %s\n", getStatusIconForTask(string(task.Status)), task.Status)
+			fmt.Printf("**Priority:** %s %s\n", getPriorityIconForTask(string(task.Priority)), task.Priority)
+			fmt.Printf("**Progress:** %s %d%%\n", getProgressBar(task.Progress, 20), task.Progress)
+			fmt.Printf("**Created:** %s\n", task.CreatedAt.Format("2006-01-02 15:04"))
+			if task.CompletedAt != nil {
+				fmt.Printf("**Completed:** %s\n", task.CompletedAt.Format("2006-01-02 15:04"))
+			}
+			fmt.Println("\n**Annotations:**")
 			if len(task.Annotations) > 0 {
-				fmt.Printf("\n📝 Annotations (%d):\n", len(task.Annotations))
-				for i, annotation := range task.Annotations {
-					fmt.Printf("  %d. %s\n", i+1, annotation.Content)
-					fmt.Printf("     📅 %s\n", annotation.CreatedAt.Format("2006-01-02 15:04:05"))
+				for _, an := range task.Annotations {
+					fmt.Printf("- %s (%s)\n", an.Content, an.CreatedAt.Format("2006-01-02 15:04"))
 				}
 			} else {
-				fmt.Println("\n📝 Annotations: None")
+				fmt.Println("  No annotations yet.")
 			}
-			
-			fmt.Println("================================================================================")
 		},
 	}
+	return cmd
 }
 
 // task progress
-func newTaskProgressCmd(db *gorm.DB) *cobra.Command {
+func newTaskProgressCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "progress [id] [percentage]",
-		Short: "Update task progress (0-100)",
-		Args:  cobra.RangeArgs(0, 2),
+		Short: "Update the progress of a task via API",
+		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-			var task *models.Task
-			var progress int
-			var err error
-
-			isInteractive, _ := cmd.Flags().GetBool("interactive")
-
-			if isInteractive {
-				// Interactive Mode
-				var tasksToUpdate []models.Task
-				db.Where("status = ?", "IN_PROGRESS").Find(&tasksToUpdate)
-				if len(tasksToUpdate) == 0 {
-					fmt.Println("No 'IN_PROGRESS' tasks to update.")
-					return
-				}
-				task, err = interactive.SelectTask(tasksToUpdate, "Select task to update progress:")
-				if err != nil {
-					fmt.Println("Task selection cancelled.")
-					return
-				}
-
-				prompt := &survey.Input{Message: "Enter progress percentage (0-100):"}
-				var progressStr string
-				survey.AskOne(prompt, &progressStr, survey.WithValidator(survey.Required))
-				progress, err = strconv.Atoi(progressStr)
-				if err != nil || progress < 0 || progress > 100 {
-					fmt.Println("Invalid percentage. Please enter a number between 0 and 100.")
-					return
-				}
-			} else {
-				// Command-line Mode
-				if len(args) < 2 {
-					fmt.Println("Task ID and percentage are required in non-interactive mode.")
-					return
-				}
-				task, err = getTaskByIDPrefix(db, args[0])
-				if err != nil {
-					log.Fatalf(err.Error())
-				}
-				progress, err = strconv.Atoi(args[1])
-				if err != nil || progress < 0 || progress > 100 {
-					log.Fatalf("Invalid percentage. Must be a number between 0 and 100.")
-				}
+			taskID := args[0]
+			progress, err := strconv.Atoi(args[1])
+			if err != nil || progress < 0 || progress > 100 {
+				log.Fatalf("Invalid progress value. Please provide a number between 0 and 100.")
 			}
 
-			// Update task progress
-			task.Progress = progress
-			if progress == 100 {
-				task.Status = "COMPLETED"
-			} else if progress > 0 && task.Status == "TODO" {
-				task.Status = "IN_PROGRESS"
+			payload := map[string]interface{}{"progress": progress}
+			jsonPayload, err := json.Marshal(payload)
+			if err != nil {
+				log.Fatalf("Failed to create JSON payload: %v", err)
 			}
 
-			if err := db.Save(task).Error; err != nil {
-				log.Fatalf("Failed to update task progress: %v", err)
+			url := fmt.Sprintf("http://localhost:8080/v1/tasks/%s", taskID)
+			req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonPayload))
+			if err != nil {
+				log.Fatalf("Failed to create HTTP request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Fatalf("Failed to send request to API: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
 			}
 
-			fmt.Printf("✅ Updated progress for task: %s\n", truncateString(task.Description, 50))
-			fmt.Printf("   New Progress: %d%%, Status: %s\n", task.Progress, task.Status)
+			fmt.Println("✅ Task progress updated successfully.")
 		},
 	}
-	cmd.Flags().BoolP("interactive", "i", false, "Update progress interactively")
 	return cmd
 }
 
@@ -673,148 +657,94 @@ func getProgressBar(progress int, width int) string {
 	return fmt.Sprintf("%s %d%%", bar, progress)
 }
 
-func newTaskDeleteCmd(db *gorm.DB) *cobra.Command {
+func newTaskDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete [id]",
-		Short:   "Delete a task",
+		Short:   "Delete a task via API",
 		Aliases: []string{"rm", "del"},
-		Args:    cobra.RangeArgs(0, 1),
+		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			var task *models.Task
-			var err error
-
-			isInteractive, _ := cmd.Flags().GetBool("interactive")
-
-			if isInteractive {
-				var allTasks []models.Task
-				db.Find(&allTasks)
-				if len(allTasks) == 0 {
-					fmt.Println("No tasks to delete.")
-					return
-				}
-				task, err = interactive.SelectTask(allTasks, "Select task to DELETE:")
-				if err != nil {
-					fmt.Println("Task selection cancelled.")
-					return
-				}
-			} else {
-				if len(args) < 1 {
-					fmt.Println("Task ID is required in non-interactive mode.")
-					return
-				}
-				task, err = getTaskByIDPrefix(db, args[0])
-				if err != nil {
-					log.Fatalf(err.Error())
-				}
-			}
-
-			// Confirmation
-			warningMessage := fmt.Sprintf("⚠️ You are about to permanently delete task '%s'.", truncateString(task.Description, 40))
-			confirmed, err := interactive.ConfirmAction(warningMessage, "This action cannot be undone.")
-			if err != nil || !confirmed {
+			taskID := args[0]
+			if !askForConfirmation("Are you sure you want to delete this task?") {
 				fmt.Println("🚫 Delete operation cancelled.")
 				return
 			}
 
-			// Deletion
-			if err := db.Delete(task).Error; err != nil {
-				log.Fatalf("Failed to delete task: %v", err)
+			// Create the DELETE request
+			url := fmt.Sprintf("http://localhost:8080/v1/tasks/%s", taskID)
+			req, err := http.NewRequest(http.MethodDelete, url, nil)
+			if err != nil {
+				log.Fatalf("Failed to create HTTP request: %v", err)
 			}
 
-			fmt.Printf("✅ Successfully deleted task: %s\n", task.Description)
+			// Send the request
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Fatalf("Failed to send request to API: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
+			}
+
+			fmt.Println("✅ Task successfully deleted.")
 		},
 	}
-	cmd.Flags().BoolP("interactive", "i", false, "Delete a task interactively")
 	return cmd
 }
 
-func newTaskModifyCmd(db *gorm.DB) *cobra.Command {
+func newTaskModifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "modify [id]",
-		Short:   "Modify a task's attributes",
-		Aliases: []string{"update", "edit"},
-		Args:    cobra.RangeArgs(0, 1),
+		Use:   "modify [id]",
+		Short: "Modify a task's description or priority via API",
+		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			isInteractive, _ := cmd.Flags().GetBool("interactive")
+			taskID := args[0]
 			newDesc, _ := cmd.Flags().GetString("description")
 			newPriority, _ := cmd.Flags().GetString("priority")
-			newStatus, _ := cmd.Flags().GetString("status")
 
-			var task *models.Task
-			var err error
-
-			if isInteractive {
-				var allTasks []models.Task
-				db.Order("updated_at desc").Find(&allTasks)
-				task, err = interactive.SelectTask(allTasks, "Select task to modify:")
-				if err != nil {
-					fmt.Println("Task selection cancelled.")
-					return
-				}
-				// Now, let's get the modifications interactively
-				if newDesc == "" {
-					prompt := &survey.Input{Message: "New description (leave blank to keep current):", Default: task.Description}
-					survey.AskOne(prompt, &newDesc)
-				}
-				if newPriority == "" {
-					prompt := &survey.Select{
-						Message: "New priority (leave blank to keep current):",
-						Options: []string{"", "H", "M", "L"},
-						Default: task.Priority,
-					}
-					survey.AskOne(prompt, &newPriority)
-				}
-				if newStatus == "" {
-					prompt := &survey.Select{
-						Message: "New status (leave blank to keep current):",
-						Options: []string{"", "TODO", "IN_PROGRESS", "IN_REVIEW", "COMPLETED"},
-						Default: task.Status,
-					}
-					survey.AskOne(prompt, &newStatus)
-				}
-
-			} else {
-				if len(args) < 1 {
-					fmt.Println("Task ID is required for non-interactive modification.")
-					return
-				}
-				task, err = getTaskByIDPrefix(db, args[0])
-				if err != nil {
-					log.Fatalf(err.Error())
-				}
-			}
-
-			// Apply modifications
-			modified := false
-			if newDesc != "" && newDesc != task.Description {
-				task.Description = newDesc
-				modified = true
-			}
-			if newPriority != "" && newPriority != task.Priority {
-				task.Priority = newPriority
-				modified = true
-			}
-			if newStatus != "" && newStatus != task.Status {
-				task.Status = newStatus
-				modified = true
-			}
-
-			if !modified {
-				fmt.Println("No changes specified. Task not modified.")
+			if newDesc == "" && newPriority == "" {
+				fmt.Println("Please provide a new description (--description) or priority (--priority).")
 				return
 			}
 
-			if err := db.Save(task).Error; err != nil {
-				log.Fatalf("Failed to modify task: %v", err)
+			payload := make(map[string]interface{})
+			if newDesc != "" {
+				payload["description"] = newDesc
 			}
-			fmt.Printf("✅ Successfully modified task: %s\n", truncateString(task.Description, 50))
+			if newPriority != "" {
+				payload["priority"] = newPriority
+			}
+
+			jsonPayload, err := json.Marshal(payload)
+			if err != nil {
+				log.Fatalf("Failed to create JSON payload: %v", err)
+			}
+
+			url := fmt.Sprintf("http://localhost:8080/v1/tasks/%s", taskID)
+			req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonPayload))
+			if err != nil {
+				log.Fatalf("Failed to create HTTP request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Fatalf("Failed to send request to API: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
+			}
+
+			fmt.Println("✅ Task modified successfully.")
 		},
 	}
-
-	cmd.Flags().BoolP("interactive", "i", false, "Modify a task interactively")
-	cmd.Flags().StringP("description", "d", "", "New task description")
-	cmd.Flags().StringP("priority", "p", "", "New priority (H, M, L)")
-	cmd.Flags().StringP("status", "s", "", "New status (TODO, IN_PROGRESS, etc.)")
-
+	cmd.Flags().StringP("description", "d", "", "New description for the task")
+	cmd.Flags().StringP("priority", "p", "", "New priority for the task (L, M, H)")
 	return cmd
-} 
+}

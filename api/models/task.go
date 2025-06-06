@@ -21,9 +21,9 @@ const (
 type Priority string
 
 const (
-	PriorityHigh   Priority = "HIGH"
-	PriorityMedium Priority = "MEDIUM"
-	PriorityLow    Priority = "LOW"
+	PriorityHigh   Priority = "H"
+	PriorityMedium Priority = "M"
+	PriorityLow    Priority = "L"
 )
 
 // Task görev modelini temsil eder
@@ -53,7 +53,7 @@ type Task struct {
 // Annotation represents a task annotation in the database
 type Annotation struct {
 	ID        uuid.UUID `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	TaskID    uuid.UUID `json:"task_id" gorm:"type:uuid;not null"`
+	TaskID    string    `json:"task_id" gorm:"type:uuid;not null"`
 	Task      *Task     `json:"task,omitempty" gorm:"foreignKey:TaskID"`
 	Content   string    `json:"content" gorm:"type:text;not null"`
 	CreatedAt time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
