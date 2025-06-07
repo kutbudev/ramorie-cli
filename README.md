@@ -2,10 +2,49 @@
 
 **A powerful command-line productivity tool for task management, project organization, and memory storage with PostgreSQL persistence.**
 
+## 📦 Installation
+
+### Option 1: Homebrew (Recommended)
+```bash
+# Add the tap and install
+brew tap terzigolu/homebrew-tap
+brew install jbraincli
+
+# Setup your account
+jbraincli setup register
+```
+
+### Option 2: Direct Binary Download
+```bash
+# Download from GitHub releases
+curl -L https://github.com/terzigolu/josepshbrain-go/releases/latest/download/jbraincli_Darwin_x86_64.tar.gz | tar xz
+sudo mv jbraincli /usr/local/bin/
+
+# Setup your account
+jbraincli setup register
+```
+
+### Option 3: Build from Source
+```bash
+# Clone and build
+git clone https://github.com/terzigolu/josepshbrain-go.git
+cd josepshbrain-go
+make install
+
+# Setup your account
+jbraincli setup register
+```
+
 ## 🚀 Quick Start
 
 ```bash
-# Install (binary available at /usr/local/bin/jbraincli)
+# After installation, register a new account
+jbraincli setup register
+
+# Or login with existing account
+jbraincli setup login
+
+# Check installation
 jbraincli --help
 
 # Set up a project
@@ -60,24 +99,24 @@ jbraincli kanban
 - ✅ Terminal-width responsive design
 - ✅ Real-time task counts per status
 
-## 🛠 Installation & Setup
+## 🛠 Configuration
 
-### Prerequisites
+### Cloud Service
+The CLI connects to a hosted PostgreSQL service automatically. No database setup required! Simply register for an account and start using the tool.
+
+### Account Setup
+After installation, create your account:
 ```bash
-# Ensure PostgreSQL is running
-psql --version
+# Register new account
+jbraincli setup register
 
-# Environment variables (create .env file)
-PG_HOST=localhost
-PG_PORT=5432
-PG_USER=postgres
-PG_PASSWORD=your_password
-PG_DATABASE=jbrain_dev
-PG_SSL_MODE=disable
+# Or login with existing account
+jbraincli setup login
 ```
 
-### Database Setup
-The CLI automatically connects to your PostgreSQL database using the `.env` configuration. Tables are created automatically via GORM migrations.
+Your API key will be stored securely in `~/.jbrain/config.json`.
+
+### Data Model
 
 **Key Tables:**
 - `tasks` - Task management
@@ -353,12 +392,31 @@ All data is persisted and synchronized across CLI sessions.
 ## 🔌 Integration
 
 The CLI integrates with:
-- **PostgreSQL** - Primary data storage
-- **Environment files** - Configuration via `.env`
+- **Cloud PostgreSQL** - Hosted data storage (no setup required)
+- **API Authentication** - Secure API key-based access
 - **Terminal** - Full CLI interface with colors and tables
-- **File system** - Automatic .env discovery from multiple paths
+- **Cross-platform** - Works on macOS, Linux, and Windows
 
 This tool is designed for developers and AI agents who want powerful task management with persistent memory storage, all accessible through a beautiful command-line interface.
+
+## 🚀 Distribution & Release
+
+### For Maintainers
+```bash
+# Create a new release
+git tag v1.0.0
+git push origin v1.0.0
+
+# This triggers GitHub Actions to:
+# - Build binaries for all platforms
+# - Create GitHub release
+# - Update Homebrew formula automatically
+```
+
+### Installation Methods Available
+- **Homebrew**: `brew install terzigolu/homebrew-tap/jbraincli`
+- **Direct Download**: GitHub releases with pre-built binaries
+- **Source Build**: Clone and compile locally
 
 ---
 
