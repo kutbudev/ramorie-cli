@@ -44,7 +44,13 @@ func newProjectInitCmd() *cobra.Command {
 				log.Fatalf("Failed to create JSON payload: %v", err)
 			}
 
-			resp, err := http.Post("http://localhost:8080/v1/projects", "application/json", bytes.NewBuffer(jsonPayload))
+			cfg, err := config.LoadCliConfig()
+			if err != nil {
+				log.Fatalf("Failed to load CLI config: %v", err)
+			}
+			apiURL := fmt.Sprintf("%s/v1/projects", cfg.ApiURL)
+
+			resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonPayload))
 			if err != nil {
 				log.Fatalf("Failed to create project via API: %v", err)
 			}
@@ -62,7 +68,7 @@ func newProjectInitCmd() *cobra.Command {
 			fmt.Printf("✅ Project '%s' initialized successfully via API.\n", newProject.Name)
 
 			// Automatically 'use' the new project
-			cfg := config.CliConfig{ActiveProjectID: newProject.ID}
+			cfg.ActiveProjectID = newProject.ID
 			if err := config.SaveCliConfig(cfg); err != nil {
 				log.Fatalf("Failed to set new project as active: %v", err)
 			}
@@ -79,7 +85,13 @@ func newProjectListCmd() *cobra.Command {
 		Short:   "List all projects from the API and show the active one",
 		Aliases: []string{"ls"},
 		Run: func(cmd *cobra.Command, args []string) {
-			resp, err := http.Get("http://localhost:8080/v1/projects")
+			cfg, err := config.LoadCliConfig()
+			if err != nil {
+				log.Fatalf("Failed to load CLI config: %v", err)
+			}
+			apiURL := fmt.Sprintf("%s/v1/projects", cfg.ApiURL)
+
+			resp, err := http.Get(apiURL)
 			if err != nil {
 				log.Fatalf("Failed to fetch projects from API: %v", err)
 			}
@@ -97,11 +109,6 @@ func newProjectListCmd() *cobra.Command {
 			if len(projects) == 0 {
 				fmt.Println("No projects found. Use 'jbraincli project init <name>' to create one.")
 				return
-			}
-
-			cfg, err := config.LoadCliConfig()
-			if err != nil {
-				log.Printf("Warning: could not load CLI config: %v", err)
 			}
 
 			fmt.Println("🏢 Available Projects:")
@@ -130,7 +137,13 @@ func newProjectUseCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			searchTerm := args[0]
 
-			resp, err := http.Get("http://localhost:8080/v1/projects")
+			cfg, err := config.LoadCliConfig()
+			if err != nil {
+				log.Fatalf("Failed to load CLI config: %v", err)
+			}
+			apiURL := fmt.Sprintf("%s/v1/projects", cfg.ApiURL)
+
+			resp, err := http.Get(apiURL)
 			if err != nil {
 				log.Fatalf("Failed to fetch projects from API: %v", err)
 			}
@@ -157,7 +170,7 @@ func newProjectUseCmd() *cobra.Command {
 				log.Fatalf("Project '%s' not found.", searchTerm)
 			}
 
-			cfg := config.CliConfig{ActiveProjectID: foundProject.ID}
+			cfg.ActiveProjectID = foundProject.ID
 			if err := config.SaveCliConfig(cfg); err != nil {
 				log.Fatalf("Failed to save configuration: %v", err)
 			}
@@ -166,4 +179,11 @@ func newProjectUseCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func truncateString(s string, length int) string {
+	if len(s) > length {
+		return s[:length]
+	}
+	return s
 }

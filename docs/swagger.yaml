@@ -1,0 +1,140 @@
+basePath: /v1
+definitions:
+  models.Annotation:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      task:
+        $ref: '#/definitions/models.Task'
+      task_id:
+        type: string
+    type: object
+  models.CreateTaskDTO:
+    properties:
+      description:
+        type: string
+      priority:
+        description: Will be normalized (e.g., "High", "H")
+        type: string
+      project_id:
+        type: string
+      title:
+        type: string
+    required:
+    - project_id
+    - title
+    type: object
+  models.Priority:
+    enum:
+    - H
+    - M
+    - L
+    type: string
+    x-enum-varnames:
+    - PriorityHigh
+    - PriorityMedium
+    - PriorityLow
+  models.Task:
+    properties:
+      annotations:
+        items:
+          $ref: '#/definitions/models.Annotation'
+        type: array
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      priority:
+        $ref: '#/definitions/models.Priority'
+      progress:
+        type: integer
+      project_id:
+        type: string
+      status:
+        $ref: '#/definitions/models.TaskStatus'
+      tags:
+        additionalProperties:
+          type: string
+        example:
+          '{\"key\"': \"value\"}
+        type: object
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.TaskStatus:
+    enum:
+    - TODO
+    - IN_PROGRESS
+    - IN_REVIEW
+    - COMPLETED
+    type: string
+    x-enum-varnames:
+    - TaskStatusTODO
+    - TaskStatusInProgress
+    - TaskStatusInReview
+    - TaskStatusCompleted
+host: localhost:8080
+info:
+  contact:
+    email: development@terzigolu.com
+    name: API Support
+  description: This is the API server for the JosephsBrain CLI.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: JosephsBrain API
+  version: "1.0"
+paths:
+  /tasks:
+    get:
+      description: Get a list of all tasks, optionally filtered by status.
+      parameters:
+      - description: Filter by status (e.g., 'TODO', 'IN_PROGRESS')
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Task'
+            type: array
+      summary: List all tasks
+      tags:
+      - tasks
+    post:
+      consumes:
+      - application/json
+      description: Creates a new task with the provided data.
+      parameters:
+      - description: Task to create
+        in: body
+        name: task
+        required: true
+        schema:
+          $ref: '#/definitions/models.CreateTaskDTO'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Task'
+      summary: Create a new task
+      tags:
+      - tasks
+swagger: "2.0"

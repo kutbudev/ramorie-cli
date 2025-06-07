@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -21,31 +22,28 @@ const (
 type Priority string
 
 const (
-	PriorityHigh   Priority = "HIGH"
-	PriorityMedium Priority = "MEDIUM"
-	PriorityLow    Priority = "LOW"
+	PriorityHigh   Priority = "H"
+	PriorityMedium Priority = "M"
+	PriorityLow    Priority = "L"
 )
 
 // Task görev modelini temsil eder
 type Task struct {
-	ID          string         `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	ProjectID   string         `json:"project_id" gorm:"type:uuid;not null;index"`
-	ContextID   *string        `json:"context_id" gorm:"type:uuid;index"`
-	Description string         `json:"description" gorm:"type:text;not null"`
-	Status      TaskStatus     `json:"status" gorm:"type:varchar(20);default:'TODO'"`
-	Priority    Priority       `json:"priority" gorm:"type:varchar(10);default:'MEDIUM'"`
-	Progress    int            `json:"progress" gorm:"default:0"`
+	ID          string         `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	Title       string         `gorm:"not null" json:"title"`
+	Description string         `json:"description"`
+	Status      TaskStatus     `gorm:"type:varchar(20);not null;default:'TODO'" json:"status"`
+	Priority    Priority       `gorm:"type:char(1);default:'M'" json:"priority"`
+	Progress    int            `gorm:"default:0" json:"progress"`
+	ProjectID   string         `gorm:"type:uuid;not null" json:"project_id"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
-	StartedAt   *time.Time     `json:"started_at,omitempty"`
-	CompletedAt *time.Time     `json:"completed_at,omitempty"`
-	DueDate     *time.Time     `json:"due_date,omitempty"`
-	Tags        []Tag          `json:"tags,omitempty" gorm:"many2many:task_tags;"`
-	Annotations []Annotation   `json:"annotations,omitempty" gorm:"foreignKey:TaskID"`
+	CompletedAt *time.Time     `json:"completed_at"`
+	Annotations []Annotation   `gorm:"foreignkey:TaskID" json:"annotations"`
+	Tags        datatypes.JSON `json:"tags" swaggertype:"object,string" example:"{\\\"key\\\":\\\"value\\\"}"`
 	
 	// Foreign key relationships
-	Project     *Project       `json:"project,omitempty" gorm:"foreignKey:ProjectID"`
-	Context     *Context       `json:"context,omitempty" gorm:"foreignKey:ContextID"`
+	Project     *Project       `json:"-" gorm:"foreignKey:ProjectID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" swaggerignore:"true"`
 	
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 }
@@ -53,7 +51,7 @@ type Task struct {
 // Annotation represents a task annotation in the database
 type Annotation struct {
 	ID        uuid.UUID `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	TaskID    uuid.UUID `json:"task_id" gorm:"type:uuid;not null"`
+	TaskID    string    `json:"task_id" gorm:"type:uuid;not null"`
 	Task      *Task     `json:"task,omitempty" gorm:"foreignKey:TaskID"`
 	Content   string    `json:"content" gorm:"type:text;not null"`
 	CreatedAt time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
@@ -66,4 +64,29 @@ func (Task) TableName() string {
 
 func (Annotation) TableName() string {
 	return "annotations"
+}
+
+// Data Transfer Objects (DTOs) for API interactions
+
+// CreateTaskDTO defines the structure for creating a new task.
+type CreateTaskDTO struct {
+	Title       string `json:"title" binding:"required"`
+	Description string `json:"description"`
+	ProjectID   string `json:"project_id" binding:"required"`
+	Priority    string `json:"priority"` // Will be normalized (e.g., "High", "H")
+}
+
+// UpdateTaskDTO defines the structure for updating an existing task.
+type UpdateTaskDTO struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Status      *string `json:"status"`
+	Priority    *string `json:"priority"`
+	Progress    *int    `json:"progress"`
+}
+
+// CreateAnnotationDTO defines the structure for creating a new annotation.
+type CreateAnnotationDTO struct {
+	Content string `json:"content" binding:"required"`
+	TaskID  string `json:"-"` // Ignored in JSON, set from URL param
 } 
