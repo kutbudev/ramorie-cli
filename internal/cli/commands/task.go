@@ -163,7 +163,11 @@ func newTaskInfoCmd() *cobra.Command {
 				fmt.Printf("Project ID: %s\n", task.ProjectID.String())
 			}
 			if len(task.Tags) > 0 {
-				fmt.Printf("Tags: %s\n", strings.Join(task.Tags, ", "))
+				var tags []string
+				for k := range task.Tags {
+					tags = append(tags, k)
+				}
+				fmt.Printf("Tags: %s\n", strings.Join(tags, ", "))
 			}
 			fmt.Printf("Created: %s\n", task.CreatedAt.Format("2006-01-02 15:04:05"))
 			fmt.Printf("Updated: %s\n", task.UpdatedAt.Format("2006-01-02 15:04:05"))

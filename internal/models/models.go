@@ -23,7 +23,7 @@ type Task struct {
 	Description string        `json:"description"`
 	Status      string        `json:"status"` // TODO, IN_PROGRESS, COMPLETED
 	Priority    string        `json:"priority"` // L, M, H
-	Tags        []string      `json:"tags"`
+	Tags        map[string]interface{}      `json:"tags"`
 	Annotations []Annotation  `json:"annotations"`
 	Project     *Project      `json:"project,omitempty"`
 	CreatedAt   time.Time     `json:"created_at"`
@@ -35,7 +35,7 @@ type Memory struct {
 	ID        uuid.UUID `json:"id"`
 	ProjectID uuid.UUID `json:"project_id"`
 	Content   string    `json:"content"`
-	Tags      []string  `json:"tags"`
+	Tags      map[string]interface{}  `json:"tags"`
 	Project   *Project  `json:"project,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

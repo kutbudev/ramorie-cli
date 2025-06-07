@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"github.com/terzigolu/josepshbrain-go/config"
 	"github.com/terzigolu/josepshbrain-go/internal/api"
@@ -58,7 +58,11 @@ func newRememberCmd() *cobra.Command {
 			fmt.Printf("ID: %s\n", memory.ID.String())
 			fmt.Printf("Content: %s\n", truncateString(memory.Content, 100))
 			if len(memory.Tags) > 0 {
-				fmt.Printf("Tags: %s\n", strings.Join(memory.Tags, ", "))
+				var tags []string
+				for k := range memory.Tags {
+					tags = append(tags, k)
+				}
+				fmt.Printf("Tags: %s\n", strings.Join(tags, ", "))
 			}
 			if memory.Project != nil {
 				fmt.Printf("Project: %s (%s)\n", memory.Project.Name, memory.ProjectID.String()[:8])
@@ -113,24 +117,23 @@ func newRecallCmd() *cobra.Command {
 			}
 
 			fmt.Printf("🧠 Found %d memories:\n\n", len(memories))
-
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tCONTENT\tTAGS\tCREATED")
-			fmt.Fprintln(w, "--\t-------\t----\t-------")
+			
+			table := tablewriter.NewWriter(os.Stdout)
+			table.Header([]string{"ID", "Content", "Tags", "Created At"})
 
 			for _, memory := range memories {
-				shortID := memory.ID.String()[:8]
-				tags := ""
-				if len(memory.Tags) > 0 {
-					tags = strings.Join(memory.Tags, ",")
+				var tags []string
+				for k := range memory.Tags {
+					tags = append(tags, k)
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-					shortID,
-					truncateString(memory.Content, 50),
-					truncateString(tags, 20),
-					memory.CreatedAt.Format("2006-01-02"))
+				table.Append([]string{
+					memory.ID.String()[:8],
+					truncateText(memory.Content, 50),
+					strings.Join(tags, ", "),
+					memory.CreatedAt.Format("2006-01-02 15:04"),
+				})
 			}
-			w.Flush()
+			table.Render()
 		},
 	}
 
@@ -172,7 +175,11 @@ func NewRememberCmd() *cobra.Command {
 			fmt.Printf("ID: %s\n", memory.ID.String())
 			fmt.Printf("Content: %s\n", truncateString(memory.Content, 100))
 			if len(memory.Tags) > 0 {
-				fmt.Printf("Tags: %s\n", strings.Join(memory.Tags, ", "))
+				var tags []string
+				for k := range memory.Tags {
+					tags = append(tags, k)
+				}
+				fmt.Printf("Tags: %s\n", strings.Join(tags, ", "))
 			}
 		},
 	}
@@ -180,4 +187,11 @@ func NewRememberCmd() *cobra.Command {
 	cmd.Flags().StringSliceVarP(&tags, "tags", "t", []string{}, "Memory tags (comma-separated)")
 
 	return cmd
+}
+
+func truncateText(s string, max int) string {
+	if len(s) > max {
+		return s[:max-3] + "..."
+	}
+	return s
 }
