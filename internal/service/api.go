@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 
 	"github.com/terzigolu/josepshbrain-go/internal/config"
@@ -52,7 +51,6 @@ func (s *APIService) makeRequest(method, url string, body interface{}) ([]byte, 
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	log.Printf("DEBUG: Sending Authorization Header: Bearer %s", s.apiKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {

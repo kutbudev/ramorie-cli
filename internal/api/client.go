@@ -342,3 +342,66 @@ func (c *Client) ListAnnotations(taskID string) ([]models.Annotation, error) {
 
 	return response.Data, nil
 }
+
+// Auth API methods
+func (c *Client) RegisterUser(firstName, lastName, email, password string) (string, error) {
+	reqBody := map[string]string{
+		"first_name": firstName,
+		"last_name":  lastName,
+		"email":      email,
+		"password":   password,
+	}
+
+	respBody, err := c.makeRequest("POST", "/auth/register", reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	var response struct {
+		Success bool   `json:"success"`
+		Data    struct {
+			APIKey string `json:"api_key"`
+		} `json:"data"`
+		Error string `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !response.Success {
+		return "", fmt.Errorf("registration failed: %s", response.Error)
+	}
+
+	return response.Data.APIKey, nil
+}
+
+func (c *Client) LoginUser(email, password string) (string, error) {
+	reqBody := map[string]string{
+		"email":    email,
+		"password": password,
+	}
+
+	respBody, err := c.makeRequest("POST", "/auth/login", reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	var response struct {
+		Success bool   `json:"success"`
+		Data    struct {
+			APIKey string `json:"api_key"`
+		} `json:"data"`
+		Error string `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !response.Success {
+		return "", fmt.Errorf("login failed: %s", response.Error)
+	}
+
+	return response.Data.APIKey, nil
+}

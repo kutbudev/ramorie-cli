@@ -9,7 +9,6 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
-	github.com/urfave/cli v1.22.16
 	github.com/urfave/cli/v2 v2.27.6
 	gorm.io/datatypes v1.2.5
 	gorm.io/driver/postgres v1.6.0
