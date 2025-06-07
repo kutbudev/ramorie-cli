@@ -6,337 +6,144 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/terzigolu/josepshbrain-go/pkg/models"
-	"golang.org/x/term"
-	"gorm.io/gorm"
+	"github.com/terzigolu/josepshbrain-go/config"
+	"github.com/terzigolu/josepshbrain-go/internal/api"
+	"github.com/terzigolu/josepshbrain-go/internal/models"
 )
 
-// NewKanbanCmd creates the kanban command
-func NewKanbanCmd(db *gorm.DB) *cobra.Command {
-	return &cobra.Command{
+// NewKanbanCmd creates the kanban command, fully API-driven.
+func NewKanbanCmd() *cobra.Command {
+	var projectID string
+
+	cmd := &cobra.Command{
 		Use:   "kanban",
-		Short: "Display tasks in a beautiful kanban board",
-		Long:  "Show tasks organized by status in a full-width kanban board layout",
+		Short: "Display tasks in a kanban board view",
+		Long:  "Show a visual overview of tasks organized by status (TODO, IN_PROGRESS, COMPLETED).",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get active project
-			var project models.Project
-			result := db.Where("is_active = ? AND deleted_at IS NULL", true).First(&project)
-			if result.Error != nil {
-				fmt.Println("❌ No active project found")
-				fmt.Println("💡 Use 'jbraincli use <project>' to set an active project")
-				return
+			cfg, err := config.LoadCliConfig()
+			if err != nil {
+				fmt.Printf("Error loading config: %v\n", err)
+				os.Exit(1)
 			}
 
-			// Get all tasks for the active project
-			var tasks []models.Task
-			err := db.Where("project_id = ?", project.ID).Find(&tasks).Error
+			// Use active project if no specific project provided
+			if projectID == "" && cfg.ActiveProjectID != "" {
+				projectID = cfg.ActiveProjectID
+			}
+
+			client := api.NewClient()
+			
+			// Get tasks for each status
+			todoTasks, err := client.ListTasks(projectID, "TODO")
 			if err != nil {
-				fmt.Printf("❌ Error fetching tasks: %v\n", err)
-				return
+				fmt.Printf("Error fetching TODO tasks: %v\n", err)
+				os.Exit(1)
+			}
+
+			inProgressTasks, err := client.ListTasks(projectID, "IN_PROGRESS")
+			if err != nil {
+				fmt.Printf("Error fetching IN_PROGRESS tasks: %v\n", err)
+				os.Exit(1)
+			}
+
+			completedTasks, err := client.ListTasks(projectID, "COMPLETED")
+			if err != nil {
+				fmt.Printf("Error fetching COMPLETED tasks: %v\n", err)
+				os.Exit(1)
 			}
 
 			// Display kanban board
-			displayKanbanBoard(tasks, project.Name)
+			displayKanbanBoard(todoTasks, inProgressTasks, completedTasks)
 		},
 	}
+
+	cmd.Flags().StringVarP(&projectID, "project", "p", "", "Filter by project ID")
+
+	return cmd
 }
 
-func displayKanbanBoard(tasks []models.Task, projectName string) {
-	// Get terminal width
-	width, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		width = 120 // Default width
-	}
+func displayKanbanBoard(todoTasks, inProgressTasks, completedTasks []models.Task) {
+	fmt.Println("📋 Task Kanban Board")
+	fmt.Println("=" + strings.Repeat("=", 80))
+	fmt.Println()
 
-	// Check if terminal is too narrow for kanban view
-	if width < 80 {
-		displayCompactTaskList(tasks, projectName)
-		return
-	}
+	// Calculate column width
+	colWidth := 25
 
-	// Organize tasks by status
-	statusColumns := map[string][]models.Task{
-		"TODO":        {},
-		"IN_PROGRESS": {},
-		"IN_REVIEW":   {},
-		"COMPLETED":   {},
-	}
+	// Headers
+	fmt.Printf("%-*s | %-*s | %-*s\n", colWidth, "📝 TODO", colWidth, "🚀 IN PROGRESS", colWidth, "✅ COMPLETED")
+	fmt.Printf("%s-+-%s-+-%s\n", 
+		strings.Repeat("-", colWidth), 
+		strings.Repeat("-", colWidth), 
+		strings.Repeat("-", colWidth))
 
-	for _, task := range tasks {
-		if _, exists := statusColumns[task.Status]; exists {
-			statusColumns[task.Status] = append(statusColumns[task.Status], task)
+	// Find max rows needed
+	maxRows := max(len(todoTasks), len(inProgressTasks), len(completedTasks))
+
+	// Display tasks row by row
+	for i := 0; i < maxRows; i++ {
+		todoCell := ""
+		inProgressCell := ""
+		completedCell := ""
+
+		if i < len(todoTasks) {
+			task := todoTasks[i]
+			priority := getPriorityIcon(task.Priority)
+			todoCell = fmt.Sprintf("%s %s %s", 
+				priority, 
+				task.ID.String()[:8], 
+				truncateString(task.Title, colWidth-12))
 		}
+
+		if i < len(inProgressTasks) {
+			task := inProgressTasks[i]
+			priority := getPriorityIcon(task.Priority)
+			inProgressCell = fmt.Sprintf("%s %s %s", 
+				priority, 
+				task.ID.String()[:8], 
+				truncateString(task.Title, colWidth-12))
+		}
+
+		if i < len(completedTasks) {
+			task := completedTasks[i]
+			priority := getPriorityIcon(task.Priority)
+			completedCell = fmt.Sprintf("%s %s %s", 
+				priority, 
+				task.ID.String()[:8], 
+				truncateString(task.Title, colWidth-12))
+		}
+
+		fmt.Printf("%-*s | %-*s | %-*s\n", colWidth, todoCell, colWidth, inProgressCell, colWidth, completedCell)
 	}
 
-	// Calculate column width (4 columns + borders + padding)
-	columnWidth := (width - 8) / 4 // 8 chars for borders and spacing
+	fmt.Println()
+	fmt.Printf("Summary: %d TODO, %d IN PROGRESS, %d COMPLETED\n", 
+		len(todoTasks), len(inProgressTasks), len(completedTasks))
 	
-	// Ensure minimum column width
-	if columnWidth < 20 {
-		columnWidth = 20
-	}
-
-	// Header
-	fmt.Printf("\n🎯 %s - Kanban Board\n\n", projectName)
-
-	// Print top border
-	printKanbanBorder(columnWidth, "top")
-
-	// Print column headers with task counts
-	fmt.Print("│")
-	printCenteredText(fmt.Sprintf("📋 TODO (%d)", len(statusColumns["TODO"])), columnWidth)
-	fmt.Print("│")
-	printCenteredText(fmt.Sprintf("🚀 IN PROGRESS (%d)", len(statusColumns["IN_PROGRESS"])), columnWidth)
-	fmt.Print("│")
-	printCenteredText(fmt.Sprintf("👀 IN REVIEW (%d)", len(statusColumns["IN_REVIEW"])), columnWidth)
-	fmt.Print("│")
-	printCenteredText(fmt.Sprintf("✅ COMPLETED (%d)", len(statusColumns["COMPLETED"])), columnWidth)
-	fmt.Println("│")
-
-	// Print separator
-	printKanbanBorder(columnWidth, "middle")
-
-	// Find max tasks in any column for row count
-	maxTasks := 0
-	for _, tasks := range statusColumns {
-		if len(tasks) > maxTasks {
-			maxTasks = len(tasks)
-		}
-	}
-
-	// Build unique short IDs for all tasks to avoid collisions
-	allTasks := []models.Task{}
-	for _, taskList := range statusColumns {
-		allTasks = append(allTasks, taskList...)
-	}
-	uniqueIDs := generateUniqueShortIDs(allTasks)
-
-	// Print task rows
-	statuses := []string{"TODO", "IN_PROGRESS", "IN_REVIEW", "COMPLETED"}
-	for i := 0; i < maxTasks; i++ {
-		fmt.Print("│")
-		for _, status := range statuses {
-			tasks := statusColumns[status]
-			if i < len(tasks) {
-				taskText := formatTaskForKanbanWithID(tasks[i], uniqueIDs[tasks[i].ID.String()], columnWidth-2)
-				fmt.Printf(" %-*s", columnWidth-2, taskText)
-			} else {
-				fmt.Printf(" %-*s", columnWidth-2, "")
-			}
-			fmt.Print(" │")
-		}
-		fmt.Println()
-	}
-
-	// Print bottom border
-	printKanbanBorder(columnWidth, "bottom")
-
-	// Print summary
-	fmt.Printf("\n📊 Summary: %d TODO • %d IN PROGRESS • %d IN REVIEW • %d COMPLETED\n\n",
-		len(statusColumns["TODO"]),
-		len(statusColumns["IN_PROGRESS"]),
-		len(statusColumns["IN_REVIEW"]),
-		len(statusColumns["COMPLETED"]))
+	// Show priority legend
+	fmt.Println()
+	fmt.Println("Priority: 🔴 High | 🟡 Medium | 🟢 Low")
 }
 
-func printKanbanBorder(columnWidth int, position string) {
-	var left, right, horizontal, junction string
-
-	switch position {
-	case "top":
-		left, right, horizontal, junction = "┌", "┐", "─", "┬"
-	case "middle":
-		left, right, horizontal, junction = "├", "┤", "─", "┼"
-	case "bottom":
-		left, right, horizontal, junction = "└", "┘", "─", "┴"
-	}
-
-	fmt.Print(left)
-	for i := 0; i < 4; i++ {
-		fmt.Print(strings.Repeat(horizontal, columnWidth))
-		if i < 3 {
-			fmt.Print(junction)
-		}
-	}
-	fmt.Println(right)
-}
-
-func printCenteredText(text string, width int) {
-	textLen := len(text)
-	if textLen >= width {
-		fmt.Printf(" %-*s", width-2, truncateString(text, width-2))
-		return
-	}
-
-	padding := (width - textLen) / 2
-	fmt.Printf("%*s%s%*s", padding, "", text, width-textLen-padding, "")
-}
-
-func formatTaskForKanban(task models.Task, maxWidth int) string {
-	// Priority indicator
-	priorityIcon := map[string]string{
-		"H": "🔴",
-		"M": "🟡", 
-		"L": "🟢",
-	}
-
-	icon := "⚪"
-	if p, exists := priorityIcon[task.Priority]; exists {
-		icon = p
-	}
-
-	// Smart ID truncation - start with 8 chars, extend if needed for uniqueness
-	shortID := task.ID.String()[:8]
-	
-	// Progress indicator for non-TODO tasks
-	progressIndicator := ""
-	if task.Status != "TODO" && task.Progress > 0 {
-		if task.Progress == 100 {
-			progressIndicator = " ✅"
-		} else if task.Progress >= 75 {
-			progressIndicator = " ▓▓▓▓▓▓▓░"
-		} else if task.Progress >= 50 {
-			progressIndicator = " ▓▓▓▓▓░░░"
-		} else if task.Progress >= 25 {
-			progressIndicator = " ▓▓▓░░░░░"
-		} else {
-			progressIndicator = " ▓░░░░░░░"
-		}
-	}
-	
-	// Format: icon + short ID + description + progress
-	prefix := fmt.Sprintf("%s %s ", icon, shortID)
-	suffix := progressIndicator
-	availableWidth := maxWidth - len(prefix) - len(suffix)
-	
-	if availableWidth <= 0 {
-		return truncateString(prefix, maxWidth)
-	}
-
-	description := truncateString(task.Description, availableWidth)
-	return prefix + description + suffix
-}
-
-// displayCompactTaskList shows a simple list view when terminal is too narrow
-func displayCompactTaskList(tasks []models.Task, projectName string) {
-	fmt.Printf("\n🎯 %s - Task List (Compact View)\n\n", projectName)
-	
-	statusOrder := []string{"TODO", "IN_PROGRESS", "IN_REVIEW", "COMPLETED"}
-	statusIcons := map[string]string{
-		"TODO":        "📋",
-		"IN_PROGRESS": "🚀", 
-		"IN_REVIEW":   "👀",
-		"COMPLETED":   "✅",
-	}
-	
-	for _, status := range statusOrder {
-		statusTasks := []models.Task{}
-		for _, task := range tasks {
-			if task.Status == status {
-				statusTasks = append(statusTasks, task)
-			}
-		}
-		
-		if len(statusTasks) > 0 {
-			fmt.Printf("%s %s (%d)\n", statusIcons[status], status, len(statusTasks))
-			for _, task := range statusTasks {
-				priorityIcon := map[string]string{"H": "🔴", "M": "🟡", "L": "🟢"}[task.Priority]
-				if priorityIcon == "" {
-					priorityIcon = "⚪"
-				}
-				
-				shortID := task.ID.String()[:8]
-				description := truncateString(task.Description, 50)
-				fmt.Printf("  %s %s %s\n", priorityIcon, shortID, description)
-			}
-			fmt.Println()
-		}
+func getPriorityIcon(priority string) string {
+	switch priority {
+	case "H":
+		return "🔴"
+	case "M":
+		return "🟡"
+	case "L":
+		return "🟢"
+	default:
+		return "⚪"
 	}
 }
 
-// generateUniqueShortIDs creates collision-free short IDs for a set of tasks
-func generateUniqueShortIDs(tasks []models.Task) map[string]string {
-	uniqueIDs := make(map[string]string)
-	usedShortIDs := make(map[string][]string) // shortID -> list of full UUIDs
-	
-	// First pass: try 8-character IDs
-	for _, task := range tasks {
-		fullID := task.ID.String()
-		shortID := fullID[:8]
-		usedShortIDs[shortID] = append(usedShortIDs[shortID], fullID)
+func max(a, b, c int) int {
+	if a >= b && a >= c {
+		return a
 	}
-	
-	// Second pass: resolve collisions by extending length
-	for shortID, fullIDs := range usedShortIDs {
-		if len(fullIDs) == 1 {
-			// No collision, use 8-char ID
-			uniqueIDs[fullIDs[0]] = shortID
-		} else {
-			// Collision detected, extend until unique
-			for _, fullID := range fullIDs {
-				uniqueLen := 8
-				for uniqueLen < len(fullID) {
-					candidate := fullID[:uniqueLen]
-					// Check if this length makes it unique among colliding IDs
-					isUnique := true
-					for _, otherID := range fullIDs {
-						if otherID != fullID && len(otherID) > uniqueLen && otherID[:uniqueLen] == candidate {
-							isUnique = false
-							break
-						}
-					}
-					if isUnique {
-						break
-					}
-					uniqueLen++
-				}
-				uniqueIDs[fullID] = fullID[:uniqueLen]
-			}
-		}
+	if b >= c {
+		return b
 	}
-	
-	return uniqueIDs
+	return c
 }
-
-// formatTaskForKanbanWithID formats a task with pre-calculated unique ID
-func formatTaskForKanbanWithID(task models.Task, shortID string, maxWidth int) string {
-	// Priority indicator
-	priorityIcon := map[string]string{
-		"H": "🔴",
-		"M": "🟡", 
-		"L": "🟢",
-	}
-
-	icon := "⚪"
-	if p, exists := priorityIcon[task.Priority]; exists {
-		icon = p
-	}
-	
-	// Progress indicator for non-TODO tasks
-	progressIndicator := ""
-	if task.Status != "TODO" && task.Progress > 0 {
-		if task.Progress == 100 {
-			progressIndicator = " ✅"
-		} else if task.Progress >= 75 {
-			progressIndicator = " ▓▓▓▓▓▓▓░"
-		} else if task.Progress >= 50 {
-			progressIndicator = " ▓▓▓▓▓░░░"
-		} else if task.Progress >= 25 {
-			progressIndicator = " ▓▓▓░░░░░"
-		} else {
-			progressIndicator = " ▓░░░░░░░"
-		}
-	}
-	
-	// Format: icon + unique short ID + description + progress
-	prefix := fmt.Sprintf("%s %s ", icon, shortID)
-	suffix := progressIndicator
-	availableWidth := maxWidth - len(prefix) - len(suffix)
-	
-	if availableWidth <= 0 {
-		return truncateString(prefix, maxWidth)
-	}
-
-	description := truncateString(task.Description, availableWidth)
-	return prefix + description + suffix
-} 

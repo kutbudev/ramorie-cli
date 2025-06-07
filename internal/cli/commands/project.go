@@ -12,8 +12,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/terzigolu/josepshbrain-go/config"
-	"github.com/terzigolu/josepshbrain-go/models"
 )
+
+// Project is a simplified local struct to hold project data from the API.
+type Project struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
 
 // NewProjectCmd creates the project command with subcommands, now fully API-driven.
 func NewProjectCmd() *cobra.Command {
@@ -60,7 +66,7 @@ func newProjectInitCmd() *cobra.Command {
 				log.Fatalf("API returned a non-201 status code: %s", resp.Status)
 			}
 
-			var newProject models.Project
+			var newProject Project
 			if err := json.NewDecoder(resp.Body).Decode(&newProject); err != nil {
 				log.Fatalf("Failed to decode API response: %v", err)
 			}
@@ -101,7 +107,7 @@ func newProjectListCmd() *cobra.Command {
 				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
 			}
 
-			var projects []models.Project
+			var projects []Project
 			if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
 				log.Fatalf("Failed to decode API response: %v", err)
 			}
@@ -153,12 +159,12 @@ func newProjectUseCmd() *cobra.Command {
 				log.Fatalf("API returned a non-200 status code: %s", resp.Status)
 			}
 
-			var projects []models.Project
+			var projects []Project
 			if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
 				log.Fatalf("Failed to decode API response: %v", err)
 			}
 
-			var foundProject *models.Project
+			var foundProject *Project
 			for i, p := range projects {
 				if p.Name == searchTerm || strings.HasPrefix(p.ID, searchTerm) {
 					foundProject = &projects[i]
@@ -181,9 +187,4 @@ func newProjectUseCmd() *cobra.Command {
 	return cmd
 }
 
-func truncateString(s string, length int) string {
-	if len(s) > length {
-		return s[:length]
-	}
-	return s
-}
+
