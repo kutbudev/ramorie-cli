@@ -7,7 +7,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/terzigolu/josepshbrain-go/internal/api"
-	"github.com/terzigolu/josepshbrain-go/internal/config"
 	"github.com/urfave/cli/v2"
 )
 
@@ -43,15 +42,22 @@ func taskListCmd() *cli.Command {
 			projectID := c.String("project")
 			status := c.String("status")
 
+			client := api.NewClient()
+
 			if projectID == "" {
-				cfg, err := config.LoadConfig()
-				if err == nil && cfg.ActiveProjectID != "" {
-					projectID = cfg.ActiveProjectID
-					fmt.Printf("No project specified, using active project: %s\n", projectID[:8])
+				// If no project is specified, find the active one from the server
+				projects, err := client.ListProjects()
+				if err != nil {
+					return fmt.Errorf("could not fetch projects to find active one: %w", err)
+				}
+				for _, p := range projects {
+					if p.IsActive {
+						projectID = p.ID.String()
+						break
+					}
 				}
 			}
 
-			client := api.NewClient()
 			tasks, err := client.ListTasks(projectID, status)
 			if err != nil {
 				fmt.Printf("Error listing tasks: %v\n", err)
@@ -100,15 +106,26 @@ func taskCreateCmd() *cli.Command {
 			description := c.String("description")
 			priority := c.String("priority")
 
+			client := api.NewClient()
+
 			if projectID == "" {
-				cfg, err := config.LoadConfig()
-				if err != nil || cfg.ActiveProjectID == "" {
-					return fmt.Errorf("no active project set. Use 'jbraincli project use <id>' or specify --project")
+				// If no project is specified, find the active one from the server
+				projects, err := client.ListProjects()
+				if err != nil {
+					return fmt.Errorf("could not fetch projects to find active one: %w", err)
 				}
-				projectID = cfg.ActiveProjectID
+				for _, p := range projects {
+					if p.IsActive {
+						projectID = p.ID.String()
+						break
+					}
+				}
 			}
 
-			client := api.NewClient()
+			if projectID == "" {
+				return fmt.Errorf("no active project set. Use 'jbraincli project use <id>' or specify --project")
+			}
+
 			task, err := client.CreateTask(projectID, title, description, priority)
 			if err != nil {
 				fmt.Printf("Error creating task: %v\n", err)
