@@ -122,9 +122,7 @@ func projectShowCmd() *cli.Command {
 			fmt.Printf("----------------------------------\n")
 			fmt.Printf("ID:          %s\n", project.ID.String())
 			fmt.Printf("Name:        %s\n", project.Name)
-			if project.Description != nil {
-				fmt.Printf("Description: %s\n", *project.Description)
-			}
+			fmt.Printf("Description: %s\n", project.Description)
 			fmt.Printf("Created At:  %s\n", project.CreatedAt.Format("2006-01-02 15:04:05"))
 			fmt.Printf("Updated At:  %s\n", project.UpdatedAt.Format("2006-01-02 15:04:05"))
 			return nil
@@ -181,4 +179,9 @@ func projectDeleteCmd() *cli.Command {
 	}
 }
 
-
+func truncateString(s string, length int) string {
+	if len(s) <= length {
+		return s
+	}
+	return s[:length-3] + "..."
+}
