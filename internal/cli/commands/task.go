@@ -24,6 +24,7 @@ func NewTaskCommand() *cli.Command {
 			taskStartCmd(),
 			taskCompleteCmd(),
 			taskDeleteCmd(),
+			taskElaborateCmd(),
 		},
 	}
 }
@@ -305,8 +306,37 @@ func taskDeleteCmd() *cli.Command {
 				return err
 			}
 
-			fmt.Printf("🗑️ Task %s deleted successfully.\n", taskID[:8])
+			fmt.Printf("✅ Task %s deleted successfully.\n", taskID[:8])
 			return nil
 		},
 	}
 }
+
+// taskElaborateCmd uses AI to elaborate on a task's description and saves it as an annotation.
+func taskElaborateCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "elaborate",
+		Aliases:   []string{"elab"},
+		Usage:     "Use AI to elaborate on a task and save as a note",
+		ArgsUsage: "[task-id]",
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("task ID is required")
+			}
+			taskID := c.Args().First()
+
+			client := api.NewClient()
+			_, err := client.ElaborateTask(taskID)
+			if err != nil {
+				// The error from the API client is already quite descriptive
+				fmt.Printf("Error elaborating task: %v\n", err)
+				return err
+			}
+
+			fmt.Printf("✅ Successfully elaborated on task %s and saved it as a new note.\n", taskID)
+			fmt.Printf("Use 'jbraincli task show %s' to see the results.\n", taskID)
+			return nil
+		},
+	}
+}
+

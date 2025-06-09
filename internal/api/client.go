@@ -228,6 +228,21 @@ func (c *Client) DeleteTask(id string) error {
 	return err
 }
 
+func (c *Client) ElaborateTask(taskID string) (*models.Annotation, error) {
+	endpoint := fmt.Sprintf("/tasks/%s/elaborate", taskID)
+	respBody, err := c.makeRequest("POST", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var annotation models.Annotation
+	if err := json.Unmarshal(respBody, &annotation); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation from elaborate response: %w", err)
+	}
+
+	return &annotation, nil
+}
+
 // Memory API methods
 func (c *Client) CreateMemory(projectID, content string) (*models.Memory, error) {
 	reqBody := map[string]interface{}{
