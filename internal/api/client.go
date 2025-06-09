@@ -27,7 +27,7 @@ type Client struct {
 func NewClient() *Client {
 	baseURL := os.Getenv("API_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://jbraincli-go-backend-production.up.railway.app"
+		baseURL = "https://jbraincli-go-backend-production.up.railway.app/v1"
 	}
 
 	// Load API key from config
@@ -98,7 +98,7 @@ func (c *Client) CreateProject(name, description string) (*models.Project, error
 		"description": description,
 	}
 
-	respBody, err := c.makeRequest("POST", "/v1/projects", reqBody)
+	respBody, err := c.makeRequest("POST", "/projects", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (c *Client) CreateProject(name, description string) (*models.Project, error
 }
 
 func (c *Client) ListProjects() ([]models.Project, error) {
-	respBody, err := c.makeRequest("GET", "/v1/projects", nil)
+	respBody, err := c.makeRequest("GET", "/projects", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (c *Client) ListProjects() ([]models.Project, error) {
 }
 
 func (c *Client) GetProject(id string) (*models.Project, error) {
-	respBody, err := c.makeRequest("GET", "/v1/projects/"+id, nil)
+	respBody, err := c.makeRequest("GET", "/projects/"+id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -140,12 +140,12 @@ func (c *Client) GetProject(id string) (*models.Project, error) {
 }
 
 func (c *Client) DeleteProject(id string) error {
-	_, err := c.makeRequest("DELETE", "/v1/projects/"+id, nil)
+	_, err := c.makeRequest("DELETE", "/projects/"+id, nil)
 	return err
 }
 
 func (c *Client) SetProjectActive(id string) error {
-	_, err := c.makeRequest("POST", "/v1/projects/"+id+"/use", nil)
+	_, err := c.makeRequest("POST", "/projects/"+id+"/use", nil)
 	return err
 }
 
@@ -158,7 +158,7 @@ func (c *Client) CreateTask(projectID, title, description, priority string) (*mo
 		"priority":    priority,
 	}
 
-	respBody, err := c.makeRequest("POST", "/v1/tasks", reqBody)
+	respBody, err := c.makeRequest("POST", "/tasks", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func (c *Client) CreateTask(projectID, title, description, priority string) (*mo
 }
 
 func (c *Client) ListTasks(projectID, status string) ([]models.Task, error) {
-	endpoint := "/v1/tasks"
+	endpoint := "/tasks"
 	if projectID != "" {
 		endpoint += "?project_id=" + projectID
 		if status != "" {
@@ -196,7 +196,7 @@ func (c *Client) ListTasks(projectID, status string) ([]models.Task, error) {
 }
 
 func (c *Client) GetTask(id string) (*models.Task, error) {
-	respBody, err := c.makeRequest("GET", "/v1/tasks/"+id, nil)
+	respBody, err := c.makeRequest("GET", "/tasks/"+id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func (c *Client) GetTask(id string) (*models.Task, error) {
 }
 
 func (c *Client) UpdateTask(id string, data map[string]interface{}) (*models.Task, error) {
-	respBody, err := c.makeRequest("PUT", "/v1/tasks/"+id, data)
+	respBody, err := c.makeRequest("PUT", "/tasks/"+id, data)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func (c *Client) UpdateTask(id string, data map[string]interface{}) (*models.Tas
 }
 
 func (c *Client) DeleteTask(id string) error {
-	_, err := c.makeRequest("DELETE", "/v1/tasks/"+id, nil)
+	_, err := c.makeRequest("DELETE", "/tasks/"+id, nil)
 	return err
 }
 
@@ -235,7 +235,7 @@ func (c *Client) CreateMemory(projectID, content string) (*models.Memory, error)
 		"content":    content,
 	}
 
-	respBody, err := c.makeRequest("POST", "/v1/memories", reqBody)
+	respBody, err := c.makeRequest("POST", "/memories", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func (c *Client) CreateMemory(projectID, content string) (*models.Memory, error)
 }
 
 func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error) {
-	endpoint := "/v1/memories"
+	endpoint := "/memories"
 	queryParams := ""
 	if projectID != "" {
 		queryParams += "project_id=" + projectID
@@ -278,7 +278,7 @@ func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error)
 }
 
 func (c *Client) DeleteMemory(id string) error {
-	_, err := c.makeRequest("DELETE", "/v1/memories/"+id, nil)
+	_, err := c.makeRequest("DELETE", "/memories/"+id, nil)
 	return err
 }
 
@@ -288,7 +288,7 @@ func (c *Client) CreateContext(name, description string) (*models.Context, error
 		"name":        name,
 		"description": description,
 	}
-	respBody, err := c.makeRequest("POST", "/v1/contexts", reqBody)
+	respBody, err := c.makeRequest("POST", "/contexts", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +300,7 @@ func (c *Client) CreateContext(name, description string) (*models.Context, error
 }
 
 func (c *Client) ListContexts() ([]models.Context, error) {
-	respBody, err := c.makeRequest("GET", "/v1/contexts", nil)
+	respBody, err := c.makeRequest("GET", "/contexts", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -312,13 +312,13 @@ func (c *Client) ListContexts() ([]models.Context, error) {
 }
 
 func (c *Client) DeleteContext(id string) error {
-	_, err := c.makeRequest("DELETE", "/v1/contexts/"+id, nil)
+	_, err := c.makeRequest("DELETE", "/contexts/"+id, nil)
 	return err
 }
 
 func (c *Client) UseContext(name string) (*models.Context, error) {
 	reqBody := map[string]interface{}{"name": name}
-	respBody, err := c.makeRequest("POST", "/v1/contexts/use", reqBody)
+	respBody, err := c.makeRequest("POST", "/contexts/use", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +335,7 @@ func (c *Client) CreateAnnotation(taskID, content string) (*models.Annotation, e
 		"content": content,
 	}
 
-	url := fmt.Sprintf("/v1/tasks/%s/annotations", taskID)
+	url := fmt.Sprintf("/tasks/%s/annotations", taskID)
 	respBody, err := c.makeRequest("POST", url, reqBody)
 	if err != nil {
 		return nil, err
@@ -350,7 +350,7 @@ func (c *Client) CreateAnnotation(taskID, content string) (*models.Annotation, e
 }
 
 func (c *Client) ListAnnotations(taskID string) ([]models.Annotation, error) {
-	endpoint := "/v1/annotations"
+	endpoint := "/annotations"
 	if taskID != "" {
 		endpoint += "?task_id=" + taskID
 	}

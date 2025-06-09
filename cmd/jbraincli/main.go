@@ -17,6 +17,7 @@ func main() {
 			commands.NewTaskCommand(),
 			commands.NewProjectCommand(),
 			commands.NewMemoryCommand(),
+			commands.NewRememberCommand(), // Direct remember command
 			commands.NewKanbanCmd(),
 			commands.NewAnnotateCmd(),
 			commands.NewTaskAnnotationsCmd(),

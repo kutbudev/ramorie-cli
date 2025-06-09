@@ -25,6 +25,11 @@ func NewMemoryCommand() *cli.Command {
 	}
 }
 
+// NewRememberCommand creates a standalone remember command
+func NewRememberCommand() *cli.Command {
+	return rememberCmd()
+}
+
 // rememberCmd creates a new memory item.
 func rememberCmd() *cli.Command {
 	return &cli.Command{

@@ -6,6 +6,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/terzigolu/josepshbrain-go/internal/api"
+	"github.com/terzigolu/josepshbrain-go/internal/config"
 	"github.com/urfave/cli/v2"
 )
 
@@ -135,20 +136,54 @@ func projectUseCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "use",
 		Usage:     "Set the active project",
-		ArgsUsage: "[project-id]",
+		ArgsUsage: "[project-name-or-id]",
 		Action: func(c *cli.Context) error {
 			if c.NArg() == 0 {
-				return fmt.Errorf("project ID is required")
+				return fmt.Errorf("project name or ID is required")
 			}
-			projectID := c.Args().First()
+			projectIdentifier := c.Args().First()
 
 			client := api.NewClient()
-			if err := client.SetProjectActive(projectID); err != nil {
+			
+			// First, get all projects to find the correct ID
+			projects, err := client.ListProjects()
+			if err != nil {
+				fmt.Printf("Error listing projects: %v\n", err)
+				return err
+			}
+
+			var targetProjectID string
+			var targetProjectName string
+			
+			// Try to find project by name or ID
+			for _, p := range projects {
+				if p.Name == projectIdentifier || p.ID.String()[:8] == projectIdentifier || p.ID.String() == projectIdentifier {
+					targetProjectID = p.ID.String()
+					targetProjectName = p.Name
+					break
+				}
+			}
+
+			if targetProjectID == "" {
+				return fmt.Errorf("project '%s' not found", projectIdentifier)
+			}
+
+			if err := client.SetProjectActive(targetProjectID); err != nil {
 				fmt.Printf("Error setting active project: %v\n", err)
 				return err
 			}
 
-			fmt.Printf("✅ Active project set to '%s'\n", projectID)
+			// Update local config with the actual UUID
+			cfg, err := config.LoadConfig()
+			if err != nil {
+				cfg = &config.Config{}
+			}
+			cfg.ActiveProjectID = targetProjectID
+			if err := config.SaveConfig(cfg); err != nil {
+				fmt.Printf("Warning: Could not save active project to local config: %v\n", err)
+			}
+
+			fmt.Printf("✅ Active project set to '%s' (ID: %s)\n", targetProjectName, targetProjectID[:8])
 			return nil
 		},
 	}
