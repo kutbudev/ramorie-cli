@@ -19,6 +19,7 @@ func NewMemoryCommand() *cli.Command {
 		Subcommands: []*cli.Command{
 			rememberCmd(),
 			memoriesCmd(),
+			getCmd(),
 			recallCmd(),
 			forgetCmd(),
 		},
@@ -73,8 +74,8 @@ func rememberCmd() *cli.Command {
 // memoriesCmd lists all memory items.
 func memoriesCmd() *cli.Command {
 	return &cli.Command{
-		Name:    "memories",
-		Usage:   "List all memories",
+		Name:  "memories",
+		Usage: "List all memories",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "project",
@@ -147,6 +148,31 @@ func recallCmd() *cli.Command {
 				fmt.Fprintf(w, "%s\t%s\n", m.ID.String()[:8], truncateString(m.Content, 70))
 			}
 			w.Flush()
+			return nil
+		},
+	}
+}
+
+// getCmd retrieves a memory item by ID.
+func getCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "get",
+		Usage:     "Retrieve a memory by ID",
+		ArgsUsage: "[memory-id]",
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("memory ID is required")
+			}
+			memoryID := c.Args().First()
+
+			client := api.NewClient()
+			memory, err := client.GetMemory(memoryID)
+			if err != nil {
+				fmt.Printf("Error getting memory: %v\n", err)
+				return err
+			}
+
+			fmt.Printf("Memory %s:\n%s\n", memory.ID.String()[:8], memory.Content)
 			return nil
 		},
 	}

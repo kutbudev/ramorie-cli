@@ -213,11 +213,11 @@ jbraincli task-annotations a1b2c3d4       # View all notes for this task
 ```bash
 # Memory management
 jbraincli remember <text>                   # Store new insight/learning
-jbraincli memories [flags]                  # List memories 
+jbraincli memories [flags]                  # List memories
 
-# Coming soon:
-# jbraincli memory recall <search_term>    # Search memories
-# jbraincli memory forget <id>             # Delete memory
+jbraincli memory recall <search_term>    # Search memories
+jbraincli memory get <id>                # View a memory by ID
+jbraincli memory forget <id>             # Delete memory
 
 # Examples
 jbraincli remember "Use connection pooling for better database performance"

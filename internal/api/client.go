@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -279,18 +280,15 @@ func (c *Client) CreateMemory(projectID, content string) (*models.Memory, error)
 
 func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error) {
 	endpoint := "/memories"
-	queryParams := ""
+	params := url.Values{}
 	if projectID != "" {
-		queryParams += "project_id=" + projectID
+		params.Add("project_id", projectID)
 	}
 	if search != "" {
-		if queryParams != "" {
-			queryParams += "&"
-		}
-		queryParams += "search=" + search
+		params.Add("search", search)
 	}
-	if queryParams != "" {
-		endpoint += "?" + queryParams
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
 	}
 
 	respBody, err := c.makeRequest("GET", endpoint, nil)
@@ -309,6 +307,20 @@ func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error)
 func (c *Client) DeleteMemory(id string) error {
 	_, err := c.makeRequest("DELETE", "/memories/"+id, nil)
 	return err
+}
+
+func (c *Client) GetMemory(id string) (*models.Memory, error) {
+	respBody, err := c.makeRequest("GET", "/memories/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var memory models.Memory
+	if err := json.Unmarshal(respBody, &memory); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &memory, nil
 }
 
 // Context API methods
@@ -416,7 +428,7 @@ func (c *Client) RegisterUser(firstName, lastName, email, password string) (stri
 	}
 
 	var response struct {
-		Success bool   `json:"success"`
+		Success bool `json:"success"`
 		Data    struct {
 			APIKey string `json:"api_key"`
 		} `json:"data"`
@@ -446,7 +458,7 @@ func (c *Client) LoginUser(email, password string) (string, error) {
 	}
 
 	var response struct {
-		Success bool   `json:"success"`
+		Success bool `json:"success"`
 		Data    struct {
 			APIKey string `json:"api_key"`
 		} `json:"data"`
