@@ -1,9 +1,10 @@
 package models
 
 import (
-	"time"
+        "encoding/json"
+        "time"
 
-	"github.com/google/uuid"
+        "github.com/google/uuid"
 )
 
 // Project represents a project in the system
@@ -11,7 +12,7 @@ type Project struct {
 	ID            uuid.UUID `json:"id"`
 	Name          string    `json:"name"`
 	Description   string    `json:"description"`
-	Configuration []byte    `json:"configuration,omitempty"`
+        Configuration json.RawMessage `json:"configuration,omitempty"`
 	IsActive      bool      `json:"is_active"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
