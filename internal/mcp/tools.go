@@ -66,11 +66,6 @@ func ToolDefinitions() []toolDef {
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}, "progress": map[string]interface{}{"type": "number"}}, "required": []string{"taskId", "progress"}},
 		},
 		{
-			Name:        "delete_task",
-			Description: "Görevi sil",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
-		},
-		{
 			Name:        "add_task_note",
 			Description: "Göreve not ekle (annotation)",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}, "note": map[string]interface{}{"type": "string"}}, "required": []string{"taskId", "note"}},
@@ -88,11 +83,6 @@ func ToolDefinitions() []toolDef {
 		{
 			Name:        "bulk_complete_tasks",
 			Description: "Birden fazla görevi tek seferde tamamla",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskIds": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "required": []string{"taskIds"}},
-		},
-		{
-			Name:        "bulk_delete_tasks",
-			Description: "Birden fazla görevi tek seferde sil",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskIds": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "required": []string{"taskIds"}},
 		},
 		{
@@ -159,6 +149,46 @@ func ToolDefinitions() []toolDef {
 			Name:        "analyze_task_dependencies",
 			Description: "Görev için bağımlılık analizi yap",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
+		},
+		{
+			Name:        "duplicate_task",
+			Description: "Bir görevi kopyala (etiket ve notlarla; durum TODO, ilerleme 0)",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}, "newDescription": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
+		},
+		{
+			Name:        "move_tasks_to_project",
+			Description: "Görevleri başka bir projeye taşı",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskIds": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}, "targetProject": map[string]interface{}{"type": "string"}}, "required": []string{"taskIds", "targetProject"}},
+		},
+		{
+			Name:        "timeline",
+			Description: "Son X günün aktivite zaman çizelgesi",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"days": map[string]interface{}{"type": "number"}, "project": map[string]interface{}{"type": "string"}}},
+		},
+		{
+			Name:        "recall",
+			Description: "Hafızalarda metin araması yap (keyword)",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"term": map[string]interface{}{"type": "string"}, "limit": map[string]interface{}{"type": "number"}}, "required": []string{"term"}},
+		},
+		{
+			Name:        "export_project",
+			Description: "Proje raporunu markdown formatında dışa aktar",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string"}, "format": map[string]interface{}{"type": "string"}}, "required": []string{"project"}},
+		},
+		{
+			Name:        "list_contexts",
+			Description: "Mevcut tüm bağlamları (context) listele",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+		{
+			Name:        "create_context",
+			Description: "Yeni bir bağlam (context) oluştur",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"name": map[string]interface{}{"type": "string"}, "description": map[string]interface{}{"type": "string"}}, "required": []string{"name"}},
+		},
+		{
+			Name:        "set_active_context",
+			Description: "Belirtilen bağlamı (context) etkinleştir",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"name": map[string]interface{}{"type": "string"}}, "required": []string{"name"}},
 		},
 	}
 }
@@ -333,17 +363,6 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 		}
 		return client.UpdateTask(taskID, map[string]interface{}{"progress": progress})
 
-	case "delete_task":
-		taskID, _ := args["taskId"].(string)
-		taskID = strings.TrimSpace(taskID)
-		if taskID == "" {
-			return nil, errors.New("taskId is required")
-		}
-		if err := client.DeleteTask(taskID); err != nil {
-			return nil, err
-		}
-		return map[string]interface{}{"ok": true}, nil
-
 	case "add_task_note":
 		taskID, _ := args["taskId"].(string)
 		note, _ := args["note"].(string)
@@ -382,16 +401,6 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 		}
 		status := "COMPLETED"
 		if err := client.BulkUpdateTasks(ids, &status, nil, nil); err != nil {
-			return nil, err
-		}
-		return map[string]interface{}{"ok": true, "count": len(ids)}, nil
-
-	case "bulk_delete_tasks":
-		ids, err := resolveTaskIDList(client, args["taskIds"])
-		if err != nil {
-			return nil, err
-		}
-		if err := client.BulkDeleteTasks(ids); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{"ok": true, "count": len(ids)}, nil
@@ -567,6 +576,260 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 			return nil, errors.New("taskId is required")
 		}
 		return client.AIDependencies(taskID)
+
+	case "duplicate_task":
+		taskID, _ := args["taskId"].(string)
+		taskID = strings.TrimSpace(taskID)
+		if taskID == "" {
+			return nil, errors.New("taskId is required")
+		}
+		newDescription, _ := args["newDescription"].(string)
+
+		// Get original task
+		original, err := client.GetTask(taskID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Create new task with same properties
+		title := original.Title
+		if newDescription != "" {
+			title = newDescription
+		} else {
+			title = title + " (kopya)"
+		}
+
+		newTask, err := client.CreateTask(
+			original.ProjectID.String(),
+			title,
+			original.Description,
+			original.Priority,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Copy annotations
+		for _, ann := range original.Annotations {
+			_, _ = client.CreateAnnotation(newTask.ID.String(), ann.Content)
+		}
+
+		return map[string]interface{}{
+			"ok":          true,
+			"original_id": original.ID.String(),
+			"new_id":      newTask.ID.String(),
+			"title":       newTask.Title,
+		}, nil
+
+	case "move_tasks_to_project":
+		taskIdsRaw := args["taskIds"]
+		targetProject, _ := args["targetProject"].(string)
+		targetProject = strings.TrimSpace(targetProject)
+		if targetProject == "" {
+			return nil, errors.New("targetProject is required")
+		}
+
+		taskIds, err := resolveTaskIDList(client, taskIdsRaw)
+		if err != nil {
+			return nil, err
+		}
+
+		// Resolve project
+		projectID, err := resolveProjectID(client, targetProject)
+		if err != nil {
+			return nil, err
+		}
+
+		// Move each task
+		movedCount := 0
+		for _, id := range taskIds {
+			_, err := client.UpdateTask(id, map[string]interface{}{"project_id": projectID})
+			if err == nil {
+				movedCount++
+			}
+		}
+
+		return map[string]interface{}{
+			"ok":         true,
+			"moved":      movedCount,
+			"total":      len(taskIds),
+			"project_id": projectID,
+		}, nil
+
+	case "timeline":
+		days := toInt(args["days"])
+		if days == 0 {
+			days = 7
+		}
+		projectIdentifier, _ := args["project"].(string)
+
+		endpoint := fmt.Sprintf("/reports/history?days=%d", days)
+		if strings.TrimSpace(projectIdentifier) != "" {
+			pid, err := resolveProjectID(client, projectIdentifier)
+			if err == nil {
+				endpoint = fmt.Sprintf("/reports/history?days=%d&project_id=%s", days, pid)
+			}
+		}
+
+		b, err := client.Request("GET", endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		var out interface{}
+		if err := json.Unmarshal(b, &out); err != nil {
+			return nil, fmt.Errorf("invalid timeline response")
+		}
+		return out, nil
+
+	case "recall":
+		term, _ := args["term"].(string)
+		term = strings.TrimSpace(term)
+		if term == "" {
+			return nil, errors.New("term is required")
+		}
+		limit := toInt(args["limit"])
+		if limit == 0 {
+			limit = 10
+		}
+
+		// Get all memories and filter by term
+		memories, err := client.ListMemories("", "")
+		if err != nil {
+			return nil, err
+		}
+
+		var filtered []interface{}
+		for _, m := range memories {
+			if strings.Contains(strings.ToLower(m.Content), strings.ToLower(term)) {
+				filtered = append(filtered, map[string]interface{}{
+					"id":         m.ID.String(),
+					"content":    m.Content,
+					"created_at": m.CreatedAt,
+				})
+				if len(filtered) >= limit {
+					break
+				}
+			}
+		}
+
+		return map[string]interface{}{
+			"term":    term,
+			"count":   len(filtered),
+			"results": filtered,
+		}, nil
+
+	case "export_project":
+		projectIdentifier, _ := args["project"].(string)
+		format, _ := args["format"].(string)
+		if format == "" {
+			format = "markdown"
+		}
+
+		projectID, err := resolveProjectID(client, projectIdentifier)
+		if err != nil {
+			return nil, err
+		}
+
+		// Get project details
+		projects, err := client.ListProjects()
+		if err != nil {
+			return nil, err
+		}
+
+		var project *struct {
+			Name        string
+			Description string
+		}
+		for _, p := range projects {
+			if p.ID.String() == projectID {
+				project = &struct {
+					Name        string
+					Description string
+				}{p.Name, p.Description}
+				break
+			}
+		}
+
+		if project == nil {
+			return nil, errors.New("project not found")
+		}
+
+		// Get tasks
+		tasks, err := client.ListTasks(projectID, "")
+		if err != nil {
+			return nil, err
+		}
+
+		// Build markdown report
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("# %s\n\n", project.Name))
+		if project.Description != "" {
+			sb.WriteString(fmt.Sprintf("%s\n\n", project.Description))
+		}
+
+		// Stats
+		total := len(tasks)
+		completed := 0
+		inProgress := 0
+		pending := 0
+		for _, t := range tasks {
+			switch t.Status {
+			case "COMPLETED":
+				completed++
+			case "IN_PROGRESS":
+				inProgress++
+			default:
+				pending++
+			}
+		}
+
+		sb.WriteString("## İstatistikler\n\n")
+		sb.WriteString(fmt.Sprintf("- **Toplam:** %d\n", total))
+		sb.WriteString(fmt.Sprintf("- **Tamamlanan:** %d\n", completed))
+		sb.WriteString(fmt.Sprintf("- **Devam Eden:** %d\n", inProgress))
+		sb.WriteString(fmt.Sprintf("- **Bekleyen:** %d\n\n", pending))
+
+		// Task list
+		sb.WriteString("## Görevler\n\n")
+		for _, t := range tasks {
+			status := "⏳"
+			if t.Status == "COMPLETED" {
+				status = "✅"
+			} else if t.Status == "IN_PROGRESS" {
+				status = "🔄"
+			}
+			sb.WriteString(fmt.Sprintf("- %s **%s** [%s]\n", status, t.Title, t.Priority))
+		}
+
+		return map[string]interface{}{
+			"project":  project.Name,
+			"format":   format,
+			"markdown": sb.String(),
+		}, nil
+
+	case "list_contexts":
+		contexts, err := client.ListContexts()
+		if err != nil {
+			return nil, err
+		}
+		return contexts, nil
+
+	case "create_context":
+		name, _ := args["name"].(string)
+		description, _ := args["description"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, errors.New("name is required")
+		}
+		return client.CreateContext(name, strings.TrimSpace(description))
+
+	case "set_active_context":
+		name, _ := args["name"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, errors.New("name is required")
+		}
+		return client.UseContext(name)
 
 	default:
 		return nil, errors.New("tool not implemented")
