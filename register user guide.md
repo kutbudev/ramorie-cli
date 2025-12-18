@@ -30,7 +30,7 @@ jbraincli setup login
 - Enter your API key when prompted.
 - The CLI stores credentials in `~/.jbrain/config.json`.
 
-**Manual config:**  
+**Manual config:**
 Alternatively, create the config file directly:
 
 ```sh
@@ -70,7 +70,7 @@ jbraincli memory create --project "My Project" "Memory content"
 
 ## 4. Troubleshooting
 
-- If you see `Permission denied`, ensure the binary is executable:  
+- If you see `Permission denied`, ensure the binary is executable:
   `chmod +x /usr/local/bin/jbraincli`
 - For API/auth errors, check your API key in `~/.jbrain/config.json`.
 

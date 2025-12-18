@@ -19,28 +19,28 @@ type Project struct {
 
 // Task represents a task in the system
 type Task struct {
-	ID          uuid.UUID              `json:"id"`
-	ProjectID   uuid.UUID              `json:"project_id"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	Status      string                 `json:"status"`   // TODO, IN_PROGRESS, COMPLETED
-	Priority    string                 `json:"priority"` // L, M, H
-	Tags        map[string]interface{} `json:"tags"`
-	Annotations []Annotation           `json:"annotations"`
-	Project     *Project               `json:"project,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID          uuid.UUID    `json:"id"`
+	ProjectID   uuid.UUID    `json:"project_id"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Status      string       `json:"status"`   // TODO, IN_PROGRESS, COMPLETED
+	Priority    string       `json:"priority"` // L, M, H
+	Tags        interface{}  `json:"tags"`     // Can be array or object from backend
+	Annotations []Annotation `json:"annotations"`
+	Project     *Project     `json:"project,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 // Memory represents a memory/knowledge item
 type Memory struct {
-	ID        uuid.UUID              `json:"id"`
-	ProjectID uuid.UUID              `json:"project_id"`
-	Content   string                 `json:"content"`
-	Tags      map[string]interface{} `json:"tags"`
-	Project   *Project               `json:"project,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+	ID        uuid.UUID   `json:"id"`
+	ProjectID uuid.UUID   `json:"project_id"`
+	Content   string      `json:"content"`
+	Tags      interface{} `json:"tags"` // Can be array or object from backend
+	Project   *Project    `json:"project,omitempty"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 type Tag struct {
