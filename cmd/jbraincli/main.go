@@ -13,8 +13,8 @@ var Version = "dev"
 
 func main() {
 	app := &cli.App{
-		Name:    "jbrain",
-		Usage:   "A CLI for interacting with the JosephsBrain API",
+		Name:    "ramorie",
+		Usage:   "AI-powered task and memory management CLI",
 		Version: Version,
 		Commands: []*cli.Command{
 			commands.NewSetupCommand(),
@@ -30,6 +30,8 @@ func main() {
 			commands.NewAnnotateCmd(),
 			commands.NewTaskAnnotationsCmd(),
 			commands.NewContextCommand(),
+			commands.NewSubtaskCommand(),
+			commands.NewOverviewCommand(),
 			commands.NewMcpCommand(),
 			commands.NewConfigCommand(),
 			commands.NewGeminiKeyCommand(),

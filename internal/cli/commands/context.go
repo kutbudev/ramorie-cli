@@ -68,7 +68,7 @@ func contextListCmd() *cli.Command {
 			}
 
 			if len(contexts) == 0 {
-				fmt.Println("No contexts found. Use 'jbrain context create' to add one.")
+				fmt.Println("No contexts found. Use 'ramorie context create' to add one.")
 				return nil
 			}
 

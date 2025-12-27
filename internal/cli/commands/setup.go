@@ -15,7 +15,7 @@ import (
 	"golang.org/x/term"
 )
 
-const webURL = "https://josephsbrain.com"
+const webURL = "https://ramorie.com"
 
 // openBrowser opens the specified URL in the default browser
 func openBrowser(url string) error {
@@ -79,7 +79,7 @@ func handleUserLogin() error {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println()
-	fmt.Println("🔐 JosephsBrain Login")
+	fmt.Println("🔐 Ramorie Login")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
 
@@ -151,10 +151,10 @@ func handleUserLogin() error {
 	fmt.Println("✅ Login successful!")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
-	fmt.Println("You can now use jbrain commands:")
-	fmt.Println("  jbrain projects      - List your projects")
-	fmt.Println("  jbrain list          - List your tasks")
-	fmt.Println("  jbrain task \"...\"    - Create a new task")
+	fmt.Println("You can now use ramorie commands:")
+	fmt.Println("  ramorie projects      - List your projects")
+	fmt.Println("  ramorie list          - List your tasks")
+	fmt.Println("  ramorie task \"...\"    - Create a new task")
 	fmt.Println()
 	return nil
 }
@@ -205,7 +205,7 @@ func handleAuthStatus() error {
 		fmt.Println("❌ Not authenticated")
 		fmt.Println()
 		fmt.Println("To login, run:")
-		fmt.Println("  jbrain setup login")
+		fmt.Println("  ramorie setup login")
 		fmt.Println()
 		fmt.Println("Don't have an account? Register at:")
 		fmt.Printf("  %s\n", webURL)
@@ -270,10 +270,10 @@ func handleInteractiveSetup() error {
 
 	fmt.Println()
 	fmt.Println("╔═══════════════════════════════════════════╗")
-	fmt.Println("║       🧠 JosephsBrain CLI Setup           ║")
+	fmt.Println("║          🧠 Ramorie CLI Setup             ║")
 	fmt.Println("╚═══════════════════════════════════════════╝")
 	fmt.Println()
-	fmt.Println("Welcome! To use the CLI, you need a JosephsBrain account.")
+	fmt.Println("Welcome! To use the CLI, you need a Ramorie account.")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  [1] Login with existing account")
@@ -306,13 +306,13 @@ func handleInteractiveSetup() error {
 			fmt.Println("✅ Browser opened!")
 		}
 		fmt.Println()
-		fmt.Println("After registration, run 'jbrain setup login' to authenticate.")
+		fmt.Println("After registration, run 'ramorie setup login' to authenticate.")
 		return nil
 	case "4":
 		fmt.Println("Setup cancelled.")
 		return nil
 	default:
-		fmt.Println("Invalid option. Please run 'jbrain setup' again.")
+		fmt.Println("Invalid option. Please run 'ramorie setup' again.")
 		return nil
 	}
 }

@@ -4,6 +4,9 @@
 !.env.example
 
 # Binaries
+ramorie
+ramorie-*
+# Legacy binary names (for backward compatibility)
 jbrain
 jbraincli
 jbraincli-*

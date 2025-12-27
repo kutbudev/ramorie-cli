@@ -11,10 +11,10 @@ import (
 type TaskStatus string
 
 const (
-	TaskStatusTODO        TaskStatus = "TODO"
-	TaskStatusInProgress  TaskStatus = "IN_PROGRESS"
-	TaskStatusInReview    TaskStatus = "IN_REVIEW"
-	TaskStatusCompleted   TaskStatus = "COMPLETED"
+	TaskStatusTODO       TaskStatus = "TODO"
+	TaskStatusInProgress TaskStatus = "IN_PROGRESS"
+	TaskStatusInReview   TaskStatus = "IN_REVIEW"
+	TaskStatusCompleted  TaskStatus = "COMPLETED"
 )
 
 // TaskPriority represents the priority of a task
@@ -51,9 +51,9 @@ type Task struct {
 
 	// Many-to-Many Relations
 	Tags []*Tag `json:"tags,omitempty" gorm:"many2many:task_tags"`
-	
+
 	// Memory Relations
-	Memories []*TaskMemory `json:"memories,omitempty" gorm:"foreignKey:TaskID"`
+	Memories    []*TaskMemory     `json:"memories,omitempty" gorm:"foreignKey:TaskID"`
 	MemoryLinks []*MemoryTaskLink `json:"memory_links,omitempty" gorm:"foreignKey:TaskID"`
 
 	// Dependencies
@@ -87,4 +87,4 @@ type Dependency struct {
 // TableName specifies the table name for GORM
 func (Dependency) TableName() string {
 	return "dependencies"
-} 
+}

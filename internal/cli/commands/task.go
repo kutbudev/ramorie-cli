@@ -129,7 +129,7 @@ func taskCreateCmd() *cli.Command {
 			}
 
 			if projectID == "" {
-				return fmt.Errorf("no active project set. Use 'jbrain project use <id>' or specify --project")
+				return fmt.Errorf("no active project set. Use 'ramorie project use <id>' or specify --project")
 			}
 
 			task, err := client.CreateTask(projectID, title, description, priority)
@@ -378,7 +378,7 @@ func taskElaborateCmd() *cli.Command {
 			}
 
 			fmt.Printf("✅ Successfully elaborated on task %s and saved it as a new note.\n", taskID)
-			fmt.Printf("Use 'jbrain task show %s' to see the results.\n", taskID)
+			fmt.Printf("Use 'ramorie task show %s' to see the results.\n", taskID)
 			return nil
 		},
 	}
@@ -623,7 +623,7 @@ func taskProgressCmd() *cli.Command {
 		ArgsUsage: "[task-id] [progress]",
 		Action: func(c *cli.Context) error {
 			if c.NArg() < 2 {
-				return fmt.Errorf("usage: jbrain task progress <task-id> <progress>")
+				return fmt.Errorf("usage: ramorie task progress <task-id> <progress>")
 			}
 
 			taskID := c.Args().Get(0)

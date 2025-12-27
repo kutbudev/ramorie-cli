@@ -46,4 +46,4 @@ func (r *gormAnnotationRepository) Update(annotation *models.Annotation) error {
 
 func (r *gormAnnotationRepository) Delete(id uuid.UUID) error {
 	return r.db.Delete(&models.Annotation{}, id).Error
-} 
+}

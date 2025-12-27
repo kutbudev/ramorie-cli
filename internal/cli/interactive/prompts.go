@@ -17,7 +17,7 @@ func SelectTask(tasks []models.Task, message string) (*models.Task, error) {
 	// Build options with format: "shortID - description (status)"
 	options := make([]string, len(tasks))
 	taskMap := make(map[string]*models.Task)
-	
+
 	for i, task := range tasks {
 		shortID := task.ID[:8]
 		status := getStatusIcon(string(task.Status))
@@ -28,8 +28,8 @@ func SelectTask(tasks []models.Task, message string) (*models.Task, error) {
 	}
 
 	prompt := &survey.Select{
-		Message: message,
-		Options: options,
+		Message:  message,
+		Options:  options,
 		PageSize: 10,
 	}
 
@@ -51,7 +51,7 @@ func SelectMemory(memories []models.MemoryItem, message string) (*models.MemoryI
 	// Build options with format: "shortID - content preview"
 	options := make([]string, len(memories))
 	memoryMap := make(map[string]*models.MemoryItem)
-	
+
 	for i, memory := range memories {
 		shortID := memory.ID.String()[:8]
 		contentPreview := memory.Content
@@ -64,8 +64,8 @@ func SelectMemory(memories []models.MemoryItem, message string) (*models.MemoryI
 	}
 
 	prompt := &survey.Select{
-		Message: message,
-		Options: options,
+		Message:  message,
+		Options:  options,
 		PageSize: 10,
 	}
 
@@ -158,7 +158,7 @@ func AnnotateTaskInteractive() (string, error) {
 	prompt := &survey.Multiline{
 		Message: "Annotation content:",
 	}
-	
+
 	var content string
 	err := survey.AskOne(prompt, &content, survey.WithValidator(survey.Required))
 	if err != nil {
@@ -173,7 +173,7 @@ func ConfirmAction(message string, details string) (bool, error) {
 	prompt := &survey.Confirm{
 		Message: fmt.Sprintf("%s\n%s\nAre you sure?", message, details),
 	}
-	
+
 	var confirmed bool
 	err := survey.AskOne(prompt, &confirmed)
 	return confirmed, err
@@ -183,7 +183,7 @@ func ConfirmAction(message string, details string) (bool, error) {
 func SelectStatus(message string, currentStatus string) (string, error) {
 	statusOptions := map[string]string{
 		"📋 TODO":        "TODO",
-		"🚀 IN PROGRESS": "IN_PROGRESS", 
+		"🚀 IN PROGRESS": "IN_PROGRESS",
 		"👀 IN REVIEW":   "IN_REVIEW",
 		"✅ COMPLETED":   "COMPLETED",
 	}
@@ -231,4 +231,4 @@ func getPriorityIcon(priority string) string {
 		return icon
 	}
 	return "⚪"
-} 
+}

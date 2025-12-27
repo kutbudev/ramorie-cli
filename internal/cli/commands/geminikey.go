@@ -13,7 +13,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-const geminiConfigFile = ".jbrain_gemini_key"
+const geminiConfigFile = ".ramorie_gemini_key"
 
 func NewGeminiKeyCommand() *cli.Command {
 	return &cli.Command{

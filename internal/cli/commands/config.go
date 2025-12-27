@@ -75,4 +75,4 @@ func configSetApiKeyCmd() *cli.Command {
 			return nil
 		},
 	}
-} 
+}

@@ -29,8 +29,8 @@ func NewMcpCommand() *cli.Command {
 				Action: func(c *cli.Context) error {
 					cfg := map[string]interface{}{
 						"mcpServers": map[string]interface{}{
-							"josephsbrain": map[string]interface{}{
-								"command": "jbrain",
+							"ramorie": map[string]interface{}{
+								"command": "ramorie",
 								"args":    []string{"mcp", "serve"},
 							},
 						},

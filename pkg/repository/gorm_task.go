@@ -75,7 +75,7 @@ func (r *gormTaskRepository) GetByTags(tags []string) ([]models.Task, error) {
 		Joins("JOIN tags ON task_tags.tag_id = tags.id").
 		Where("tags.name IN ?", tags).
 		Group("tasks.id")
-	
+
 	err := query.Find(&tasks).Error
 	return tasks, err
 }
@@ -83,11 +83,11 @@ func (r *gormTaskRepository) GetByTags(tags []string) ([]models.Task, error) {
 func (r *gormTaskRepository) Search(query string) ([]models.Task, error) {
 	var tasks []models.Task
 	searchTerm := "%" + strings.ToLower(query) + "%"
-	
+
 	err := r.db.Preload("Tags").Where(
 		"LOWER(title) LIKE ? OR LOWER(description) LIKE ?",
 		searchTerm, searchTerm,
 	).Find(&tasks).Error
-	
+
 	return tasks, err
-} 
+}

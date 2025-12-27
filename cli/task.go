@@ -12,12 +12,12 @@ func NewTaskCommand() *cobra.Command {
 		Use:   "task",
 		Short: "Görev yönetimi komutları",
 		Long: `Görevleri oluşturma, listeleme, güncelleme ve silme işlemleri için komutlar.
-		
+
 Örnekler:
-  jbraincli task create "Yeni özellik geliştir" --priority high
-  jbraincli task list --status todo
-  jbraincli task start <task-id>
-  jbraincli task complete <task-id>`,
+  ramorie task create "Yeni özellik geliştir" --priority high
+  ramorie task list --status todo
+  ramorie task start <task-id>
+  ramorie task complete <task-id>`,
 	}
 
 	// Alt komutları ekle
@@ -78,8 +78,8 @@ func newTaskListCommand() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "Görevleri listele",
+		Use:     "list",
+		Short:   "Görevleri listele",
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Task service çağrısı
@@ -222,4 +222,4 @@ func newTaskDeleteCommand() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Onay almadan sil")
 
 	return cmd
-} 
+}

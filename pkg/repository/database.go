@@ -23,7 +23,7 @@ func NewDatabase(cfg *config.Config) (*gorm.DB, error) {
 	)
 
 	// Temporary debug - always show database info
-	fmt.Printf("🔧 Connecting to database: %s@%s:%d/%s\n", 
+	fmt.Printf("🔧 Connecting to database: %s@%s:%d/%s\n",
 		cfg.Database.User, cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 
 	// Set GORM logger level based on DEBUG env var
@@ -36,7 +36,7 @@ func NewDatabase(cfg *config.Config) (*gorm.DB, error) {
 		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database %s@%s:%d: %w", 
+		return nil, fmt.Errorf("failed to connect to database %s@%s:%d: %w",
 			cfg.Database.User, cfg.Database.Host, cfg.Database.Port, err)
 	}
 
@@ -52,10 +52,10 @@ func NewDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 	// Log successful connection only in DEBUG mode
 	if os.Getenv("DEBUG") == "true" {
-		fmt.Printf("✅ Database connected successfully (%s@%s:%d)\n", 
+		fmt.Printf("✅ Database connected successfully (%s@%s:%d)\n",
 			cfg.Database.User, cfg.Database.Host, cfg.Database.Port)
 	}
-	
+
 	return db, nil
 }
 
@@ -73,4 +73,4 @@ func autoMigrate(db *gorm.DB) error {
 		&models.TaskMemory{},
 		&models.MemoryTaskLink{},
 	)
-} 
+}

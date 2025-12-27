@@ -55,4 +55,4 @@ func (r *gormContextRepository) Update(context *models.Context) error {
 
 func (r *gormContextRepository) Delete(id uuid.UUID) error {
 	return r.db.Delete(&models.Context{}, id).Error
-} 
+}

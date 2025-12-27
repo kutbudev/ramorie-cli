@@ -54,7 +54,7 @@ func rememberCmd() *cli.Command {
 			if projectID == "" {
 				cfg, err := config.LoadConfig()
 				if err != nil || cfg.ActiveProjectID == "" {
-					return fmt.Errorf("no active project set. Use 'jbrain project use <id>' or specify --project")
+					return fmt.Errorf("no active project set. Use 'ramorie project use <id>' or specify --project")
 				}
 				projectID = cfg.ActiveProjectID
 			}

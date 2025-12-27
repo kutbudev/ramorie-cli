@@ -12,12 +12,12 @@ func NewProjectCommand() *cobra.Command {
 		Use:   "project",
 		Short: "Proje yönetimi komutları",
 		Long: `Projeleri oluşturma, listeleme, güncelleme ve silme işlemleri için komutlar.
-		
+
 Örnekler:
-  jbraincli project create "My New Project" --description "Proje açıklaması"
-  jbraincli project list
-  jbraincli project use <project-id>
-  jbraincli project show <project-id>`,
+  ramorie project create "My New Project" --description "Proje açıklaması"
+  ramorie project list
+  ramorie project use <project-id>
+  ramorie project show <project-id>`,
 	}
 
 	// Alt komutları ekle
@@ -119,4 +119,4 @@ func newProjectDeleteCommand() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Onay almadan sil")
 
 	return cmd
-} 
+}

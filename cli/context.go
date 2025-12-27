@@ -11,7 +11,7 @@ func NewContextCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "context",
 		Short: "Bağlam yönetimi komutları",
-		Long: `Bağlam oluşturma, listeleme ve yönetme komutları.`,
+		Long:  `Bağlam oluşturma, listeleme ve yönetme komutları.`,
 	}
 
 	cmd.AddCommand(newContextCreateCommand())
@@ -62,4 +62,4 @@ func newContextUseCommand() *cobra.Command {
 	}
 
 	return cmd
-} 
+}

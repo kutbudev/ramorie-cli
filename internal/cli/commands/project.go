@@ -43,7 +43,7 @@ func projectListCmd() *cli.Command {
 			}
 
 			if len(projects) == 0 {
-				fmt.Println("No projects found. Use 'jbrain project create' to add one.")
+				fmt.Println("No projects found. Use 'ramorie project create' to add one.")
 				return nil
 			}
 

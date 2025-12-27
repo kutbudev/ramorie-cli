@@ -25,7 +25,7 @@ print_error() {
 detect_platform() {
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
     ARCH=$(uname -m)
-    
+
     case $ARCH in
         x86_64)
             ARCH="amd64"
@@ -38,7 +38,7 @@ detect_platform() {
             exit 1
             ;;
     esac
-    
+
     case $OS in
         linux)
             PLATFORM="linux"
@@ -51,7 +51,7 @@ detect_platform() {
             exit 1
             ;;
     esac
-    
+
     print_status "Detected platform: ${PLATFORM}-${ARCH}"
 }
 
@@ -59,46 +59,46 @@ detect_platform() {
 get_latest_version() {
     print_status "Fetching latest release information..."
     LATEST_VERSION=$(curl -s "https://api.github.com/repos/terzigolu/josepshbrain-go/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    
+
     if [ -z "$LATEST_VERSION" ]; then
         print_error "Failed to get latest version"
         exit 1
     fi
-    
+
     print_status "Latest version: $LATEST_VERSION"
 }
 
 # Download and install
-install_jbraincli() {
-    BINARY_NAME="jbraincli-${PLATFORM}-${ARCH}"
+install_ramorie() {
+    BINARY_NAME="ramorie-${PLATFORM}-${ARCH}"
     DOWNLOAD_URL="https://github.com/terzigolu/josepshbrain-go/releases/latest/download/${BINARY_NAME}"
-    
-    print_status "Downloading jbraincli from: $DOWNLOAD_URL"
-    
+
+    print_status "Downloading ramorie from: $DOWNLOAD_URL"
+
     # Create temporary directory
     TMP_DIR=$(mktemp -d)
     cd "$TMP_DIR"
-    
+
     # Download binary
-    if ! curl -L -o jbraincli "$DOWNLOAD_URL"; then
-        print_error "Failed to download jbraincli"
+    if ! curl -L -o ramorie "$DOWNLOAD_URL"; then
+        print_error "Failed to download ramorie"
         exit 1
     fi
-    
+
     # Make executable
-    chmod +x jbraincli
-    
+    chmod +x ramorie
+
     # Install to /usr/local/bin
     INSTALL_DIR="/usr/local/bin"
-    
+
     if [ -w "$INSTALL_DIR" ]; then
-        mv jbraincli "$INSTALL_DIR/"
-        print_status "Installed jbraincli to $INSTALL_DIR"
+        mv ramorie "$INSTALL_DIR/"
+        print_status "Installed ramorie to $INSTALL_DIR"
     else
-        print_status "Installing jbraincli to $INSTALL_DIR (requires sudo)"
-        sudo mv jbraincli "$INSTALL_DIR/"
+        print_status "Installing ramorie to $INSTALL_DIR (requires sudo)"
+        sudo mv ramorie "$INSTALL_DIR/"
     fi
-    
+
     # Clean up
     cd - > /dev/null
     rm -rf "$TMP_DIR"
@@ -106,30 +106,30 @@ install_jbraincli() {
 
 # Verify installation
 verify_installation() {
-    if command -v jbraincli >/dev/null 2>&1; then
-        print_status "✅ jbraincli installed successfully!"
-        print_status "Version: $(jbraincli --version 2>/dev/null || echo 'unknown')"
+    if command -v ramorie >/dev/null 2>&1; then
+        print_status "✅ ramorie installed successfully!"
+        print_status "Version: $(ramorie --version 2>/dev/null || echo 'unknown')"
         echo
         echo "🚀 Get started with:"
-        echo "   jbraincli setup register"
+        echo "   ramorie setup login"
         echo
         echo "📚 For help:"
-        echo "   jbraincli --help"
+        echo "   ramorie --help"
     else
-        print_error "Installation failed. jbraincli not found in PATH."
+        print_error "Installation failed. ramorie not found in PATH."
         exit 1
     fi
 }
 
 # Main execution
 main() {
-    echo "🧠 JosephsBrain CLI Installer"
-    echo "============================"
+    echo "🧠 Ramorie CLI Installer"
+    echo "======================="
     echo
-    
+
     detect_platform
     get_latest_version
-    install_jbraincli
+    install_ramorie
     verify_installation
 }
 
@@ -140,4 +140,4 @@ if [ -z "$BASH_VERSION" ]; then
 fi
 
 # Run main function
-main "$@" 
+main "$@"

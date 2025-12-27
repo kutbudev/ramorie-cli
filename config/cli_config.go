@@ -7,7 +7,10 @@ import (
 )
 
 const (
-	configDirName      = ".jbrain"
+	// New config directory name
+	configDirName = ".ramorie"
+	// Legacy config directory name (for backward compatibility)
+	configDirLegacy    = ".jbrain"
 	configFileName     = "config.json"
 	DefaultApiURL      = "https://jbraincli-go-backend-production.up.railway.app"
 	DefaultAuthURL     = "https://jbraincli-go-backend-production.up.railway.app/auth"
@@ -57,38 +60,68 @@ func SaveCliConfig(cfg CliConfig) error {
 	return os.WriteFile(configPath, data, 0644)
 }
 
-// LoadCliConfig loads the CLI configuration. If it doesn't exist, it creates a default one.
+// getLegacyConfigPath returns the full path to the legacy configuration file.
+func getLegacyConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, configDirLegacy, configFileName), nil
+}
+
+// LoadCliConfig loads the CLI configuration from new location, falling back to legacy.
+// If config is found in legacy location, it will be migrated to the new location.
 func LoadCliConfig() (CliConfig, error) {
 	configPath, err := getConfigPath()
 	if err != nil {
 		return CliConfig{}, err
 	}
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Config file does not exist, create a default one.
-		defaultConfig := CliConfig{
-			ApiURL: DefaultApiURL,
-		}
-		if err := SaveCliConfig(defaultConfig); err != nil {
+	// Try new location first
+	if _, err := os.Stat(configPath); err == nil {
+		data, err := os.ReadFile(configPath)
+		if err != nil {
 			return CliConfig{}, err
 		}
-		return defaultConfig, nil
+		var cfg CliConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return CliConfig{}, err
+		}
+		if cfg.ApiURL == "" {
+			cfg.ApiURL = DefaultApiURL
+		}
+		return cfg, nil
 	}
 
-	data, err := os.ReadFile(configPath)
+	// Try legacy location
+	legacyPath, err := getLegacyConfigPath()
 	if err != nil {
 		return CliConfig{}, err
 	}
 
-	var cfg CliConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if _, err := os.Stat(legacyPath); err == nil {
+		data, err := os.ReadFile(legacyPath)
+		if err != nil {
+			return CliConfig{}, err
+		}
+		var cfg CliConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return CliConfig{}, err
+		}
+		if cfg.ApiURL == "" {
+			cfg.ApiURL = DefaultApiURL
+		}
+		// Migrate to new location
+		_ = SaveCliConfig(cfg) // Best effort migration
+		return cfg, nil
+	}
+
+	// Config file does not exist, create a default one.
+	defaultConfig := CliConfig{
+		ApiURL: DefaultApiURL,
+	}
+	if err := SaveCliConfig(defaultConfig); err != nil {
 		return CliConfig{}, err
 	}
-
-	// If ApiURL is missing from an existing config, set it to default.
-	if cfg.ApiURL == "" {
-		cfg.ApiURL = DefaultApiURL
-	}
-
-	return cfg, nil
-} 
+	return defaultConfig, nil
+}

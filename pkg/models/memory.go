@@ -9,19 +9,19 @@ import (
 
 // Memory represents the memories table
 type Memory struct {
-	ID        uuid.UUID      `json:"id" gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
-	Content   string         `json:"content" gorm:"not null"`
-	ProjectID *uuid.UUID     `json:"project_id,omitempty" gorm:"type:uuid"`
-	ContextID *uuid.UUID     `json:"context_id,omitempty" gorm:"type:uuid"`
-	CreatedAt time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID        uuid.UUID  `json:"id" gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
+	Content   string     `json:"content" gorm:"not null"`
+	ProjectID *uuid.UUID `json:"project_id,omitempty" gorm:"type:uuid"`
+	ContextID *uuid.UUID `json:"context_id,omitempty" gorm:"type:uuid"`
+	CreatedAt time.Time  `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt time.Time  `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 
 	// Foreign Key Relations
 	Project *Project `json:"project,omitempty" gorm:"foreignKey:ProjectID;constraint:OnDelete:SET NULL"`
 	Context *Context `json:"context,omitempty" gorm:"foreignKey:ContextID;constraint:OnDelete:SET NULL"`
 
 	// Many-to-Many Relations
-	Tags []*Tag `json:"tags,omitempty" gorm:"many2many:memory_tags"`
+	Tags  []*Tag        `json:"tags,omitempty" gorm:"many2many:memory_tags"`
 	Tasks []*TaskMemory `json:"tasks,omitempty" gorm:"foreignKey:MemoryID"`
 }
 
@@ -40,13 +40,13 @@ type MemoryItem struct {
 	Context *Context `json:"context,omitempty" gorm:"foreignKey:ContextID;constraint:OnDelete:SET NULL"`
 
 	// Many-to-Many Relations
-	Tags []*Tag `json:"tags,omitempty" gorm:"many2many:memory_item_tags"`
+	Tags      []*Tag            `json:"tags,omitempty" gorm:"many2many:memory_item_tags"`
 	TaskLinks []*MemoryTaskLink `json:"task_links,omitempty" gorm:"foreignKey:MemoryID"`
 }
 
 // TaskMemory represents the task_memories table (memory -> task relation)
 type TaskMemory struct {
-	ID                    uuid.UUID `json:"id" gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
+	ID                   uuid.UUID `json:"id" gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
 	TaskID               uuid.UUID `json:"task_id" gorm:"not null;type:uuid;uniqueIndex:idx_task_memory"`
 	MemoryID             uuid.UUID `json:"memory_id" gorm:"not null;type:uuid;uniqueIndex:idx_task_memory"`
 	RelevanceScore       float32   `json:"relevance_score" gorm:"default:0"`
@@ -88,4 +88,4 @@ func (TaskMemory) TableName() string {
 
 func (MemoryTaskLink) TableName() string {
 	return "memory_task_links"
-} 
+}

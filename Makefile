@@ -1,7 +1,7 @@
 .PHONY: build install clean test release build-all version help
 
 # Variables
-BINARY_NAME = jbraincli
+BINARY_NAME = ramorie
 BUILD_DIR = ./bin
 VERSION = $(shell git describe --tags --dirty --always 2>/dev/null || echo "dev")
 LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
@@ -15,19 +15,19 @@ build:
 build-all: clean
 	@echo "Building $(BINARY_NAME) v$(VERSION) for all platforms..."
 	@mkdir -p $(BUILD_DIR)
-	
+
 	# Linux
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/jbraincli
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/jbraincli
-	
+
 	# macOS
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/jbraincli
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/jbraincli
-	
+
 	# Windows
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/jbraincli
 	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-arm64.exe ./cmd/jbraincli
-	
+
 	@echo "✅ All binaries built successfully in $(BUILD_DIR)/"
 
 # Install the CLI globally
@@ -101,7 +101,7 @@ setup-dev:
 
 # Show help
 help:
-	@echo "🧠 JosephsBrain CLI Build Commands"
+	@echo "🧠 Ramorie CLI Build Commands"
 	@echo "==================================="
 	@echo ""
 	@echo "Building:"

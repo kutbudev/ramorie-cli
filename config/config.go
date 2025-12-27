@@ -30,7 +30,7 @@ func LoadConfig() *Config {
 	if host == "" || port == "" || user == "" || dbname == "" {
 		log.Fatal("One or more required database environment variables (PG_HOST, PG_PORT, PG_USER, PG_DATABASE) are not set.")
 	}
-	
+
 	if sslmode == "" {
 		sslmode = "disable"
 	}
@@ -41,4 +41,4 @@ func LoadConfig() *Config {
 	return &Config{
 		DB_DSN: dsn,
 	}
-} 
+}

@@ -35,11 +35,11 @@ type ServerConfig struct {
 func Load() (*Config, error) {
 	// Try to load .env file from multiple locations (silently)
 	possibleEnvPaths := []string{
-		".env",                                                    // Current directory
-		"/Users/terzigolu/GitHub/josepshbrain-go/.env",           // Project directory
-		"/Users/terzigolu/.env",                                   // Home directory
+		".env", // Current directory
+		"/Users/terzigolu/GitHub/josepshbrain-go/.env", // Project directory
+		"/Users/terzigolu/.env",                        // Home directory
 	}
-	
+
 	envLoaded := false
 	for _, path := range possibleEnvPaths {
 		if err := godotenv.Load(path); err == nil {
@@ -47,7 +47,7 @@ func Load() (*Config, error) {
 			break // Successfully loaded, stop trying
 		}
 	}
-	
+
 	// Initialize viper
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -82,13 +82,13 @@ func Load() (*Config, error) {
 		fmt.Printf("Working directory: %s\n", getWorkingDir())
 		fmt.Printf("Env file loaded: %v\n", envLoaded)
 		fmt.Printf("Config file found: %v\n", configFileFound)
-		
+
 		// Debug actual config values
 		fmt.Printf("DB Host: %s\n", viper.GetString("database.host"))
 		fmt.Printf("DB Port: %d\n", viper.GetInt("database.port"))
 		fmt.Printf("DB Name: %s\n", viper.GetString("database.name"))
 		fmt.Printf("DB User: %s\n", viper.GetString("database.user"))
-		
+
 		if !envLoaded && !configFileFound {
 			fmt.Println("Config file not found, using environment variables and defaults")
 		} else if envLoaded {
@@ -128,4 +128,4 @@ func getWorkingDir() string {
 		return wd
 	}
 	return "unknown"
-} 
+}

@@ -86,7 +86,7 @@ func ServeStdio(client *api.Client) error {
 					"tools": map[string]interface{}{},
 				},
 				"serverInfo": map[string]interface{}{
-					"name":    "jbrain",
+					"name":    "ramorie",
 					"version": "0.1.0",
 				},
 			}

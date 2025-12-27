@@ -21,4 +21,4 @@ type Context struct {
 	// One-to-Many Relations
 	Tasks    []*Task   `json:"tasks,omitempty" gorm:"foreignKey:ContextID;constraint:OnDelete:SET NULL"`
 	Memories []*Memory `json:"memories,omitempty" gorm:"foreignKey:ContextID;constraint:OnDelete:SET NULL"`
-} 
+}

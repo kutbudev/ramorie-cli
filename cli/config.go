@@ -11,7 +11,7 @@ func NewConfigCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Konfigürasyon yönetimi komutları",
-		Long: `Uygulama konfigürasyonunu görüntüleme ve yönetme komutları.`,
+		Long:  `Uygulama konfigürasyonunu görüntüleme ve yönetme komutları.`,
 	}
 
 	cmd.AddCommand(newConfigShowCommand())
@@ -47,4 +47,4 @@ func newConfigSetCommand() *cobra.Command {
 	}
 
 	return cmd
-} 
+}

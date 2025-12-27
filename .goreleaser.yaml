@@ -1,16 +1,16 @@
-# GoReleaser configuration for jbraincli CLI
+# GoReleaser configuration for Ramorie CLI
 version: 2
 
-project_name: jbraincli
+project_name: ramorie
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: jbraincli
+  - id: ramorie
     main: ./cmd/jbraincli
-    binary: jbraincli
+    binary: ramorie
     env:
       - CGO_ENABLED=0
     goos:
@@ -27,7 +27,7 @@ builds:
       - -X main.date={{.Date}}
 
 archives:
-  - id: jbraincli
+  - id: ramorie
     format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
@@ -49,19 +49,19 @@ changelog:
       - "^chore:"
 
 brews:
-  - name: jbraincli
+  - name: ramorie
     repository:
       owner: terzigolu
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://josephsbrain.com"
-    description: "AI-powered task and memory management CLI for JosephsBrain"
+    homepage: "https://ramorie.com"
+    description: "AI-powered task and memory management CLI"
     license: "MIT"
     install: |
-      bin.install "jbraincli"
+      bin.install "ramorie"
     test: |
-      system "#{bin}/jbraincli", "--version"
+      system "#{bin}/ramorie", "--version"
 
 release:
   github:

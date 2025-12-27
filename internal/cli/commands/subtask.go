@@ -77,7 +77,7 @@ func subtaskAddCmd() *cli.Command {
 		ArgsUsage: "[task-id] [description]",
 		Action: func(c *cli.Context) error {
 			if c.NArg() < 2 {
-				return fmt.Errorf("usage: jbrain subtask add <task-id> <description>")
+				return fmt.Errorf("usage: ramorie subtask add <task-id> <description>")
 			}
 
 			taskID := c.Args().Get(0)
@@ -118,7 +118,7 @@ func subtaskCompleteCmd() *cli.Command {
 		ArgsUsage: "[task-id] [subtask-id]",
 		Action: func(c *cli.Context) error {
 			if c.NArg() < 2 {
-				return fmt.Errorf("usage: jbrain subtask complete <task-id> <subtask-id>")
+				return fmt.Errorf("usage: ramorie subtask complete <task-id> <subtask-id>")
 			}
 
 			taskID := c.Args().Get(0)
@@ -149,7 +149,7 @@ func subtaskDeleteCmd() *cli.Command {
 		ArgsUsage: "[task-id] [subtask-id]",
 		Action: func(c *cli.Context) error {
 			if c.NArg() < 2 {
-				return fmt.Errorf("usage: jbrain subtask delete <task-id> <subtask-id>")
+				return fmt.Errorf("usage: ramorie subtask delete <task-id> <subtask-id>")
 			}
 
 			taskID := c.Args().Get(0)

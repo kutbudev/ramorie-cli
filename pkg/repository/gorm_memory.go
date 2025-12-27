@@ -53,12 +53,12 @@ func (r *gormMemoryRepository) Delete(id uuid.UUID) error {
 func (r *gormMemoryRepository) Search(query string) ([]models.Memory, error) {
 	var memories []models.Memory
 	searchTerm := "%" + strings.ToLower(query) + "%"
-	
+
 	err := r.db.Preload("Tags").Where(
 		"LOWER(content) LIKE ? OR LOWER(title) LIKE ?",
 		searchTerm, searchTerm,
 	).Order("created_at DESC").Find(&memories).Error
-	
+
 	return memories, err
 }
 
@@ -70,7 +70,7 @@ func (r *gormMemoryRepository) GetByTags(tags []string) ([]models.Memory, error)
 		Where("tags.name IN ?", tags).
 		Group("memories.id").
 		Order("memories.created_at DESC")
-	
+
 	err := query.Find(&memories).Error
 	return memories, err
-} 
+}

@@ -25,7 +25,7 @@ func NewAPIService() (*APIService, error) {
 	}
 
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("API key not set. Please run 'jbraincli setup' to configure it")
+		return nil, fmt.Errorf("API key not set. Please run 'ramorie setup' to configure it")
 	}
 
 	return &APIService{
@@ -164,7 +164,7 @@ func (s *APIService) UpdateTaskStatus(taskID, status string) (*models.Task, erro
 	return &models.Task{}, nil
 }
 
-func (s *APIService) DeleteTask(taskID string) (error) {
+func (s *APIService) DeleteTask(taskID string) error {
 	// This is a placeholder
 	return nil
 }
@@ -172,4 +172,4 @@ func (s *APIService) DeleteTask(taskID string) (error) {
 func (s *APIService) CreateAnnotation(taskID, content string) (*models.Annotation, error) {
 	// This is a placeholder
 	return &models.Annotation{}, nil
-} 
+}

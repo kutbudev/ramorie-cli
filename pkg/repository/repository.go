@@ -14,4 +14,4 @@ func NewRepository(db *gorm.DB) *Repository {
 		Tag:        NewTagRepository(db),
 		Annotation: NewAnnotationRepository(db),
 	}
-} 
+}

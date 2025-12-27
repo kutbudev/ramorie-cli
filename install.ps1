@@ -1,4 +1,4 @@
-# JosephsBrain CLI Windows Installer
+# Ramorie CLI Windows Installer
 param(
     [string]$InstallPath = "$env:USERPROFILE\bin"
 )
@@ -50,32 +50,32 @@ function Get-LatestVersion {
     }
 }
 
-function Install-JbrainCLI {
+function Install-Ramorie {
     param([string]$Architecture)
-    
-    $binaryName = "jbraincli-windows-$Architecture.exe"
+
+    $binaryName = "ramorie-windows-$Architecture.exe"
     $downloadUrl = "https://github.com/terzigolu/josepshbrain-go/releases/latest/download/$binaryName"
-    
-    Write-Status "Downloading jbraincli from: $downloadUrl"
-    
+
+    Write-Status "Downloading ramorie from: $downloadUrl"
+
     # Create install directory if it doesn't exist
     if (!(Test-Path $InstallPath)) {
         Write-Status "Creating directory: $InstallPath"
         New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
     }
-    
-    $destinationPath = Join-Path $InstallPath "jbraincli.exe"
-    
+
+    $destinationPath = Join-Path $InstallPath "ramorie.exe"
+
     try {
         # Download the binary
         Invoke-WebRequest -Uri $downloadUrl -OutFile $destinationPath
-        Write-Status "Downloaded jbraincli to: $destinationPath"
+        Write-Status "Downloaded ramorie to: $destinationPath"
     }
     catch {
-        Write-Error "Failed to download jbraincli: $_"
+        Write-Error "Failed to download ramorie: $_"
         exit 1
     }
-    
+
     # Add to PATH if not already there
     $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if ($currentPath -notlike "*$InstallPath*") {
@@ -83,16 +83,16 @@ function Install-JbrainCLI {
         [Environment]::SetEnvironmentVariable("PATH", "$currentPath;$InstallPath", "User")
         Write-Status "PATH updated. You may need to restart your terminal."
     }
-    
+
     return $destinationPath
 }
 
 function Verify-Installation {
     param([string]$BinaryPath)
-    
+
     if (Test-Path $BinaryPath) {
-        Write-Status "✅ jbraincli installed successfully!"
-        
+        Write-Status "✅ ramorie installed successfully!"
+
         # Try to get version
         try {
             $version = & $BinaryPath --version 2>$null
@@ -103,13 +103,13 @@ function Verify-Installation {
         catch {
             Write-Status "Version: unknown"
         }
-        
+
         Write-Host ""
         Write-Host "🚀 Get started with:"
-        Write-Host "   jbraincli setup register"
+        Write-Host "   ramorie setup login"
         Write-Host ""
         Write-Host "📚 For help:"
-        Write-Host "   jbraincli --help"
+        Write-Host "   ramorie --help"
         Write-Host ""
         Write-Host "💡 Note: You may need to restart your terminal for PATH changes to take effect."
     }
@@ -121,15 +121,15 @@ function Verify-Installation {
 
 # Main execution
 function Main {
-    Write-Host "🧠 JosephsBrain CLI Windows Installer" -ForegroundColor Cyan
-    Write-Host "====================================" -ForegroundColor Cyan
+    Write-Host "🧠 Ramorie CLI Windows Installer" -ForegroundColor Cyan
+    Write-Host "================================" -ForegroundColor Cyan
     Write-Host ""
-    
+
     $architecture = Detect-Architecture
     Write-Status "Detected architecture: $architecture"
-    
+
     $version = Get-LatestVersion
-    $binaryPath = Install-JbrainCLI -Architecture $architecture
+    $binaryPath = Install-Ramorie -Architecture $architecture
     Verify-Installation -BinaryPath $binaryPath
 }
 
@@ -140,4 +140,4 @@ try {
 catch {
     Write-Error "Installation failed: $_"
     exit 1
-} 
+}
