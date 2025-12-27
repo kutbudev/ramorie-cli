@@ -502,6 +502,14 @@ func (c *Client) CreateMemory(projectID, content string) (*models.Memory, error)
 	return &memory, nil
 }
 
+// MemoriesListResponse represents the paginated response from memories endpoint
+type MemoriesListResponse struct {
+	Memories []models.Memory `json:"memories"`
+	Total    int             `json:"total"`
+	Limit    int             `json:"limit"`
+	Offset   int             `json:"offset"`
+}
+
 func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error) {
 	endpoint := "/memories"
 	params := url.Values{}
@@ -520,12 +528,12 @@ func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error)
 		return nil, err
 	}
 
-	var memories []models.Memory
-	if err := json.Unmarshal(respBody, &memories); err != nil {
+	var response MemoriesListResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return memories, nil
+	return response.Memories, nil
 }
 
 func (c *Client) DeleteMemory(id string) error {
