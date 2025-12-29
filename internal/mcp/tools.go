@@ -56,6 +56,21 @@ func ToolDefinitions() []toolDef {
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
 		},
 		{
+			Name:        "stop_task",
+			Description: "Görevi duraklat (aktif görevi temizler, IN_PROGRESS kalır)",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
+		},
+		{
+			Name:        "get_active_task",
+			Description: "Şu anda aktif olan görevi getir (memory auto-link için)",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+		{
+			Name:        "delete_task",
+			Description: "Görevi sil",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
+		},
+		{
 			Name:        "update_task_status",
 			Description: "Görev durumunu güncelle",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}, "status": map[string]interface{}{"type": "string"}}, "required": []string{"taskId", "status"}},
@@ -101,6 +116,21 @@ func ToolDefinitions() []toolDef {
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"projectName": map[string]interface{}{"type": "string"}}, "required": []string{"projectName"}},
 		},
 		{
+			Name:        "get_project",
+			Description: "Proje detaylarını getir",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"projectId": map[string]interface{}{"type": "string"}}, "required": []string{"projectId"}},
+		},
+		{
+			Name:        "update_project",
+			Description: "Projeyi güncelle",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"projectId": map[string]interface{}{"type": "string"}, "name": map[string]interface{}{"type": "string"}, "description": map[string]interface{}{"type": "string"}}, "required": []string{"projectId"}},
+		},
+		{
+			Name:        "delete_project",
+			Description: "Projeyi sil",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"projectId": map[string]interface{}{"type": "string"}}, "required": []string{"projectId"}},
+		},
+		{
 			Name:        "add_memory",
 			Description: "Yeni bir hafıza/not ekle",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"content": map[string]interface{}{"type": "string"}, "project": map[string]interface{}{"type": "string"}}, "required": []string{"content"}},
@@ -128,6 +158,16 @@ func ToolDefinitions() []toolDef {
 		{
 			Name:        "get_memory",
 			Description: "Hafıza detaylarını getir",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"memoryId": map[string]interface{}{"type": "string"}}, "required": []string{"memoryId"}},
+		},
+		{
+			Name:        "update_memory",
+			Description: "Hafızayı güncelle",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"memoryId": map[string]interface{}{"type": "string"}, "content": map[string]interface{}{"type": "string"}, "tags": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "required": []string{"memoryId"}},
+		},
+		{
+			Name:        "delete_memory",
+			Description: "Hafızayı sil",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"memoryId": map[string]interface{}{"type": "string"}}, "required": []string{"memoryId"}},
 		},
 		{
@@ -220,6 +260,27 @@ func ToolDefinitions() []toolDef {
 			Name:        "activate_context_pack",
 			Description: "Bir context pack'i aktif (published) yap",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"packId": map[string]interface{}{"type": "string"}}, "required": []string{"packId"}},
+		},
+		{
+			Name:        "get_active_context_pack",
+			Description: "Aktif context pack'i getir (şu anki çalışma bağlamı)",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+		// Organization tools
+		{
+			Name:        "list_organizations",
+			Description: "Organizasyonları listele",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+		{
+			Name:        "get_organization",
+			Description: "Organizasyon detaylarını getir",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"orgId": map[string]interface{}{"type": "string"}}, "required": []string{"orgId"}},
+		},
+		{
+			Name:        "create_organization",
+			Description: "Yeni organizasyon oluştur",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"name": map[string]interface{}{"type": "string"}, "description": map[string]interface{}{"type": "string"}}, "required": []string{"name"}},
 		},
 		// Decision tools - for agents to record architectural decisions
 		{
@@ -398,6 +459,31 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 		}
 		return map[string]interface{}{"ok": true}, nil
 
+	case "stop_task":
+		taskID, _ := args["taskId"].(string)
+		taskID = strings.TrimSpace(taskID)
+		if taskID == "" {
+			return nil, errors.New("taskId is required")
+		}
+		if err := client.StopTask(taskID); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true}, nil
+
+	case "get_active_task":
+		return client.GetActiveTask()
+
+	case "delete_task":
+		taskID, _ := args["taskId"].(string)
+		taskID = strings.TrimSpace(taskID)
+		if taskID == "" {
+			return nil, errors.New("taskId is required")
+		}
+		if err := client.DeleteTask(taskID); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true, "deleted": taskID}, nil
+
 	case "update_task_status":
 		taskID, _ := args["taskId"].(string)
 		status, _ := args["status"].(string)
@@ -500,6 +586,40 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 		}
 		return nil, errors.New("project not found")
 
+	case "get_project":
+		projectID, _ := args["projectId"].(string)
+		projectID = strings.TrimSpace(projectID)
+		if projectID == "" {
+			return nil, errors.New("projectId is required")
+		}
+		return client.GetProject(projectID)
+
+	case "update_project":
+		projectID, _ := args["projectId"].(string)
+		projectID = strings.TrimSpace(projectID)
+		if projectID == "" {
+			return nil, errors.New("projectId is required")
+		}
+		updates := make(map[string]interface{})
+		if name, ok := args["name"].(string); ok && strings.TrimSpace(name) != "" {
+			updates["name"] = strings.TrimSpace(name)
+		}
+		if description, ok := args["description"].(string); ok {
+			updates["description"] = strings.TrimSpace(description)
+		}
+		return client.UpdateProject(projectID, updates)
+
+	case "delete_project":
+		projectID, _ := args["projectId"].(string)
+		projectID = strings.TrimSpace(projectID)
+		if projectID == "" {
+			return nil, errors.New("projectId is required")
+		}
+		if err := client.DeleteProject(projectID); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true, "deleted": projectID}, nil
+
 	case "add_memory":
 		content, _ := args["content"].(string)
 		content = strings.TrimSpace(content)
@@ -551,6 +671,38 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 			return nil, errors.New("memoryId is required")
 		}
 		return client.GetMemory(memoryID)
+
+	case "update_memory":
+		memoryID, _ := args["memoryId"].(string)
+		memoryID = strings.TrimSpace(memoryID)
+		if memoryID == "" {
+			return nil, errors.New("memoryId is required")
+		}
+		updates := make(map[string]interface{})
+		if content, ok := args["content"].(string); ok && strings.TrimSpace(content) != "" {
+			updates["content"] = strings.TrimSpace(content)
+		}
+		if tagsRaw, ok := args["tags"].([]interface{}); ok {
+			var tags []string
+			for _, t := range tagsRaw {
+				if s, ok := t.(string); ok {
+					tags = append(tags, strings.TrimSpace(s))
+				}
+			}
+			updates["tags"] = tags
+		}
+		return client.UpdateMemory(memoryID, updates)
+
+	case "delete_memory":
+		memoryID, _ := args["memoryId"].(string)
+		memoryID = strings.TrimSpace(memoryID)
+		if memoryID == "" {
+			return nil, errors.New("memoryId is required")
+		}
+		if err := client.DeleteMemory(memoryID); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true, "deleted": memoryID}, nil
 
 	case "get_task_memories":
 		taskID, _ := args["taskId"].(string)
@@ -996,6 +1148,30 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 			return nil, err
 		}
 		return map[string]interface{}{"ok": true, "pack": pack}, nil
+
+	case "get_active_context_pack":
+		return client.GetActiveContextPack()
+
+	// Organization tools
+	case "list_organizations":
+		return client.ListOrganizations()
+
+	case "get_organization":
+		orgID, _ := args["orgId"].(string)
+		orgID = strings.TrimSpace(orgID)
+		if orgID == "" {
+			return nil, errors.New("orgId is required")
+		}
+		return client.GetOrganization(orgID)
+
+	case "create_organization":
+		name, _ := args["name"].(string)
+		description, _ := args["description"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, errors.New("name is required")
+		}
+		return client.CreateOrganization(name, strings.TrimSpace(description))
 
 	// Decision tools - for agents to record architectural decisions
 	case "list_decisions":

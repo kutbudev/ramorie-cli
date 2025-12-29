@@ -544,6 +544,19 @@ func (c *Client) DeleteMemory(id string) error {
 	return err
 }
 
+func (c *Client) UpdateMemory(id string, updates map[string]interface{}) (*models.Memory, error) {
+	respBody, err := c.makeRequest("PUT", "/memories/"+id, updates)
+	if err != nil {
+		return nil, err
+	}
+
+	var memory models.Memory
+	if err := json.Unmarshal(respBody, &memory); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal memory: %w", err)
+	}
+	return &memory, nil
+}
+
 func (c *Client) GetMemory(id string) (*models.Memory, error) {
 	respBody, err := c.makeRequest("GET", "/memories/"+id, nil)
 	if err != nil {
@@ -1082,4 +1095,66 @@ func (c *Client) DeleteDecision(id string) error {
 	endpoint := fmt.Sprintf("/decisions/%s", id)
 	_, err := c.makeRequest("DELETE", endpoint, nil)
 	return err
+}
+
+// Organization API methods
+
+// Organization represents an organization
+type Organization struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	OwnerID     string    `json:"owner_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ListOrganizations lists all organizations for the user
+func (c *Client) ListOrganizations() ([]Organization, error) {
+	respBody, err := c.makeRequest("GET", "/organizations", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var orgs []Organization
+	if err := json.Unmarshal(respBody, &orgs); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal organizations: %w", err)
+	}
+	return orgs, nil
+}
+
+// GetOrganization gets a specific organization by ID
+func (c *Client) GetOrganization(id string) (*Organization, error) {
+	endpoint := fmt.Sprintf("/organizations/%s", id)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var org Organization
+	if err := json.Unmarshal(respBody, &org); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
+	}
+	return &org, nil
+}
+
+// CreateOrganization creates a new organization
+func (c *Client) CreateOrganization(name, description string) (*Organization, error) {
+	reqBody := map[string]interface{}{
+		"name": name,
+	}
+	if description != "" {
+		reqBody["description"] = description
+	}
+
+	respBody, err := c.makeRequest("POST", "/organizations", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var org Organization
+	if err := json.Unmarshal(respBody, &org); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
+	}
+	return &org, nil
 }
