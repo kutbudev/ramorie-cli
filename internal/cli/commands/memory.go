@@ -9,6 +9,7 @@ import (
 	"github.com/terzigolu/josepshbrain-go/internal/config"
 	"github.com/terzigolu/josepshbrain-go/internal/constants"
 	apierrors "github.com/terzigolu/josepshbrain-go/internal/errors"
+	"github.com/terzigolu/josepshbrain-go/internal/models"
 	"github.com/urfave/cli/v2"
 )
 
@@ -106,14 +107,31 @@ func memoriesCmd() *cli.Command {
 				Aliases: []string{"p"},
 				Usage:   "Filter by project ID. If not provided, lists for the active project.",
 			},
+			&cli.BoolFlag{
+				Name:    "all",
+				Aliases: []string{"a"},
+				Usage:   "List memories from all projects (including organization projects)",
+			},
+			&cli.BoolFlag{
+				Name:  "org-only",
+				Usage: "Only show memories from organization projects",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			projectID := c.String("project")
-			if projectID == "" {
+			showAll := c.Bool("all")
+			orgOnly := c.Bool("org-only")
+
+			if !showAll && projectID == "" {
 				cfg, err := config.LoadConfig()
 				if err == nil && cfg.ActiveProjectID != "" {
 					projectID = cfg.ActiveProjectID
 				}
+			}
+
+			// If --all flag, don't filter by project
+			if showAll {
+				projectID = ""
 			}
 
 			client := api.NewClient()
@@ -123,16 +141,31 @@ func memoriesCmd() *cli.Command {
 				return err
 			}
 
+			// Filter by org-only if requested
+			if orgOnly {
+				var filtered []models.Memory
+				for _, m := range memories {
+					if m.Project != nil && m.Project.Organization != nil {
+						filtered = append(filtered, m)
+					}
+				}
+				memories = filtered
+			}
+
 			if len(memories) == 0 {
 				fmt.Println("No memories found.")
 				return nil
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tCONTENT")
-			fmt.Fprintln(w, "--\t-------")
+			fmt.Fprintln(w, "ID\tORG\tCONTENT")
+			fmt.Fprintln(w, "--\t---\t-------")
 			for _, m := range memories {
-				fmt.Fprintf(w, "%s\t%s\n", m.ID.String()[:8], truncateString(m.Content, 70))
+				orgName := "-"
+				if m.Project != nil && m.Project.Organization != nil {
+					orgName = m.Project.Organization.Name
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\n", m.ID.String()[:8], truncateString(orgName, 15), truncateString(m.Content, 55))
 			}
 			w.Flush()
 			return nil

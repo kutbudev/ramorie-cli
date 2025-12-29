@@ -6,15 +6,27 @@ import (
 	"github.com/google/uuid"
 )
 
+// Organization represents an organization
+type Organization struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Slug        string    `json:"slug"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // Project represents a project in the system
 type Project struct {
-	ID            uuid.UUID              `json:"id"`
-	Name          string                 `json:"name"`
-	Description   string                 `json:"description"`
-	Configuration map[string]interface{} `json:"configuration,omitempty"`
-	IsActive      bool                   `json:"is_active"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	ID             uuid.UUID              `json:"id"`
+	Name           string                 `json:"name"`
+	Description    string                 `json:"description"`
+	Configuration  map[string]interface{} `json:"configuration,omitempty"`
+	IsActive       bool                   `json:"is_active"`
+	OrganizationID *uuid.UUID             `json:"organization_id,omitempty"`
+	Organization   *Organization          `json:"organization,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // Task represents a task in the system
@@ -37,7 +49,7 @@ type Memory struct {
 	ID           uuid.UUID   `json:"id"`
 	ProjectID    uuid.UUID   `json:"project_id"`
 	Content      string      `json:"content"`
-	Tags         interface{} `json:"tags"` // Can be array or object from backend
+	Tags         interface{} `json:"tags"`                     // Can be array or object from backend
 	LinkedTaskID *uuid.UUID  `json:"linked_task_id,omitempty"` // Active task it was linked to
 	Project      *Project    `json:"project,omitempty"`
 	CreatedAt    time.Time   `json:"created_at"`
