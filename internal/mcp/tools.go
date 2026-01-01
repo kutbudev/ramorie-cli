@@ -134,8 +134,41 @@ func ToolDefinitions() []toolDef {
 		},
 		{
 			Name:        "recall",
-			Description: "🟡 COMMON | Search memories by keyword. Use to find past knowledge.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"term": map[string]interface{}{"type": "string", "description": "Search term"}, "limit": map[string]interface{}{"type": "number"}}, "required": []string{"term"}},
+			Description: "🟡 COMMON | Advanced memory search with multi-word support, filters, and relations. Supports: OR search (space-separated), AND search (comma-separated), project/tag filtering.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"term": map[string]interface{}{
+						"type":        "string",
+						"description": "Search terms. Space = OR (any match), comma = AND (all must match). Example: 'traefik docker' finds either, 'traefik,docker' finds both.",
+					},
+					"project": map[string]interface{}{
+						"type":        "string",
+						"description": "Filter by project name or ID",
+					},
+					"tag": map[string]interface{}{
+						"type":        "string",
+						"description": "Filter by tag name",
+					},
+					"linked_task": map[string]interface{}{
+						"type":        "boolean",
+						"description": "If true, only return memories linked to a task",
+					},
+					"include_relations": map[string]interface{}{
+						"type":        "boolean",
+						"description": "If true, include full project and task details (default: true)",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Max results (default: 20)",
+					},
+					"min_score": map[string]interface{}{
+						"type":        "number",
+						"description": "Minimum relevance score 0-100 (default: 0)",
+					},
+				},
+				"required": []string{"term"},
+			},
 		},
 
 		// ============================================================================
@@ -480,34 +513,183 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 		if term == "" {
 			return nil, errors.New("term is required")
 		}
+
+		// Parse options
 		limit := toInt(args["limit"])
 		if limit == 0 {
-			limit = 10
+			limit = 20
+		}
+		minScore := toInt(args["min_score"])
+		projectFilter, _ := args["project"].(string)
+		tagFilter, _ := args["tag"].(string)
+		linkedTaskOnly, _ := args["linked_task"].(bool)
+		includeRelations := true
+		if ir, ok := args["include_relations"].(bool); ok {
+			includeRelations = ir
 		}
 
-		memories, err := client.ListMemories("", "")
+		// Resolve project filter if provided
+		projectID := ""
+		if strings.TrimSpace(projectFilter) != "" {
+			pid, err := resolveProjectID(client, projectFilter)
+			if err == nil {
+				projectID = pid
+			}
+		}
+
+		// Fetch memories
+		memories, err := client.ListMemories(projectID, "")
 		if err != nil {
 			return nil, err
 		}
 
-		var filtered []interface{}
-		for _, m := range memories {
-			if strings.Contains(strings.ToLower(m.Content), strings.ToLower(term)) {
-				filtered = append(filtered, map[string]interface{}{
-					"id":         m.ID.String(),
-					"content":    m.Content,
-					"created_at": m.CreatedAt,
-				})
-				if len(filtered) >= limit {
-					break
+		// Parse search terms
+		// Comma-separated = AND (all must match)
+		// Space-separated = OR (any match)
+		isAndSearch := strings.Contains(term, ",")
+		var searchTerms []string
+		if isAndSearch {
+			for _, t := range strings.Split(term, ",") {
+				t = strings.TrimSpace(strings.ToLower(t))
+				if t != "" {
+					searchTerms = append(searchTerms, t)
+				}
+			}
+		} else {
+			for _, t := range strings.Fields(term) {
+				t = strings.TrimSpace(strings.ToLower(t))
+				if t != "" {
+					searchTerms = append(searchTerms, t)
 				}
 			}
 		}
 
+		// Score and filter memories
+		type scoredMemory struct {
+			memory interface{}
+			score  int
+		}
+		var scored []scoredMemory
+
+		for _, m := range memories {
+			// Filter: linked_task
+			if linkedTaskOnly && m.LinkedTaskID == nil {
+				continue
+			}
+
+			// Filter: tag
+			if tagFilter != "" {
+				hasTag := false
+				if tags, ok := m.Tags.([]interface{}); ok {
+					for _, tag := range tags {
+						if tagStr, ok := tag.(string); ok {
+							if strings.EqualFold(tagStr, tagFilter) {
+								hasTag = true
+								break
+							}
+						}
+					}
+				}
+				if !hasTag {
+					continue
+				}
+			}
+
+			// Calculate relevance score
+			contentLower := strings.ToLower(m.Content)
+			score := 0
+			matchCount := 0
+
+			for _, term := range searchTerms {
+				if strings.Contains(contentLower, term) {
+					matchCount++
+					// Base score for match
+					score += 20
+					// Bonus for exact word match
+					if strings.Contains(contentLower, " "+term+" ") ||
+						strings.HasPrefix(contentLower, term+" ") ||
+						strings.HasSuffix(contentLower, " "+term) {
+						score += 10
+					}
+					// Bonus for title/header match (## or ###)
+					if strings.Contains(contentLower, "## "+term) ||
+						strings.Contains(contentLower, "### "+term) {
+						score += 15
+					}
+					// Bonus for multiple occurrences
+					occurrences := strings.Count(contentLower, term)
+					if occurrences > 1 {
+						score += min(occurrences*5, 25)
+					}
+				}
+			}
+
+			// AND search: all terms must match
+			if isAndSearch && matchCount < len(searchTerms) {
+				continue
+			}
+			// OR search: at least one term must match
+			if !isAndSearch && matchCount == 0 {
+				continue
+			}
+
+			// Bonus for linked task (organized knowledge)
+			if m.LinkedTaskID != nil {
+				score += 5
+			}
+
+			// Skip if below minimum score
+			if score < minScore {
+				continue
+			}
+
+			// Build result object
+			result := map[string]interface{}{
+				"id":         m.ID.String(),
+				"content":    m.Content,
+				"score":      score,
+				"created_at": m.CreatedAt,
+			}
+
+			// Include relations
+			if includeRelations {
+				if m.Project != nil {
+					result["project"] = map[string]interface{}{
+						"id":   m.Project.ID.String(),
+						"name": m.Project.Name,
+					}
+				}
+				if m.LinkedTaskID != nil {
+					result["linked_task_id"] = m.LinkedTaskID.String()
+				}
+				if m.Tags != nil {
+					result["tags"] = m.Tags
+				}
+			}
+
+			scored = append(scored, scoredMemory{memory: result, score: score})
+		}
+
+		// Sort by score (descending)
+		sort.Slice(scored, func(i, j int) bool {
+			return scored[i].score > scored[j].score
+		})
+
+		// Apply limit and extract results
+		var results []interface{}
+		for i, s := range scored {
+			if i >= limit {
+				break
+			}
+			results = append(results, s.memory)
+		}
+
 		return map[string]interface{}{
-			"term":    term,
-			"count":   len(filtered),
-			"results": filtered,
+			"term":        term,
+			"search_mode": map[bool]string{true: "AND", false: "OR"}[isAndSearch],
+			"count":       len(results),
+			"total_found": len(scored),
+			"results":     results,
 		}, nil
 
 	// ============================================================================
