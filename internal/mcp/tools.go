@@ -308,6 +308,22 @@ func ToolDefinitions() []toolDef {
 			Description: "Delete a decision.",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"decisionId": map[string]interface{}{"type": "string"}}, "required": []string{"decisionId"}},
 		},
+		// Agent Onboarding & Self-Documentation tools
+		{
+			Name:        "get_ramorie_info",
+			Description: "🧠 CALL THIS FIRST! Get comprehensive information about Ramorie - what it is, how to use it, and agent guidelines. Essential for understanding the system.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+		{
+			Name:        "get_cursor_rules",
+			Description: "Get Cursor IDE rules for Ramorie integration. Returns markdown rules that can be added to .cursorrules file.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"format": map[string]interface{}{"type": "string", "description": "Output format: markdown (default) or json"}}},
+		},
+		{
+			Name:        "setup_agent",
+			Description: "Initialize agent session with Ramorie. Returns current context, active project, and recommended first actions.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
 	}
 }
 
@@ -1253,6 +1269,20 @@ func CallTool(client *api.Client, name string, args map[string]interface{}) (int
 		}
 		return map[string]interface{}{"ok": true, "deleted": decisionID}, nil
 
+	// Agent Onboarding & Self-Documentation tools
+	case "get_ramorie_info":
+		return getRamorieInfo(), nil
+
+	case "get_cursor_rules":
+		format, _ := args["format"].(string)
+		if format == "" {
+			format = "markdown"
+		}
+		return getCursorRules(format), nil
+
+	case "setup_agent":
+		return setupAgent(client)
+
 	default:
 		return nil, errors.New("tool not implemented")
 	}
@@ -1367,4 +1397,231 @@ func toInt(v interface{}) int {
 	default:
 		return 0
 	}
+}
+
+// ============================================================================
+// AGENT ONBOARDING & SELF-DOCUMENTATION
+// ============================================================================
+
+func getRamorieInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"name":    "Ramorie",
+		"version": "1.9.1",
+		"tagline": "AI Agent Memory & Task Management System",
+		"description": `Ramorie is a persistent memory and task management system designed for AI agents. 
+It enables agents to maintain context across sessions, track tasks, store knowledge, and make architectural decisions.
+
+Key Concepts:
+- Projects: Organize work into logical groups
+- Tasks: Track work items with status, priority, and progress
+- Memories: Store knowledge, learnings, and context for future reference
+- Decisions: Record architectural decisions (ADRs) for transparency
+- Context Packs: Save and restore working contexts`,
+
+		"capabilities": []string{
+			"Persistent task management across sessions",
+			"Knowledge/memory storage with auto-linking",
+			"Project organization and switching",
+			"Architectural decision records (ADRs)",
+			"AI-powered task analysis (risks, dependencies)",
+			"Context pack management for focus switching",
+			"Multi-organization support",
+			"Export and reporting capabilities",
+		},
+
+		"quickstart": map[string]interface{}{
+			"1_first_call":    "get_ramorie_info (you're here!)",
+			"2_setup":         "setup_agent - get current context and recommendations",
+			"3_list_projects": "list_projects - see available projects",
+			"4_get_tasks":     "get_next_tasks - see what needs attention",
+			"5_work":          "start_task, add_memory, complete_task",
+		},
+
+		"rules": []string{
+			"Always check active project before creating tasks",
+			"Use add_memory to persist important information",
+			"Link memories to tasks for context preservation",
+			"Record architectural decisions with create_decision",
+			"Never delete without explicit user approval",
+			"Search before creating to avoid duplicates",
+		},
+
+		"tool_categories": map[string][]string{
+			"project":      {"list_projects", "create_project", "get_project", "update_project", "delete_project", "set_active_project"},
+			"task":         {"list_tasks", "create_task", "get_task", "start_task", "complete_task", "stop_task", "delete_task", "update_task_status", "update_progress", "add_task_note", "create_subtask", "search_tasks", "get_next_tasks", "get_active_task", "duplicate_task", "move_tasks_to_project", "bulk_start_tasks", "bulk_complete_tasks"},
+			"memory":       {"list_memories", "add_memory", "get_memory", "update_memory", "delete_memory", "recall", "get_task_memories", "memory_tasks", "create_memory_task_link"},
+			"context":      {"list_contexts", "create_context", "set_active_context"},
+			"context_pack": {"list_context_packs", "get_context_pack", "create_context_pack", "update_context_pack", "delete_context_pack", "activate_context_pack", "get_active_context_pack"},
+			"organization": {"list_organizations", "get_organization", "create_organization"},
+			"decision":     {"list_decisions", "get_decision", "create_decision", "update_decision", "delete_decision"},
+			"reports":      {"get_stats", "get_history", "timeline", "export_project"},
+			"ai":           {"analyze_task_risks", "analyze_task_dependencies"},
+			"agent":        {"get_ramorie_info", "get_cursor_rules", "setup_agent"},
+		},
+	}
+}
+
+func getCursorRules(format string) map[string]interface{} {
+	rules := `# 🧠 Ramorie MCP Usage Rules
+
+## Core Principle
+**"If it matters later, it belongs in Ramorie."**
+
+## Required Behaviors
+
+### Session Start
+1. Call ` + "`setup_agent`" + ` to get current context
+2. Check active project with ` + "`list_projects`" + `
+3. Review pending tasks with ` + "`get_next_tasks`" + `
+
+### During Work
+1. **Task Management:**
+   - Search before creating (avoid duplicates)
+   - Use ` + "`start_task`" + ` when beginning work
+   - Update progress with ` + "`update_progress`" + `
+   - Add notes with ` + "`add_task_note`" + ` for context
+   - Complete with ` + "`complete_task`" + ` when done
+
+2. **Memory/Knowledge:**
+   - Store important discoveries with ` + "`add_memory`" + `
+   - Memories auto-link to active task
+   - Use ` + "`recall`" + ` to search past knowledge
+
+3. **Decisions:**
+   - Record architectural decisions with ` + "`create_decision`" + `
+   - Include context, consequences, and area
+
+### Session End
+- Save session summary to memory
+- Update task progress
+- Note any blockers or next steps
+
+## Forbidden Actions
+- ❌ Never delete without explicit user approval
+- ❌ Never modify completed tasks unless instructed
+- ❌ Never bypass Ramorie for task/memory management
+- ❌ Never create duplicate projects
+
+## Tool Priority
+1. ` + "`get_ramorie_info`" + ` - Understand the system
+2. ` + "`setup_agent`" + ` - Get current context
+3. ` + "`get_next_tasks`" + ` - See what needs attention
+4. ` + "`add_memory`" + ` - Persist important information
+5. ` + "`create_decision`" + ` - Record architectural choices
+`
+
+	result := map[string]interface{}{
+		"format": format,
+		"rules":  rules,
+		"usage":  "Add this to your .cursorrules file or project rules",
+	}
+
+	if format == "json" {
+		result["rules_structured"] = map[string]interface{}{
+			"session_start": []string{
+				"Call setup_agent to get current context",
+				"Check active project with list_projects",
+				"Review pending tasks with get_next_tasks",
+			},
+			"during_work": map[string][]string{
+				"task_management": {
+					"Search before creating tasks",
+					"Use start_task when beginning work",
+					"Update progress regularly",
+					"Add notes for context",
+					"Complete tasks when done",
+				},
+				"memory": {
+					"Store important discoveries with add_memory",
+					"Memories auto-link to active task",
+					"Use recall to search past knowledge",
+				},
+				"decisions": {
+					"Record architectural decisions",
+					"Include context and consequences",
+				},
+			},
+			"forbidden": []string{
+				"Delete without explicit user approval",
+				"Modify completed tasks unless instructed",
+				"Bypass Ramorie for task/memory management",
+				"Create duplicate projects",
+			},
+		}
+	}
+
+	return result
+}
+
+func setupAgent(client *api.Client) (map[string]interface{}, error) {
+	result := map[string]interface{}{
+		"status":  "ready",
+		"message": "Ramorie agent session initialized",
+	}
+
+	// Get active project
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.ActiveProjectID != "" {
+		result["active_project_id"] = cfg.ActiveProjectID
+	}
+
+	// List projects
+	projects, err := client.ListProjects()
+	if err == nil {
+		projectSummary := make([]map[string]interface{}, 0)
+		for _, p := range projects {
+			ps := map[string]interface{}{
+				"id":        p.ID.String(),
+				"name":      p.Name,
+				"is_active": p.IsActive,
+			}
+			if p.IsActive {
+				result["active_project"] = ps
+			}
+			projectSummary = append(projectSummary, ps)
+		}
+		result["projects_count"] = len(projects)
+		result["projects"] = projectSummary
+	}
+
+	// Get active task
+	activeTask, err := client.GetActiveTask()
+	if err == nil && activeTask != nil {
+		result["active_task"] = map[string]interface{}{
+			"id":     activeTask.ID.String(),
+			"title":  activeTask.Title,
+			"status": activeTask.Status,
+		}
+	}
+
+	// Get TODO tasks count
+	if cfg != nil && cfg.ActiveProjectID != "" {
+		tasks, err := client.ListTasks(cfg.ActiveProjectID, "TODO")
+		if err == nil {
+			result["pending_tasks_count"] = len(tasks)
+		}
+	}
+
+	// Get stats
+	statsBytes, err := client.Request("GET", "/reports/stats", nil)
+	if err == nil {
+		var stats map[string]interface{}
+		if json.Unmarshal(statsBytes, &stats) == nil {
+			result["stats"] = stats
+		}
+	}
+
+	// Recommendations
+	recommendations := []string{
+		"Call get_next_tasks to see prioritized work items",
+	}
+	if result["active_project"] == nil {
+		recommendations = append(recommendations, "Set an active project with set_active_project")
+	}
+	if result["active_task"] == nil {
+		recommendations = append(recommendations, "Start a task with start_task to enable memory auto-linking")
+	}
+	result["recommendations"] = recommendations
+
+	return result, nil
 }
