@@ -13,7 +13,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const VERSION = require('./package.json').version;
-const REPO = 'terzigolu/ramorie';
+const REPO = 'kutbudev/ramorie-cli';
 
 // Platform/arch mapping
 const PLATFORM_MAP = {
@@ -59,7 +59,7 @@ async function main() {
 
   if (!platform || !arch) {
     console.error(`❌ Unsupported platform: ${process.platform}/${process.arch}`);
-    console.error('Please install manually from: https://github.com/terzigolu/ramorie/releases');
+    console.error('Please install manually from: https://github.com/kutbudev/ramorie-cli/releases');
     process.exit(0); // Don't fail npm install
   }
 
@@ -129,9 +129,9 @@ async function main() {
   } catch (error) {
     console.error(`\n⚠️  Binary installation skipped: ${error.message}`);
     console.error('\nAlternative installation methods:');
-    console.error('  • macOS/Linux: brew install terzigolu/tap/ramorie');
+    console.error('  • macOS/Linux: brew install kutbudev/tap/ramorie');
     console.error('  • Windows: scoop install ramorie');
-    console.error('  • All: https://github.com/terzigolu/ramorie/releases');
+    console.error('  • All: https://github.com/kutbudev/ramorie-cli/releases');
 
     // Don't fail the npm install
     process.exit(0);

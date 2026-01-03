@@ -25,8 +25,8 @@ This usually means the postinstall script failed.
 Try reinstalling: npm install -g ramorie
 
 Or install via other methods:
-  • brew install ramorie
-  • go install github.com/terzigolu/josepshbrain-go/cmd/jbraincli@latest
+  • brew install kutbudev/tap/ramorie
+  • go install github.com/kutbudev/ramorie-cli/cmd/jbraincli@latest
 `);
   process.exit(1);
 }

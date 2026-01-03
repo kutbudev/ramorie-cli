@@ -58,7 +58,7 @@ detect_platform() {
 # Get latest release version
 get_latest_version() {
     print_status "Fetching latest release information..."
-    LATEST_VERSION=$(curl -s "https://api.github.com/repos/terzigolu/josepshbrain-go/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    LATEST_VERSION=$(curl -s "https://api.github.com/repos/kutbudev/ramorie-cli/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
     if [ -z "$LATEST_VERSION" ]; then
         print_error "Failed to get latest version"
@@ -71,7 +71,7 @@ get_latest_version() {
 # Download and install
 install_ramorie() {
     BINARY_NAME="ramorie-${PLATFORM}-${ARCH}"
-    DOWNLOAD_URL="https://github.com/terzigolu/josepshbrain-go/releases/latest/download/${BINARY_NAME}"
+    DOWNLOAD_URL="https://github.com/kutbudev/ramorie-cli/releases/latest/download/${BINARY_NAME}"
 
     print_status "Downloading ramorie from: $DOWNLOAD_URL"
 

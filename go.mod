@@ -1,4 +1,4 @@
-module github.com/terzigolu/josepshbrain-go
+module github.com/kutbudev/ramorie-cli
 
 go 1.24.0
 

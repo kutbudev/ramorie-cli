@@ -11,14 +11,14 @@
 <p align="center">
   <a href="https://ramorie.com">Website</a> •
   <a href="https://ramorie.com/docs">Documentation</a> •
-  <a href="https://github.com/terzigolu/josepshbrain-go/releases">Releases</a>
+  <a href="https://github.com/kutbudev/ramorie-cli/releases">Releases</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/v/release/terzigolu/josepshbrain-go?style=flat-square&color=00d4aa" alt="Release">
+  <img src="https://img.shields.io/github/v/release/kutbudev/ramorie-cli?style=flat-square&color=00d4aa" alt="Release">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/go-%3E%3D1.21-00ADD8?style=flat-square&logo=go" alt="Go Version">
-  <img src="https://img.shields.io/github/license/terzigolu/josepshbrain-go?style=flat-square" alt="License">
+  <img src="https://img.shields.io/github/license/kutbudev/ramorie-cli?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/MCP-compatible-purple?style=flat-square" alt="MCP Compatible">
 </p>
 
@@ -43,34 +43,46 @@
 ### Homebrew (Recommended for macOS/Linux)
 
 ```bash
-brew tap terzigolu/homebrew-tap
+brew tap kutbudev/homebrew-tap
 brew install ramorie
+```
+
+### npm (Cross-platform)
+
+```bash
+npm install -g ramorie
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/terzigolu/josepshbrain-go/cmd/ramorie@latest
+go install github.com/kutbudev/ramorie-cli/cmd/jbraincli@latest
 ```
 
 ### Direct Download
 
-Download pre-built binaries from the [releases page](https://github.com/terzigolu/josepshbrain-go/releases/latest):
+Download pre-built binaries from the [releases page](https://github.com/kutbudev/ramorie-cli/releases/latest):
 
 | Platform | Architecture | Download |
 |----------|--------------|----------|
-| macOS | Apple Silicon (M1/M2/M3) | [ramorie_darwin_arm64.tar.gz](https://github.com/terzigolu/josepshbrain-go/releases/latest) |
-| macOS | Intel | [ramorie_darwin_amd64.tar.gz](https://github.com/terzigolu/josepshbrain-go/releases/latest) |
-| Linux | x86_64 | [ramorie_linux_amd64.tar.gz](https://github.com/terzigolu/josepshbrain-go/releases/latest) |
-| Linux | ARM64 | [ramorie_linux_arm64.tar.gz](https://github.com/terzigolu/josepshbrain-go/releases/latest) |
-| Windows | x86_64 | [ramorie_windows_amd64.zip](https://github.com/terzigolu/josepshbrain-go/releases/latest) |
+| macOS | Apple Silicon (M1/M2/M3) | [ramorie_darwin_arm64.tar.gz](https://github.com/kutbudev/ramorie-cli/releases/latest) |
+| macOS | Intel | [ramorie_darwin_amd64.tar.gz](https://github.com/kutbudev/ramorie-cli/releases/latest) |
+| Linux | x86_64 | [ramorie_linux_amd64.tar.gz](https://github.com/kutbudev/ramorie-cli/releases/latest) |
+| Linux | ARM64 | [ramorie_linux_arm64.tar.gz](https://github.com/kutbudev/ramorie-cli/releases/latest) |
+| Windows | x86_64 | [ramorie_windows_amd64.zip](https://github.com/kutbudev/ramorie-cli/releases/latest) |
+
+### curl Install Script
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kutbudev/ramorie-cli/main/install.sh | bash
+```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/terzigolu/josepshbrain-go.git
-cd josepshbrain-go
-go build -o ramorie ./cmd/ramorie
+git clone https://github.com/kutbudev/ramorie-cli.git
+cd ramorie-cli
+go build -o ramorie ./cmd/jbraincli
 ```
 
 ---
@@ -654,8 +666,8 @@ ramorie task done <id>                   # Complete task
 
 - **Website:** [ramorie.com](https://ramorie.com)
 - **Documentation:** [ramorie.com/docs](https://ramorie.com/docs)
-- **Releases:** [GitHub Releases](https://github.com/terzigolu/josepshbrain-go/releases)
-- **Homebrew Tap:** [terzigolu/homebrew-tap](https://github.com/terzigolu/homebrew-tap)
+- **Releases:** [GitHub Releases](https://github.com/kutbudev/ramorie-cli/releases)
+- **Homebrew Tap:** [kutbudev/homebrew-tap](https://github.com/kutbudev/homebrew-tap)
 
 ---
 

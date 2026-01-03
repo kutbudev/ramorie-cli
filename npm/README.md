@@ -12,11 +12,11 @@ npm install -g ramorie
 
 ### macOS / Linux (Homebrew)
 ```bash
-brew install terzigolu/tap/ramorie
+brew install kutbudev/tap/ramorie
 ```
 
 ### Direct Download
-Download the latest release from [GitHub Releases](https://github.com/terzigolu/ramorie/releases).
+Download the latest release from [GitHub Releases](https://github.com/kutbudev/ramorie-cli/releases).
 
 ## Usage
 
