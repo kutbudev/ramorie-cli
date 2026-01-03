@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/terzigolu/josepshbrain-go/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/urfave/cli/v2"
 )
 

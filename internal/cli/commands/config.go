@@ -3,7 +3,7 @@ package commands
 import (
 	"fmt"
 
-	"github.com/terzigolu/josepshbrain-go/internal/config"
+	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/urfave/cli/v2"
 )
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/terzigolu/josepshbrain-go/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/urfave/cli/v2"
 )
 

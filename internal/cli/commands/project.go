@@ -6,8 +6,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/terzigolu/josepshbrain-go/internal/api"
-	"github.com/terzigolu/josepshbrain-go/internal/config"
+	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/urfave/cli/v2"
 )
 

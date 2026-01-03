@@ -7,8 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/terzigolu/josepshbrain-go/internal/config"
-	"github.com/terzigolu/josepshbrain-go/internal/models"
+	"github.com/kutbudev/ramorie-cli/internal/config"
+	"github.com/kutbudev/ramorie-cli/internal/models"
 )
 
 const BaseURL = "https://jbraincli-go-backend-production.up.railway.app/v1"

@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/terzigolu/josepshbrain-go/internal/models"
+	"github.com/kutbudev/ramorie-cli/internal/models"
 
 	"github.com/google/uuid"
 )

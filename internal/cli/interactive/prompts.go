@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/terzigolu/josepshbrain-go/pkg/models"
+	"github.com/kutbudev/ramorie-cli/pkg/models"
 )
 
 // SelectTask prompts user to select a task from a list

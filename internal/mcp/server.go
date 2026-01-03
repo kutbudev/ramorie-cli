@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/terzigolu/josepshbrain-go/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/api"
 )
 
 // apiClient holds the API client for tool handlers

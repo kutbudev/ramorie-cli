@@ -2,7 +2,7 @@ package repository
 
 import (
 	"github.com/google/uuid"
-	"github.com/terzigolu/josepshbrain-go/pkg/models"
+	"github.com/kutbudev/ramorie-cli/pkg/models"
 )
 
 // ProjectRepository defines the interface for project operations

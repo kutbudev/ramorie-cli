@@ -9,9 +9,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/terzigolu/josepshbrain-go/internal/api"
-	"github.com/terzigolu/josepshbrain-go/internal/config"
-	apierrors "github.com/terzigolu/josepshbrain-go/internal/errors"
+	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/config"
+	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/term"
 )

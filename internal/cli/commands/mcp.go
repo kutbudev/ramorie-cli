@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/terzigolu/josepshbrain-go/internal/api"
-	"github.com/terzigolu/josepshbrain-go/internal/mcp"
+	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/mcp"
 	"github.com/urfave/cli/v2"
 )
 

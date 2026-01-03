@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/terzigolu/josepshbrain-go/internal/cli/commands"
+	"github.com/kutbudev/ramorie-cli/internal/cli/commands"
 	"github.com/urfave/cli/v2"
 )
 

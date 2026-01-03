@@ -7,8 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/terzigolu/josepshbrain-go/internal/api"
-	apierrors "github.com/terzigolu/josepshbrain-go/internal/errors"
+	"github.com/kutbudev/ramorie-cli/internal/api"
+	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/urfave/cli/v2"
 )
 

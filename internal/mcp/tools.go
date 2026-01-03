@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/terzigolu/josepshbrain-go/internal/api"
-	"github.com/terzigolu/josepshbrain-go/internal/config"
+	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/config"
 )
 
 // ToolInput is a generic input struct for tools that use map[string]interface{}

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/terzigolu/josepshbrain-go/pkg/config"
-	"github.com/terzigolu/josepshbrain-go/pkg/models"
+	"github.com/kutbudev/ramorie-cli/pkg/config"
+	"github.com/kutbudev/ramorie-cli/pkg/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

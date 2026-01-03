@@ -9,8 +9,8 @@ import (
 
 	"strings"
 
-	"github.com/terzigolu/josepshbrain-go/handlers"
-	"github.com/terzigolu/josepshbrain-go/repository"
+	"github.com/kutbudev/ramorie-cli/handlers"
+	"github.com/kutbudev/ramorie-cli/repository"
 
 	_ "github.com/lib/pq"
 )

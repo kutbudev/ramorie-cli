@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/terzigolu/josepshbrain-go/internal/models"
+	"github.com/kutbudev/ramorie-cli/internal/models"
 )
 
 // --- Notes Endpoints ---

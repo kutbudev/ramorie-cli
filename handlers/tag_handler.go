@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/terzigolu/josepshbrain-go/internal/models"
-	"github.com/terzigolu/josepshbrain-go/repository"
+	"github.com/kutbudev/ramorie-cli/internal/models"
+	"github.com/kutbudev/ramorie-cli/repository"
 
 	"github.com/google/uuid"
 )
