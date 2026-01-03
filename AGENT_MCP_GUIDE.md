@@ -86,6 +86,25 @@
 }
 ```
 
+### Codex CLI İçin
+
+Codex `~/.codex/config.toml` dosyasını kullanır. Hazır snippet üretmek için:
+
+```bash
+ramorie mcp config --client codex
+```
+
+Çıktıyı config dosyanıza ekleyin:
+
+```toml
+[mcp_servers.ramorie]
+command = "ramorie"
+args = ["mcp", "serve"]
+enabled = true
+```
+
+> Düzenleme sonrası Codex CLI'yi yeniden başlatın.
+
 ### API Key Ayarı
 
 ```bash

@@ -564,6 +564,8 @@ Run this command to get your MCP configuration:
 
 ```bash
 ramorie mcp config
+# or for Codex CLI users
+ramorie mcp config --client codex
 ```
 
 ### Windsurf / Cursor Configuration
@@ -610,6 +612,25 @@ Add the following to your MCP config file:
 ```
 
 > **Note:** Make sure `ramorie` is in your PATH, or use the full path (e.g., `/opt/homebrew/bin/ramorie` or `~/.local/bin/ramorie`).
+
+### Codex CLI Configuration
+
+Codex CLI uses `~/.codex/config.toml`. Generate a ready-to-paste snippet with:
+
+```bash
+ramorie mcp config --client codex
+```
+
+Then append the output to your config file:
+
+```toml
+[mcp_servers.ramorie]
+command = "ramorie"
+args = ["mcp", "serve"]
+enabled = true
+```
+
+Restart Codex CLI (or the Codex app) after editing so it reloads the MCP settings.
 
 ### Available MCP Tools
 

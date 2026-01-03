@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/mcp"
@@ -26,17 +27,21 @@ func NewMcpCommand() *cli.Command {
 			{
 				Name:  "config",
 				Usage: "Print MCP config examples for clients",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "client",
+						Aliases: []string{"c"},
+						Usage:   "target client (generic|codex)",
+						Value:   "generic",
+					},
+				},
 				Action: func(c *cli.Context) error {
-					cfg := map[string]interface{}{
-						"mcpServers": map[string]interface{}{
-							"ramorie": map[string]interface{}{
-								"command": "ramorie",
-								"args":    []string{"mcp", "serve"},
-							},
-						},
+					switch strings.ToLower(c.String("client")) {
+					case "codex":
+						printCodexConfig()
+					default:
+						printGenericConfig()
 					}
-					b, _ := json.MarshalIndent(cfg, "", "  ")
-					fmt.Println(string(b))
 					return nil
 				},
 			},
@@ -52,4 +57,25 @@ func NewMcpCommand() *cli.Command {
 			},
 		},
 	}
+}
+
+func printGenericConfig() {
+	cfg := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"ramorie": map[string]interface{}{
+				"command": "ramorie",
+				"args":    []string{"mcp", "serve"},
+			},
+		},
+	}
+	b, _ := json.MarshalIndent(cfg, "", "  ")
+	fmt.Println(string(b))
+}
+
+func printCodexConfig() {
+	fmt.Println("# Add the following to ~/.codex/config.toml (merge with existing settings)")
+	fmt.Println("[mcp_servers.ramorie]")
+	fmt.Println("command = \"ramorie\"")
+	fmt.Println("args = [\"mcp\", \"serve\"]")
+	fmt.Println("enabled = true")
 }
