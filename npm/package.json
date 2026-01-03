@@ -1,6 +1,6 @@
 {
   "name": "ramorie",
-  "version": "1.4.0",
+  "version": "2.4.0",
   "description": "AI-powered task and memory management CLI",
   "homepage": "https://ramorie.com",
   "repository": {
@@ -37,4 +37,3 @@
     "arm64"
   ]
 }
-
