@@ -65,5 +65,6 @@ release:
   github:
     owner: kutbudev
     name: ramorie-cli
+  mode: replace
   draft: false
   prerelease: auto
