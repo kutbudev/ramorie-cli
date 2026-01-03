@@ -1,15 +1,950 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/terzigolu/josepshbrain-go/internal/api"
 	"github.com/terzigolu/josepshbrain-go/internal/config"
 )
+
+// ToolInput is a generic input struct for tools that use map[string]interface{}
+type ToolInput struct {
+	Args map[string]interface{} `json:"-"`
+}
+
+// registerTools registers all MCP tools with the server using go-sdk
+// The SDK automatically infers InputSchema from the handler's input struct type
+func registerTools(server *mcp.Server) {
+	// ============================================================================
+	// 🔴 ESSENTIAL - Agent Onboarding
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_ramorie_info",
+		Description: "🔴 ESSENTIAL | 🧠 CALL THIS FIRST! Get comprehensive information about Ramorie - what it is, how to use it, and agent guidelines.",
+	}, handleGetRamorieInfo)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "setup_agent",
+		Description: "🔴 ESSENTIAL | Initialize agent session. Returns current context, active project, pending tasks, and recommended actions.",
+	}, handleSetupAgent)
+
+	// ============================================================================
+	// 🔴 ESSENTIAL - Project Management
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_projects",
+		Description: "🔴 ESSENTIAL | List all projects. Check this to see available projects and which one is active.",
+	}, handleListProjects)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "set_active_project",
+		Description: "🔴 ESSENTIAL | Set the active project. All new tasks and memories will be created in this project.",
+	}, handleSetActiveProject)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_project",
+		Description: "🟢 ADVANCED | Create a new project. ⚠️ Check list_projects first - don't create duplicates!",
+	}, handleCreateProject)
+
+	// ============================================================================
+	// 🔴 ESSENTIAL - Task Management
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_tasks",
+		Description: "🔴 ESSENTIAL | List tasks with filtering. 💡 Call before create_task to check for duplicates.",
+	}, handleListTasks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_task",
+		Description: "🔴 ESSENTIAL | Create a new task. ⚠️ Always check list_tasks first to avoid duplicates!",
+	}, handleCreateTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_task",
+		Description: "🔴 ESSENTIAL | Get task details including notes and metadata.",
+	}, handleGetTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "start_task",
+		Description: "🔴 ESSENTIAL | Start working on a task. Sets status to IN_PROGRESS and enables memory auto-linking.",
+	}, handleStartTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "complete_task",
+		Description: "🔴 ESSENTIAL | Mark task as completed. Use when work is finished.",
+	}, handleCompleteTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "stop_task",
+		Description: "🟢 ADVANCED | Pause a task. Clears active task, keeps IN_PROGRESS status.",
+	}, handleStopTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_next_tasks",
+		Description: "🔴 ESSENTIAL | Get prioritized TODO tasks. 💡 Use at session start to see what needs attention.",
+	}, handleGetNextTasks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "add_task_note",
+		Description: "🟡 COMMON | Add a note/annotation to a task. Use for progress updates or context.",
+	}, handleAddTaskNote)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_progress",
+		Description: "🟡 COMMON | Update task progress percentage (0-100).",
+	}, handleUpdateProgress)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "search_tasks",
+		Description: "🟡 COMMON | Search tasks by keyword. Use to find specific tasks.",
+	}, handleSearchTasks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_active_task",
+		Description: "🟡 COMMON | Get the currently active task. Memories auto-link to this task.",
+	}, handleGetActiveTask)
+
+	// ============================================================================
+	// 🔴 ESSENTIAL - Memory Management
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "add_memory",
+		Description: "🔴 ESSENTIAL | Store important information to knowledge base. Auto-links to active task. 💡 If it matters later, add it here!",
+	}, handleAddMemory)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_memories",
+		Description: "🔴 ESSENTIAL | List memories with optional filtering by project or term.",
+	}, handleListMemories)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_memory",
+		Description: "🟡 COMMON | Get memory details by ID.",
+	}, handleGetMemory)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "recall",
+		Description: "🟡 COMMON | Advanced memory search with multi-word support, filters, and relations. Supports: OR search (space-separated), AND search (comma-separated), project/tag filtering.",
+	}, handleRecall)
+
+	// ============================================================================
+	// 🔴 ESSENTIAL - Focus Management
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_focus",
+		Description: "🔴 ESSENTIAL | Get user's current focus (active workspace). Returns the active context pack and its details.",
+	}, handleGetFocus)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "set_focus",
+		Description: "🔴 ESSENTIAL | Set user's active focus (workspace). Switch to a different context pack.",
+	}, handleSetFocus)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "clear_focus",
+		Description: "🔴 ESSENTIAL | Clear user's active focus. Deactivates the current context pack.",
+	}, handleClearFocus)
+
+	// ============================================================================
+	// 🟡 COMMON - Decisions (ADRs)
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_decision",
+		Description: "🟡 COMMON | Record an architectural decision (ADR). Use for important technical choices.",
+	}, handleCreateDecision)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_decisions",
+		Description: "🟡 COMMON | List architectural decisions. Review past decisions before making new ones.",
+	}, handleListDecisions)
+
+	// ============================================================================
+	// 🟡 COMMON - Reports
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_stats",
+		Description: "🟡 COMMON | Get task statistics and completion rates.",
+	}, handleGetStats)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "export_project",
+		Description: "🟢 ADVANCED | Export project report in markdown format.",
+	}, handleExportProject)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_cursor_rules",
+		Description: "🟢 ADVANCED | Get Cursor IDE rules for Ramorie. Returns markdown for .cursorrules file.",
+	}, handleGetCursorRules)
+}
+
+// ============================================================================
+// TOOL HANDLER FUNCTIONS
+// ============================================================================
+
+type EmptyInput struct{}
+type EmptyOutput struct{}
+
+type TextOutput struct {
+	Text string `json:"text"`
+}
+
+func handleGetRamorieInfo(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	return nil, getRamorieInfo(), nil
+}
+
+func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	result, err := setupAgent(apiClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
+	projects, err := apiClient.ListProjects()
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, projects, nil
+}
+
+type SetActiveProjectInput struct {
+	ProjectName string `json:"projectName"`
+}
+
+func handleSetActiveProject(ctx context.Context, req *mcp.CallToolRequest, input SetActiveProjectInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	projectName := strings.TrimSpace(input.ProjectName)
+	if projectName == "" {
+		return nil, nil, errors.New("projectName is required")
+	}
+	projects, err := apiClient.ListProjects()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, p := range projects {
+		if p.Name == projectName || strings.HasPrefix(p.ID.String(), projectName) {
+			if err := apiClient.SetProjectActive(p.ID.String()); err != nil {
+				return nil, nil, err
+			}
+			cfg, _ := config.LoadConfig()
+			if cfg == nil {
+				cfg = &config.Config{}
+			}
+			cfg.ActiveProjectID = p.ID.String()
+			_ = config.SaveConfig(cfg)
+			return nil, map[string]interface{}{"ok": true, "project_id": p.ID.String(), "name": p.Name}, nil
+		}
+	}
+	return nil, nil, errors.New("project not found")
+}
+
+type CreateProjectInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input CreateProjectInput) (*mcp.CallToolResult, interface{}, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	project, err := apiClient.CreateProject(name, strings.TrimSpace(input.Description))
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, project, nil
+}
+
+type ListTasksInput struct {
+	Status  string  `json:"status"`
+	Project string  `json:"project"`
+	Limit   float64 `json:"limit"`
+}
+
+func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, interface{}, error) {
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err != nil {
+			return nil, nil, err
+		}
+		projectID = pid
+	}
+	tasks, err := apiClient.ListTasks(projectID, strings.TrimSpace(input.Status))
+	if err != nil {
+		return nil, nil, err
+	}
+	limit := int(input.Limit)
+	if limit > 0 && limit < len(tasks) {
+		tasks = tasks[:limit]
+	}
+	return nil, tasks, nil
+}
+
+type CreateTaskInput struct {
+	Description string `json:"description"`
+	Priority    string `json:"priority"`
+	Project     string `json:"project"`
+}
+
+func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, interface{}, error) {
+	description := strings.TrimSpace(input.Description)
+	if description == "" {
+		return nil, nil, errors.New("description is required")
+	}
+	priority := normalizePriority(input.Priority)
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
+	}
+	task, err := apiClient.CreateTask(projectID, description, "", priority)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, task, nil
+}
+
+type TaskIDInput struct {
+	TaskID string `json:"taskId"`
+}
+
+func handleGetTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	task, err := apiClient.GetTask(taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, task, nil
+}
+
+func handleStartTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	if err := apiClient.StartTask(taskID); err != nil {
+		return nil, nil, err
+	}
+	return nil, map[string]interface{}{"ok": true, "message": "Task started. Memories will now auto-link to this task."}, nil
+}
+
+func handleCompleteTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	if err := apiClient.CompleteTask(taskID); err != nil {
+		return nil, nil, err
+	}
+	return nil, map[string]interface{}{"ok": true}, nil
+}
+
+func handleStopTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	if err := apiClient.StopTask(taskID); err != nil {
+		return nil, nil, err
+	}
+	return nil, map[string]interface{}{"ok": true}, nil
+}
+
+type GetNextTasksInput struct {
+	Count   float64 `json:"count"`
+	Project string  `json:"project"`
+}
+
+func handleGetNextTasks(ctx context.Context, req *mcp.CallToolRequest, input GetNextTasksInput) (*mcp.CallToolResult, interface{}, error) {
+	count := int(input.Count)
+	if count <= 0 {
+		count = 5
+	}
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err != nil {
+			return nil, nil, err
+		}
+		projectID = pid
+	}
+	tasks, err := apiClient.ListTasksQuery(projectID, "TODO", "", nil, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		pi := priorityRank(tasks[i].Priority)
+		pj := priorityRank(tasks[j].Priority)
+		if pi != pj {
+			return pi > pj
+		}
+		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
+	})
+	if count < len(tasks) {
+		tasks = tasks[:count]
+	}
+	return nil, tasks, nil
+}
+
+type AddTaskNoteInput struct {
+	TaskID string `json:"taskId"`
+	Note   string `json:"note"`
+}
+
+func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddTaskNoteInput) (*mcp.CallToolResult, interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	note := strings.TrimSpace(input.Note)
+	if taskID == "" || note == "" {
+		return nil, nil, errors.New("taskId and note are required")
+	}
+	annotation, err := apiClient.CreateAnnotation(taskID, note)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, annotation, nil
+}
+
+type UpdateProgressInput struct {
+	TaskID   string  `json:"taskId"`
+	Progress float64 `json:"progress"`
+}
+
+func handleUpdateProgress(ctx context.Context, req *mcp.CallToolRequest, input UpdateProgressInput) (*mcp.CallToolResult, interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	progress := int(input.Progress)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	if progress < 0 || progress > 100 {
+		return nil, nil, errors.New("progress must be between 0 and 100")
+	}
+	result, err := apiClient.UpdateTask(taskID, map[string]interface{}{"progress": progress})
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+type SearchTasksInput struct {
+	Query   string  `json:"query"`
+	Status  string  `json:"status"`
+	Project string  `json:"project"`
+	Limit   float64 `json:"limit"`
+}
+
+func handleSearchTasks(ctx context.Context, req *mcp.CallToolRequest, input SearchTasksInput) (*mcp.CallToolResult, interface{}, error) {
+	query := strings.TrimSpace(input.Query)
+	if query == "" {
+		return nil, nil, errors.New("query is required")
+	}
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err != nil {
+			return nil, nil, err
+		}
+		projectID = pid
+	}
+	tasks, err := apiClient.ListTasksQuery(projectID, strings.TrimSpace(input.Status), query, nil, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	limit := int(input.Limit)
+	if limit > 0 && limit < len(tasks) {
+		tasks = tasks[:limit]
+	}
+	return nil, tasks, nil
+}
+
+func handleGetActiveTask(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
+	task, err := apiClient.GetActiveTask()
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, task, nil
+}
+
+type AddMemoryInput struct {
+	Content string `json:"content"`
+	Project string `json:"project"`
+}
+
+func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, interface{}, error) {
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return nil, nil, errors.New("content is required")
+	}
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
+	}
+	memory, err := apiClient.CreateMemory(projectID, content)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, memory, nil
+}
+
+type ListMemoriesInput struct {
+	Project string  `json:"project"`
+	Term    string  `json:"term"`
+	Limit   float64 `json:"limit"`
+}
+
+func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input ListMemoriesInput) (*mcp.CallToolResult, interface{}, error) {
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err != nil {
+			return nil, nil, err
+		}
+		projectID = pid
+	}
+	memories, err := apiClient.ListMemories(projectID, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	term := strings.TrimSpace(input.Term)
+	if term != "" {
+		filtered := memories[:0]
+		for _, m := range memories {
+			if strings.Contains(strings.ToLower(m.Content), strings.ToLower(term)) {
+				filtered = append(filtered, m)
+			}
+		}
+		memories = filtered
+	}
+	limit := int(input.Limit)
+	if limit > 0 && limit < len(memories) {
+		memories = memories[:limit]
+	}
+	return nil, memories, nil
+}
+
+type GetMemoryInput struct {
+	MemoryID string `json:"memoryId"`
+}
+
+func handleGetMemory(ctx context.Context, req *mcp.CallToolRequest, input GetMemoryInput) (*mcp.CallToolResult, interface{}, error) {
+	memoryID := strings.TrimSpace(input.MemoryID)
+	if memoryID == "" {
+		return nil, nil, errors.New("memoryId is required")
+	}
+	memory, err := apiClient.GetMemory(memoryID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, memory, nil
+}
+
+type RecallInput struct {
+	Term             string  `json:"term"`
+	Project          string  `json:"project"`
+	Tag              string  `json:"tag"`
+	LinkedTask       bool    `json:"linked_task"`
+	IncludeRelations bool    `json:"include_relations"`
+	Limit            float64 `json:"limit"`
+	MinScore         float64 `json:"min_score"`
+}
+
+func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	term := strings.TrimSpace(input.Term)
+	if term == "" {
+		return nil, nil, errors.New("term is required")
+	}
+
+	limit := int(input.Limit)
+	if limit == 0 {
+		limit = 20
+	}
+	minScore := int(input.MinScore)
+	includeRelations := true
+	if !input.IncludeRelations && input.Limit > 0 {
+		includeRelations = input.IncludeRelations
+	}
+
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err == nil {
+			projectID = pid
+		}
+	}
+
+	memories, err := apiClient.ListMemories(projectID, "")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	isAndSearch := strings.Contains(term, ",")
+	var searchTerms []string
+	if isAndSearch {
+		for _, t := range strings.Split(term, ",") {
+			t = strings.TrimSpace(strings.ToLower(t))
+			if t != "" {
+				searchTerms = append(searchTerms, t)
+			}
+		}
+	} else {
+		for _, t := range strings.Fields(term) {
+			t = strings.TrimSpace(strings.ToLower(t))
+			if t != "" {
+				searchTerms = append(searchTerms, t)
+			}
+		}
+	}
+
+	type scoredMemory struct {
+		memory interface{}
+		score  int
+	}
+	var scored []scoredMemory
+
+	for _, m := range memories {
+		if input.LinkedTask && m.LinkedTaskID == nil {
+			continue
+		}
+
+		if input.Tag != "" {
+			hasTag := false
+			if tags, ok := m.Tags.([]interface{}); ok {
+				for _, tag := range tags {
+					if tagStr, ok := tag.(string); ok {
+						if strings.EqualFold(tagStr, input.Tag) {
+							hasTag = true
+							break
+						}
+					}
+				}
+			}
+			if !hasTag {
+				continue
+			}
+		}
+
+		contentLower := strings.ToLower(m.Content)
+		score := 0
+		matchCount := 0
+
+		for _, t := range searchTerms {
+			if strings.Contains(contentLower, t) {
+				matchCount++
+				score += 20
+				if strings.Contains(contentLower, " "+t+" ") ||
+					strings.HasPrefix(contentLower, t+" ") ||
+					strings.HasSuffix(contentLower, " "+t) {
+					score += 10
+				}
+				if strings.Contains(contentLower, "## "+t) ||
+					strings.Contains(contentLower, "### "+t) {
+					score += 15
+				}
+				occurrences := strings.Count(contentLower, t)
+				if occurrences > 1 {
+					score += min(occurrences*5, 25)
+				}
+			}
+		}
+
+		if isAndSearch && matchCount < len(searchTerms) {
+			continue
+		}
+		if !isAndSearch && matchCount == 0 {
+			continue
+		}
+
+		if m.LinkedTaskID != nil {
+			score += 5
+		}
+
+		if score < minScore {
+			continue
+		}
+
+		result := map[string]interface{}{
+			"id":         m.ID.String(),
+			"content":    m.Content,
+			"score":      score,
+			"created_at": m.CreatedAt,
+		}
+
+		if includeRelations {
+			if m.Project != nil {
+				result["project"] = map[string]interface{}{
+					"id":   m.Project.ID.String(),
+					"name": m.Project.Name,
+				}
+			}
+			if m.LinkedTaskID != nil {
+				result["linked_task_id"] = m.LinkedTaskID.String()
+			}
+			if m.Tags != nil {
+				result["tags"] = m.Tags
+			}
+		}
+
+		scored = append(scored, scoredMemory{memory: result, score: score})
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	var results []interface{}
+	for i, s := range scored {
+		if i >= limit {
+			break
+		}
+		results = append(results, s.memory)
+	}
+
+	return nil, map[string]interface{}{
+		"term":        term,
+		"search_mode": map[bool]string{true: "AND", false: "OR"}[isAndSearch],
+		"count":       len(results),
+		"total_found": len(scored),
+		"results":     results,
+	}, nil
+}
+
+func handleGetFocus(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	focus, err := apiClient.GetFocus()
+	if err != nil {
+		return nil, nil, err
+	}
+	if focus.ActivePack == nil {
+		return nil, map[string]interface{}{
+			"active_context_pack_id": nil,
+			"active_pack":            nil,
+			"message":                "No active focus set. Use set_focus to activate a context pack.",
+		}, nil
+	}
+	return nil, map[string]interface{}{
+		"active_context_pack_id": focus.ActiveContextPackID,
+		"active_pack": map[string]interface{}{
+			"id":             focus.ActivePack.ID,
+			"name":           focus.ActivePack.Name,
+			"description":    focus.ActivePack.Description,
+			"type":           focus.ActivePack.Type,
+			"status":         focus.ActivePack.Status,
+			"contexts_count": focus.ActivePack.ContextsCount,
+			"memories_count": focus.ActivePack.MemoriesCount,
+			"tasks_count":    focus.ActivePack.TasksCount,
+			"contexts":       focus.ActivePack.Contexts,
+		},
+	}, nil
+}
+
+type SetFocusInput struct {
+	PackID string `json:"packId"`
+}
+
+func handleSetFocus(ctx context.Context, req *mcp.CallToolRequest, input SetFocusInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	packID := strings.TrimSpace(input.PackID)
+	if packID == "" {
+		return nil, nil, errors.New("packId is required")
+	}
+	focus, err := apiClient.SetFocus(packID)
+	if err != nil {
+		return nil, nil, err
+	}
+	result := map[string]interface{}{
+		"ok":      true,
+		"message": "Focus updated successfully",
+	}
+	if focus.ActivePack != nil {
+		result["active_pack"] = map[string]interface{}{
+			"id":             focus.ActivePack.ID,
+			"name":           focus.ActivePack.Name,
+			"contexts_count": focus.ActivePack.ContextsCount,
+			"memories_count": focus.ActivePack.MemoriesCount,
+			"tasks_count":    focus.ActivePack.TasksCount,
+		}
+	}
+	return nil, result, nil
+}
+
+func handleClearFocus(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	if err := apiClient.ClearFocus(); err != nil {
+		return nil, nil, err
+	}
+	return nil, map[string]interface{}{
+		"ok":      true,
+		"message": "Focus cleared",
+	}, nil
+}
+
+type CreateDecisionInput struct {
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	Status       string `json:"status"`
+	Area         string `json:"area"`
+	Context      string `json:"context"`
+	Consequences string `json:"consequences"`
+}
+
+func handleCreateDecision(ctx context.Context, req *mcp.CallToolRequest, input CreateDecisionInput) (*mcp.CallToolResult, interface{}, error) {
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		return nil, nil, errors.New("title is required")
+	}
+	decision, err := apiClient.CreateDecision(
+		title,
+		strings.TrimSpace(input.Description),
+		strings.TrimSpace(input.Status),
+		strings.TrimSpace(input.Area),
+		strings.TrimSpace(input.Context),
+		strings.TrimSpace(input.Consequences),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, decision, nil
+}
+
+type ListDecisionsInput struct {
+	Status string  `json:"status"`
+	Area   string  `json:"area"`
+	Limit  float64 `json:"limit"`
+}
+
+func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, interface{}, error) {
+	decisions, err := apiClient.ListDecisions(strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), int(input.Limit))
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, decisions, nil
+}
+
+type GetStatsInput struct {
+	Project string `json:"project"`
+}
+
+func handleGetStats(ctx context.Context, req *mcp.CallToolRequest, input GetStatsInput) (*mcp.CallToolResult, interface{}, error) {
+	b, err := apiClient.Request("GET", "/reports/stats", nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	var out interface{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, nil, errors.New("invalid stats response")
+	}
+	return nil, out, nil
+}
+
+type ExportProjectInput struct {
+	Project string `json:"project"`
+	Format  string `json:"format"`
+}
+
+func handleExportProject(ctx context.Context, req *mcp.CallToolRequest, input ExportProjectInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	format := input.Format
+	if format == "" {
+		format = "markdown"
+	}
+
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	projects, err := apiClient.ListProjects()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var project *struct {
+		Name        string
+		Description string
+	}
+	for _, p := range projects {
+		if p.ID.String() == projectID {
+			project = &struct {
+				Name        string
+				Description string
+			}{p.Name, p.Description}
+			break
+		}
+	}
+
+	if project == nil {
+		return nil, nil, errors.New("project not found")
+	}
+
+	tasks, err := apiClient.ListTasks(projectID, "")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", project.Name))
+	if project.Description != "" {
+		sb.WriteString(fmt.Sprintf("%s\n\n", project.Description))
+	}
+
+	total := len(tasks)
+	completed := 0
+	inProgress := 0
+	pending := 0
+	for _, t := range tasks {
+		switch t.Status {
+		case "COMPLETED":
+			completed++
+		case "IN_PROGRESS":
+			inProgress++
+		default:
+			pending++
+		}
+	}
+
+	sb.WriteString("## Statistics\n\n")
+	sb.WriteString(fmt.Sprintf("- **Total:** %d\n", total))
+	sb.WriteString(fmt.Sprintf("- **Completed:** %d\n", completed))
+	sb.WriteString(fmt.Sprintf("- **In Progress:** %d\n", inProgress))
+	sb.WriteString(fmt.Sprintf("- **Pending:** %d\n\n", pending))
+
+	sb.WriteString("## Tasks\n\n")
+	for _, t := range tasks {
+		status := "⏳"
+		if t.Status == "COMPLETED" {
+			status = "✅"
+		} else if t.Status == "IN_PROGRESS" {
+			status = "🔄"
+		}
+		sb.WriteString(fmt.Sprintf("- %s **%s** [%s]\n", status, t.Title, t.Priority))
+	}
+
+	return nil, map[string]interface{}{
+		"project":  project.Name,
+		"format":   format,
+		"markdown": sb.String(),
+	}, nil
+}
+
+type GetCursorRulesInput struct {
+	Format string `json:"format"`
+}
+
+func handleGetCursorRules(ctx context.Context, req *mcp.CallToolRequest, input GetCursorRulesInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	format := input.Format
+	if format == "" {
+		format = "markdown"
+	}
+	return nil, getCursorRules(format), nil
+}
+
+// ============================================================================
+// LEGACY SUPPORT - ToolDefinitions for CLI tools command
+// ============================================================================
 
 type toolDef struct {
 	Name        string                 `json:"name"`
@@ -17,11 +952,6 @@ type toolDef struct {
 	InputSchema map[string]interface{} `json:"inputSchema"`
 }
 
-// ToolDefinitions returns the list of available MCP tools
-// Tools are organized by priority:
-// 🔴 ESSENTIAL - Core functionality, always use
-// 🟡 COMMON - Frequently used
-// 🟢 ADVANCED - Specialized scenarios
 func ToolDefinitions() []toolDef {
 	return []toolDef{
 		// ============================================================================
@@ -236,679 +1166,6 @@ func ToolDefinitions() []toolDef {
 			Description: "🟢 ADVANCED | Pause a task. Clears active task, keeps IN_PROGRESS status.",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
 		},
-	}
-}
-
-// CallTool executes a tool by name with given arguments
-func CallTool(client *api.Client, name string, args map[string]interface{}) (interface{}, error) {
-	switch name {
-	// ============================================================================
-	// AGENT ONBOARDING
-	// ============================================================================
-	case "get_ramorie_info":
-		return getRamorieInfo(), nil
-
-	case "get_cursor_rules":
-		format, _ := args["format"].(string)
-		if format == "" {
-			format = "markdown"
-		}
-		return getCursorRules(format), nil
-
-	case "setup_agent":
-		return setupAgent(client)
-
-	// ============================================================================
-	// PROJECT MANAGEMENT
-	// ============================================================================
-	case "list_projects":
-		return client.ListProjects()
-
-	case "set_active_project":
-		projectName, _ := args["projectName"].(string)
-		projectName = strings.TrimSpace(projectName)
-		if projectName == "" {
-			return nil, errors.New("projectName is required")
-		}
-		projects, err := client.ListProjects()
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range projects {
-			if p.Name == projectName || strings.HasPrefix(p.ID.String(), projectName) {
-				if err := client.SetProjectActive(p.ID.String()); err != nil {
-					return nil, err
-				}
-				cfg, _ := config.LoadConfig()
-				if cfg == nil {
-					cfg = &config.Config{}
-				}
-				cfg.ActiveProjectID = p.ID.String()
-				_ = config.SaveConfig(cfg)
-				return map[string]interface{}{"ok": true, "project_id": p.ID.String(), "name": p.Name}, nil
-			}
-		}
-		return nil, errors.New("project not found")
-
-	case "create_project":
-		name, _ := args["name"].(string)
-		description, _ := args["description"].(string)
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return nil, errors.New("name is required")
-		}
-		return client.CreateProject(name, strings.TrimSpace(description))
-
-	// ============================================================================
-	// TASK MANAGEMENT
-	// ============================================================================
-	case "list_tasks":
-		status, _ := args["status"].(string)
-		projectIdentifier, _ := args["project"].(string)
-		projectID := ""
-		if strings.TrimSpace(projectIdentifier) != "" {
-			pid, err := resolveProjectID(client, projectIdentifier)
-			if err != nil {
-				return nil, err
-			}
-			projectID = pid
-		}
-		tasks, err := client.ListTasks(projectID, strings.TrimSpace(status))
-		if err != nil {
-			return nil, err
-		}
-		limit := toInt(args["limit"])
-		if limit > 0 && limit < len(tasks) {
-			tasks = tasks[:limit]
-		}
-		return tasks, nil
-
-	case "create_task":
-		description, _ := args["description"].(string)
-		description = strings.TrimSpace(description)
-		if description == "" {
-			return nil, errors.New("description is required")
-		}
-		priority, _ := args["priority"].(string)
-		priority = normalizePriority(priority)
-		projectIdentifier, _ := args["project"].(string)
-		projectID, err := resolveProjectID(client, projectIdentifier)
-		if err != nil {
-			return nil, err
-		}
-		task, err := client.CreateTask(projectID, description, "", priority)
-		if err != nil {
-			return nil, err
-		}
-		return task, nil
-
-	case "get_task":
-		taskID, _ := args["taskId"].(string)
-		taskID = strings.TrimSpace(taskID)
-		if taskID == "" {
-			return nil, errors.New("taskId is required")
-		}
-		return client.GetTask(taskID)
-
-	case "start_task":
-		taskID, _ := args["taskId"].(string)
-		taskID = strings.TrimSpace(taskID)
-		if taskID == "" {
-			return nil, errors.New("taskId is required")
-		}
-		if err := client.StartTask(taskID); err != nil {
-			return nil, err
-		}
-		return map[string]interface{}{"ok": true, "message": "Task started. Memories will now auto-link to this task."}, nil
-
-	case "complete_task":
-		taskID, _ := args["taskId"].(string)
-		taskID = strings.TrimSpace(taskID)
-		if taskID == "" {
-			return nil, errors.New("taskId is required")
-		}
-		if err := client.CompleteTask(taskID); err != nil {
-			return nil, err
-		}
-		return map[string]interface{}{"ok": true}, nil
-
-	case "stop_task":
-		taskID, _ := args["taskId"].(string)
-		taskID = strings.TrimSpace(taskID)
-		if taskID == "" {
-			return nil, errors.New("taskId is required")
-		}
-		if err := client.StopTask(taskID); err != nil {
-			return nil, err
-		}
-		return map[string]interface{}{"ok": true}, nil
-
-	case "get_next_tasks":
-		count := toInt(args["count"])
-		if count <= 0 {
-			count = 5
-		}
-		projectIdentifier, _ := args["project"].(string)
-
-		projectID := ""
-		if strings.TrimSpace(projectIdentifier) != "" {
-			pid, err := resolveProjectID(client, projectIdentifier)
-			if err != nil {
-				return nil, err
-			}
-			projectID = pid
-		}
-
-		tasks, err := client.ListTasksQuery(projectID, "TODO", "", nil, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		sort.Slice(tasks, func(i, j int) bool {
-			pi := priorityRank(tasks[i].Priority)
-			pj := priorityRank(tasks[j].Priority)
-			if pi != pj {
-				return pi > pj
-			}
-			return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
-		})
-
-		if count < len(tasks) {
-			tasks = tasks[:count]
-		}
-		return tasks, nil
-
-	case "add_task_note":
-		taskID, _ := args["taskId"].(string)
-		note, _ := args["note"].(string)
-		taskID = strings.TrimSpace(taskID)
-		note = strings.TrimSpace(note)
-		if taskID == "" || note == "" {
-			return nil, errors.New("taskId and note are required")
-		}
-		return client.CreateAnnotation(taskID, note)
-
-	case "update_progress":
-		taskID, _ := args["taskId"].(string)
-		taskID = strings.TrimSpace(taskID)
-		progress := toInt(args["progress"])
-		if taskID == "" {
-			return nil, errors.New("taskId is required")
-		}
-		if progress < 0 || progress > 100 {
-			return nil, errors.New("progress must be between 0 and 100")
-		}
-		return client.UpdateTask(taskID, map[string]interface{}{"progress": progress})
-
-	case "search_tasks":
-		query, _ := args["query"].(string)
-		query = strings.TrimSpace(query)
-		if query == "" {
-			return nil, errors.New("query is required")
-		}
-		status, _ := args["status"].(string)
-		projectIdentifier, _ := args["project"].(string)
-		limit := toInt(args["limit"])
-
-		projectID := ""
-		if strings.TrimSpace(projectIdentifier) != "" {
-			pid, err := resolveProjectID(client, projectIdentifier)
-			if err != nil {
-				return nil, err
-			}
-			projectID = pid
-		}
-
-		tasks, err := client.ListTasksQuery(projectID, strings.TrimSpace(status), query, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		if limit > 0 && limit < len(tasks) {
-			tasks = tasks[:limit]
-		}
-		return tasks, nil
-
-	case "get_active_task":
-		return client.GetActiveTask()
-
-	// ============================================================================
-	// FOCUS MANAGEMENT (SINGLE SOURCE OF TRUTH)
-	// ============================================================================
-	case "get_focus":
-		focus, err := client.GetFocus()
-		if err != nil {
-			return nil, err
-		}
-		if focus.ActivePack == nil {
-			return map[string]interface{}{
-				"active_context_pack_id": nil,
-				"active_pack":            nil,
-				"message":                "No active focus set. Use set_focus to activate a context pack.",
-			}, nil
-		}
-		return map[string]interface{}{
-			"active_context_pack_id": focus.ActiveContextPackID,
-			"active_pack": map[string]interface{}{
-				"id":             focus.ActivePack.ID,
-				"name":           focus.ActivePack.Name,
-				"description":    focus.ActivePack.Description,
-				"type":           focus.ActivePack.Type,
-				"status":         focus.ActivePack.Status,
-				"contexts_count": focus.ActivePack.ContextsCount,
-				"memories_count": focus.ActivePack.MemoriesCount,
-				"tasks_count":    focus.ActivePack.TasksCount,
-				"contexts":       focus.ActivePack.Contexts,
-			},
-		}, nil
-
-	case "set_focus":
-		packID, _ := args["packId"].(string)
-		packID = strings.TrimSpace(packID)
-		if packID == "" {
-			return nil, errors.New("packId is required")
-		}
-		focus, err := client.SetFocus(packID)
-		if err != nil {
-			return nil, err
-		}
-		result := map[string]interface{}{
-			"ok":      true,
-			"message": "Focus updated successfully",
-		}
-		if focus.ActivePack != nil {
-			result["active_pack"] = map[string]interface{}{
-				"id":             focus.ActivePack.ID,
-				"name":           focus.ActivePack.Name,
-				"contexts_count": focus.ActivePack.ContextsCount,
-				"memories_count": focus.ActivePack.MemoriesCount,
-				"tasks_count":    focus.ActivePack.TasksCount,
-			}
-		}
-		return result, nil
-
-	case "clear_focus":
-		if err := client.ClearFocus(); err != nil {
-			return nil, err
-		}
-		return map[string]interface{}{
-			"ok":      true,
-			"message": "Focus cleared",
-		}, nil
-
-	// ============================================================================
-	// MEMORY MANAGEMENT
-	// ============================================================================
-	case "add_memory":
-		content, _ := args["content"].(string)
-		content = strings.TrimSpace(content)
-		if content == "" {
-			return nil, errors.New("content is required")
-		}
-		projectIdentifier, _ := args["project"].(string)
-		projectID, err := resolveProjectID(client, projectIdentifier)
-		if err != nil {
-			return nil, err
-		}
-		return client.CreateMemory(projectID, content)
-
-	case "list_memories":
-		projectIdentifier, _ := args["project"].(string)
-		term, _ := args["term"].(string)
-		projectID := ""
-		if strings.TrimSpace(projectIdentifier) != "" {
-			pid, err := resolveProjectID(client, projectIdentifier)
-			if err != nil {
-				return nil, err
-			}
-			projectID = pid
-		}
-		memories, err := client.ListMemories(projectID, "")
-		if err != nil {
-			return nil, err
-		}
-		term = strings.TrimSpace(term)
-		if term != "" {
-			filtered := memories[:0]
-			for _, m := range memories {
-				if strings.Contains(strings.ToLower(m.Content), strings.ToLower(term)) {
-					filtered = append(filtered, m)
-				}
-			}
-			memories = filtered
-		}
-		limit := toInt(args["limit"])
-		if limit > 0 && limit < len(memories) {
-			memories = memories[:limit]
-		}
-		return memories, nil
-
-	case "get_memory":
-		memoryID, _ := args["memoryId"].(string)
-		memoryID = strings.TrimSpace(memoryID)
-		if memoryID == "" {
-			return nil, errors.New("memoryId is required")
-		}
-		return client.GetMemory(memoryID)
-
-	case "recall":
-		term, _ := args["term"].(string)
-		term = strings.TrimSpace(term)
-		if term == "" {
-			return nil, errors.New("term is required")
-		}
-
-		// Parse options
-		limit := toInt(args["limit"])
-		if limit == 0 {
-			limit = 20
-		}
-		minScore := toInt(args["min_score"])
-		projectFilter, _ := args["project"].(string)
-		tagFilter, _ := args["tag"].(string)
-		linkedTaskOnly, _ := args["linked_task"].(bool)
-		includeRelations := true
-		if ir, ok := args["include_relations"].(bool); ok {
-			includeRelations = ir
-		}
-
-		// Resolve project filter if provided
-		projectID := ""
-		if strings.TrimSpace(projectFilter) != "" {
-			pid, err := resolveProjectID(client, projectFilter)
-			if err == nil {
-				projectID = pid
-			}
-		}
-
-		// Fetch memories
-		memories, err := client.ListMemories(projectID, "")
-		if err != nil {
-			return nil, err
-		}
-
-		// Parse search terms
-		// Comma-separated = AND (all must match)
-		// Space-separated = OR (any match)
-		isAndSearch := strings.Contains(term, ",")
-		var searchTerms []string
-		if isAndSearch {
-			for _, t := range strings.Split(term, ",") {
-				t = strings.TrimSpace(strings.ToLower(t))
-				if t != "" {
-					searchTerms = append(searchTerms, t)
-				}
-			}
-		} else {
-			for _, t := range strings.Fields(term) {
-				t = strings.TrimSpace(strings.ToLower(t))
-				if t != "" {
-					searchTerms = append(searchTerms, t)
-				}
-			}
-		}
-
-		// Score and filter memories
-		type scoredMemory struct {
-			memory interface{}
-			score  int
-		}
-		var scored []scoredMemory
-
-		for _, m := range memories {
-			// Filter: linked_task
-			if linkedTaskOnly && m.LinkedTaskID == nil {
-				continue
-			}
-
-			// Filter: tag
-			if tagFilter != "" {
-				hasTag := false
-				if tags, ok := m.Tags.([]interface{}); ok {
-					for _, tag := range tags {
-						if tagStr, ok := tag.(string); ok {
-							if strings.EqualFold(tagStr, tagFilter) {
-								hasTag = true
-								break
-							}
-						}
-					}
-				}
-				if !hasTag {
-					continue
-				}
-			}
-
-			// Calculate relevance score
-			contentLower := strings.ToLower(m.Content)
-			score := 0
-			matchCount := 0
-
-			for _, term := range searchTerms {
-				if strings.Contains(contentLower, term) {
-					matchCount++
-					// Base score for match
-					score += 20
-					// Bonus for exact word match
-					if strings.Contains(contentLower, " "+term+" ") ||
-						strings.HasPrefix(contentLower, term+" ") ||
-						strings.HasSuffix(contentLower, " "+term) {
-						score += 10
-					}
-					// Bonus for title/header match (## or ###)
-					if strings.Contains(contentLower, "## "+term) ||
-						strings.Contains(contentLower, "### "+term) {
-						score += 15
-					}
-					// Bonus for multiple occurrences
-					occurrences := strings.Count(contentLower, term)
-					if occurrences > 1 {
-						score += min(occurrences*5, 25)
-					}
-				}
-			}
-
-			// AND search: all terms must match
-			if isAndSearch && matchCount < len(searchTerms) {
-				continue
-			}
-			// OR search: at least one term must match
-			if !isAndSearch && matchCount == 0 {
-				continue
-			}
-
-			// Bonus for linked task (organized knowledge)
-			if m.LinkedTaskID != nil {
-				score += 5
-			}
-
-			// Skip if below minimum score
-			if score < minScore {
-				continue
-			}
-
-			// Build result object
-			result := map[string]interface{}{
-				"id":         m.ID.String(),
-				"content":    m.Content,
-				"score":      score,
-				"created_at": m.CreatedAt,
-			}
-
-			// Include relations
-			if includeRelations {
-				if m.Project != nil {
-					result["project"] = map[string]interface{}{
-						"id":   m.Project.ID.String(),
-						"name": m.Project.Name,
-					}
-				}
-				if m.LinkedTaskID != nil {
-					result["linked_task_id"] = m.LinkedTaskID.String()
-				}
-				if m.Tags != nil {
-					result["tags"] = m.Tags
-				}
-			}
-
-			scored = append(scored, scoredMemory{memory: result, score: score})
-		}
-
-		// Sort by score (descending)
-		sort.Slice(scored, func(i, j int) bool {
-			return scored[i].score > scored[j].score
-		})
-
-		// Apply limit and extract results
-		var results []interface{}
-		for i, s := range scored {
-			if i >= limit {
-				break
-			}
-			results = append(results, s.memory)
-		}
-
-		return map[string]interface{}{
-			"term":        term,
-			"search_mode": map[bool]string{true: "AND", false: "OR"}[isAndSearch],
-			"count":       len(results),
-			"total_found": len(scored),
-			"results":     results,
-		}, nil
-
-	// ============================================================================
-	// DECISIONS (ADRs)
-	// ============================================================================
-	case "create_decision":
-		title, _ := args["title"].(string)
-		title = strings.TrimSpace(title)
-		if title == "" {
-			return nil, errors.New("title is required")
-		}
-		description, _ := args["description"].(string)
-		status, _ := args["status"].(string)
-		area, _ := args["area"].(string)
-		context, _ := args["context"].(string)
-		consequences, _ := args["consequences"].(string)
-
-		return client.CreateDecision(
-			title,
-			strings.TrimSpace(description),
-			strings.TrimSpace(status),
-			strings.TrimSpace(area),
-			strings.TrimSpace(context),
-			strings.TrimSpace(consequences),
-		)
-
-	case "list_decisions":
-		status, _ := args["status"].(string)
-		area, _ := args["area"].(string)
-		limit := toInt(args["limit"])
-		decisions, err := client.ListDecisions(strings.TrimSpace(status), strings.TrimSpace(area), limit)
-		if err != nil {
-			return nil, err
-		}
-		return decisions, nil
-
-	// ============================================================================
-	// REPORTS
-	// ============================================================================
-	case "get_stats":
-		b, err := client.Request("GET", "/reports/stats", nil)
-		if err != nil {
-			return nil, err
-		}
-		var out interface{}
-		if err := json.Unmarshal(b, &out); err != nil {
-			return nil, fmt.Errorf("invalid stats response")
-		}
-		return out, nil
-
-	case "export_project":
-		projectIdentifier, _ := args["project"].(string)
-		format, _ := args["format"].(string)
-		if format == "" {
-			format = "markdown"
-		}
-
-		projectID, err := resolveProjectID(client, projectIdentifier)
-		if err != nil {
-			return nil, err
-		}
-
-		projects, err := client.ListProjects()
-		if err != nil {
-			return nil, err
-		}
-
-		var project *struct {
-			Name        string
-			Description string
-		}
-		for _, p := range projects {
-			if p.ID.String() == projectID {
-				project = &struct {
-					Name        string
-					Description string
-				}{p.Name, p.Description}
-				break
-			}
-		}
-
-		if project == nil {
-			return nil, errors.New("project not found")
-		}
-
-		tasks, err := client.ListTasks(projectID, "")
-		if err != nil {
-			return nil, err
-		}
-
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("# %s\n\n", project.Name))
-		if project.Description != "" {
-			sb.WriteString(fmt.Sprintf("%s\n\n", project.Description))
-		}
-
-		total := len(tasks)
-		completed := 0
-		inProgress := 0
-		pending := 0
-		for _, t := range tasks {
-			switch t.Status {
-			case "COMPLETED":
-				completed++
-			case "IN_PROGRESS":
-				inProgress++
-			default:
-				pending++
-			}
-		}
-
-		sb.WriteString("## Statistics\n\n")
-		sb.WriteString(fmt.Sprintf("- **Total:** %d\n", total))
-		sb.WriteString(fmt.Sprintf("- **Completed:** %d\n", completed))
-		sb.WriteString(fmt.Sprintf("- **In Progress:** %d\n", inProgress))
-		sb.WriteString(fmt.Sprintf("- **Pending:** %d\n\n", pending))
-
-		sb.WriteString("## Tasks\n\n")
-		for _, t := range tasks {
-			status := "⏳"
-			if t.Status == "COMPLETED" {
-				status = "✅"
-			} else if t.Status == "IN_PROGRESS" {
-				status = "🔄"
-			}
-			sb.WriteString(fmt.Sprintf("- %s **%s** [%s]\n", status, t.Title, t.Priority))
-		}
-
-		return map[string]interface{}{
-			"project":  project.Name,
-			"format":   format,
-			"markdown": sb.String(),
-		}, nil
-
-	default:
-		return nil, errors.New("tool not implemented")
 	}
 }
 
