@@ -1,6 +1,6 @@
 # Ramorie CLI
 
-AI-powered task and memory management CLI.
+AI-powered task and memory management CLI for developers and AI agents.
 
 ## Installation
 
@@ -10,34 +10,56 @@ npm install -g ramorie
 
 ## Alternative Installation Methods
 
-### macOS / Linux (Homebrew)
+### Homebrew (macOS/Linux)
 ```bash
-brew install kutbudev/tap/ramorie
+brew tap kutbudev/tap
+brew install ramorie
 ```
 
 ### Direct Download
-Download the latest release from [GitHub Releases](https://github.com/kutbudev/ramorie-cli/releases).
+Download pre-built binaries from [GitHub Releases](https://github.com/kutbudev/ramorie-cli/releases/latest).
 
-## Usage
+### Go Install
+```bash
+go install github.com/kutbudev/ramorie-cli/cmd/jbraincli@latest
+```
+
+## Quick Start
 
 ```bash
-# Configure API connection
-ramorie config set-api <your-api-key>
+# Create an account
+ramorie setup register
 
-# List tasks
-ramorie task list
+# Create your first project
+ramorie project init "My Project"
+ramorie project use "My Project"
 
 # Create a task
-ramorie task add "My new task"
+ramorie task create "Implement user authentication" --priority H
 
-# AI-powered features
-ramorie task analyze <task-id>
-ramorie memory add "Important note"
+# View kanban board
+ramorie kanban
+
+# Store knowledge
+ramorie remember "Use bcrypt with 12 rounds for password hashing"
+
+# Search memories
+ramorie memory recall "password"
 ```
+
+## Features
+
+- 🎯 **Smart Task Management** - Priorities, progress tracking, subtasks
+- 🧠 **Memory System** - Store and search development insights
+- 🤖 **AI Integration** - Gemini-powered suggestions and analysis
+- 📊 **Visual Dashboards** - Kanban boards, burndown charts, statistics
+- 🔗 **MCP Support** - Model Context Protocol for AI agents (Cursor, Claude, etc.)
 
 ## Documentation
 
-Full documentation available at [ramorie.com](https://ramorie.com)
+- **Website:** [ramorie.com](https://ramorie.com)
+- **Docs:** [ramorie.com/docs](https://ramorie.com/docs)
+- **GitHub:** [github.com/kutbudev/ramorie-cli](https://github.com/kutbudev/ramorie-cli)
 
 ## License
 
