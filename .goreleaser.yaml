@@ -9,7 +9,7 @@ before:
 
 builds:
   - id: ramorie
-    main: ./cmd/jbraincli
+    main: ./cmd/ramorie
     binary: ramorie
     env:
       - CGO_ENABLED=0
