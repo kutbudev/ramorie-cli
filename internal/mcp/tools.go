@@ -152,6 +152,44 @@ func registerTools(server *mcp.Server) {
 	}, handleClearFocus)
 
 	// ============================================================================
+	// 🟡 COMMON - Context Pack Management
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_context_packs",
+		Description: "🟡 COMMON | List all context packs with optional filtering by type and status.",
+	}, handleListContextPacks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_context_pack",
+		Description: "🟡 COMMON | Create a new context pack. Use to bundle related contexts, memories, and tasks.",
+	}, handleCreateContextPack)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_context_pack",
+		Description: "🟡 COMMON | Get detailed context pack info including linked memories, tasks, and contexts.",
+	}, handleGetContextPack)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_context_pack",
+		Description: "🟡 COMMON | Update a context pack's name, description, type, or status.",
+	}, handleUpdateContextPack)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "delete_context_pack",
+		Description: "🟢 ADVANCED | Delete a context pack. ⚠️ Requires explicit user approval.",
+	}, handleDeleteContextPack)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "add_memory_to_pack",
+		Description: "🟡 COMMON | Add an existing memory to a context pack.",
+	}, handleAddMemoryToPack)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "add_task_to_pack",
+		Description: "🟡 COMMON | Add an existing task to a context pack.",
+	}, handleAddTaskToPack)
+
+	// ============================================================================
 	// 🟡 COMMON - Decisions (ADRs)
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
@@ -163,6 +201,72 @@ func registerTools(server *mcp.Server) {
 		Name:        "list_decisions",
 		Description: "🟡 COMMON | List architectural decisions. Review past decisions before making new ones.",
 	}, handleListDecisions)
+
+	// ============================================================================
+	// 🟡 COMMON - AI Features
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "ai_next_step",
+		Description: "🟡 COMMON | Get AI-suggested next actionable step for a task based on project context.",
+	}, handleAINextStep)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "ai_estimate_time",
+		Description: "🟡 COMMON | Get AI-estimated time to complete a task.",
+	}, handleAIEstimateTime)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "ai_analyze_risks",
+		Description: "🟡 COMMON | Get AI analysis of potential risks and blockers for a task.",
+	}, handleAIAnalyzeRisks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "ai_find_dependencies",
+		Description: "🟡 COMMON | Get AI-identified dependencies and prerequisites for a task.",
+	}, handleAIFindDependencies)
+
+	// ============================================================================
+	// 🟡 COMMON - Organizations
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_organizations",
+		Description: "🟡 COMMON | List user's organizations.",
+	}, handleListOrganizations)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_organization",
+		Description: "🟡 COMMON | Get organization details.",
+	}, handleGetOrganization)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_organization",
+		Description: "🟢 ADVANCED | Create new organization.",
+	}, handleCreateOrganization)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_organization",
+		Description: "🟢 ADVANCED | Update organization.",
+	}, handleUpdateOrganization)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_organization_members",
+		Description: "🟡 COMMON | List organization members.",
+	}, handleGetOrganizationMembers)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "invite_to_organization",
+		Description: "🟢 ADVANCED | Invite member to organization by email.",
+	}, handleInviteToOrganization)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "switch_organization",
+		Description: "🟡 COMMON | Switch active organization context.",
+	}, handleSwitchOrganization)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_active_organization",
+		Description: "🔴 ESSENTIAL | Get current active organization.",
+	}, handleGetActiveOrganization)
 
 	// ============================================================================
 	// 🟡 COMMON - Reports
@@ -783,6 +887,365 @@ func handleClearFocus(ctx context.Context, req *mcp.CallToolRequest, input Empty
 	}, nil
 }
 
+type ListContextPacksInput struct {
+	Type   string  `json:"type,omitempty"`   // project, integration, decision, custom
+	Status string  `json:"status,omitempty"` // draft, published
+	Query  string  `json:"query,omitempty"`
+	Limit  float64 `json:"limit,omitempty"`
+}
+
+func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input ListContextPacksInput) (*mcp.CallToolResult, interface{}, error) {
+	limit := int(input.Limit)
+	if limit == 0 {
+		limit = 50
+	}
+	result, err := apiClient.ListContextPacks(
+		strings.TrimSpace(input.Type),
+		strings.TrimSpace(input.Status),
+		strings.TrimSpace(input.Query),
+		limit,
+		0,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+type CreateContextPackInput struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`        // project, integration, decision, custom
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+func handleCreateContextPack(ctx context.Context, req *mcp.CallToolRequest, input CreateContextPackInput) (*mcp.CallToolResult, interface{}, error) {
+	name := strings.TrimSpace(input.Name)
+	packType := strings.TrimSpace(input.Type)
+	if name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	if packType == "" {
+		return nil, nil, errors.New("type is required (project, integration, decision, custom)")
+	}
+	pack, err := apiClient.CreateContextPack(
+		name,
+		packType,
+		strings.TrimSpace(input.Description),
+		"draft", // Always create as draft
+		input.Tags,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, pack, nil
+}
+
+type GetContextPackInput struct {
+	PackID string `json:"packId"`
+}
+
+func handleGetContextPack(ctx context.Context, req *mcp.CallToolRequest, input GetContextPackInput) (*mcp.CallToolResult, interface{}, error) {
+	packID := strings.TrimSpace(input.PackID)
+	if packID == "" {
+		return nil, nil, errors.New("packId is required")
+	}
+	pack, err := apiClient.GetContextPack(packID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, pack, nil
+}
+
+type UpdateContextPackInput struct {
+	PackID      string `json:"packId"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status,omitempty"`
+}
+
+func handleUpdateContextPack(ctx context.Context, req *mcp.CallToolRequest, input UpdateContextPackInput) (*mcp.CallToolResult, interface{}, error) {
+	packID := strings.TrimSpace(input.PackID)
+	if packID == "" {
+		return nil, nil, errors.New("packId is required")
+	}
+	updates := make(map[string]interface{})
+	if name := strings.TrimSpace(input.Name); name != "" {
+		updates["name"] = name
+	}
+	if desc := strings.TrimSpace(input.Description); desc != "" {
+		updates["description"] = desc
+	}
+	if status := strings.TrimSpace(input.Status); status != "" {
+		updates["status"] = status
+	}
+	if len(updates) == 0 {
+		return nil, nil, errors.New("at least one field to update is required")
+	}
+	pack, err := apiClient.UpdateContextPack(packID, updates)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, pack, nil
+}
+
+type DeleteContextPackInput struct {
+	PackID string `json:"packId"`
+}
+
+func handleDeleteContextPack(ctx context.Context, req *mcp.CallToolRequest, input DeleteContextPackInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	packID := strings.TrimSpace(input.PackID)
+	if packID == "" {
+		return nil, nil, errors.New("packId is required")
+	}
+	if err := apiClient.DeleteContextPack(packID); err != nil {
+		return nil, nil, err
+	}
+	return nil, map[string]interface{}{
+		"ok":      true,
+		"message": "Context pack deleted",
+	}, nil
+}
+
+type AddMemoryToPackInput struct {
+	PackID   string `json:"packId"`
+	MemoryID string `json:"memoryId"`
+}
+
+func handleAddMemoryToPack(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryToPackInput) (*mcp.CallToolResult, interface{}, error) {
+	packID := strings.TrimSpace(input.PackID)
+	memoryID := strings.TrimSpace(input.MemoryID)
+	if packID == "" || memoryID == "" {
+		return nil, nil, errors.New("packId and memoryId are required")
+	}
+
+	// Get current pack to retrieve existing memory IDs
+	pack, err := apiClient.GetContextPack(packID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Build memory IDs array
+	memoryIDs := []string{memoryID}
+	if pack.MemoryIDs != nil {
+		if ids, ok := pack.MemoryIDs.([]interface{}); ok {
+			for _, id := range ids {
+				if idStr, ok := id.(string); ok && idStr != memoryID {
+					memoryIDs = append(memoryIDs, idStr)
+				}
+			}
+		}
+	}
+
+	updates := map[string]interface{}{
+		"memoryIds": memoryIDs,
+	}
+	result, err := apiClient.UpdateContextPack(packID, updates)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+type AddTaskToPackInput struct {
+	PackID string `json:"packId"`
+	TaskID string `json:"taskId"`
+}
+
+func handleAddTaskToPack(ctx context.Context, req *mcp.CallToolRequest, input AddTaskToPackInput) (*mcp.CallToolResult, interface{}, error) {
+	packID := strings.TrimSpace(input.PackID)
+	taskID := strings.TrimSpace(input.TaskID)
+	if packID == "" || taskID == "" {
+		return nil, nil, errors.New("packId and taskId are required")
+	}
+
+	// Get current pack to retrieve existing task IDs
+	pack, err := apiClient.GetContextPack(packID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Build task IDs array
+	taskIDs := []string{taskID}
+	if pack.TaskIDs != nil {
+		if ids, ok := pack.TaskIDs.([]interface{}); ok {
+			for _, id := range ids {
+				if idStr, ok := id.(string); ok && idStr != taskID {
+					taskIDs = append(taskIDs, idStr)
+				}
+			}
+		}
+	}
+
+	updates := map[string]interface{}{
+		"taskIds": taskIDs,
+	}
+	result, err := apiClient.UpdateContextPack(packID, updates)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+// ============================================================================
+// AI FEATURES HANDLERS
+// ============================================================================
+
+type AITaskInput struct {
+	TaskID string `json:"taskId"`
+}
+
+func handleAINextStep(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	result, err := apiClient.AINextStep(taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+func handleAIEstimateTime(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	result, err := apiClient.AIEstimateTime(taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+func handleAIAnalyzeRisks(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	result, err := apiClient.AIRisks(taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+func handleAIFindDependencies(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+	result, err := apiClient.AIDependencies(taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
+}
+
+// ============================================================================
+// ORGANIZATION HANDLERS
+// ============================================================================
+
+func handleListOrganizations(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
+	orgs, err := apiClient.ListOrganizations()
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, orgs, nil
+}
+
+type GetOrganizationInput struct {
+	OrgID string `json:"orgId"`
+}
+
+func handleGetOrganization(ctx context.Context, req *mcp.CallToolRequest, input GetOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
+	orgID := strings.TrimSpace(input.OrgID)
+	if orgID == "" {
+		return nil, nil, errors.New("orgId is required")
+	}
+	org, err := apiClient.GetOrganization(orgID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, org, nil
+}
+
+type CreateOrganizationInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+func handleCreateOrganization(ctx context.Context, req *mcp.CallToolRequest, input CreateOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	org, err := apiClient.CreateOrganization(name, strings.TrimSpace(input.Description))
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, org, nil
+}
+
+type UpdateOrganizationInput struct {
+	OrgID       string `json:"orgId"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+func handleUpdateOrganization(ctx context.Context, req *mcp.CallToolRequest, input UpdateOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
+	orgID := strings.TrimSpace(input.OrgID)
+	if orgID == "" {
+		return nil, nil, errors.New("orgId is required")
+	}
+	// Note: Update method needs to be added to API client
+	return nil, nil, errors.New("update_organization not yet implemented in API client")
+}
+
+func handleGetOrganizationMembers(ctx context.Context, req *mcp.CallToolRequest, input GetOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
+	orgID := strings.TrimSpace(input.OrgID)
+	if orgID == "" {
+		return nil, nil, errors.New("orgId is required")
+	}
+	// Note: Method needs to be added to API client
+	return nil, nil, errors.New("get_organization_members not yet implemented in API client")
+}
+
+type InviteToOrganizationInput struct {
+	OrgID string `json:"orgId"`
+	Email string `json:"email"`
+	Role  string `json:"role,omitempty"`
+}
+
+func handleInviteToOrganization(ctx context.Context, req *mcp.CallToolRequest, input InviteToOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
+	orgID := strings.TrimSpace(input.OrgID)
+	email := strings.TrimSpace(input.Email)
+	if orgID == "" || email == "" {
+		return nil, nil, errors.New("orgId and email are required")
+	}
+	// Note: Method needs to be added to API client
+	return nil, nil, errors.New("invite_to_organization not yet implemented in API client")
+}
+
+type SwitchOrganizationInput struct {
+	OrgID string `json:"orgId"`
+}
+
+func handleSwitchOrganization(ctx context.Context, req *mcp.CallToolRequest, input SwitchOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
+	orgID := strings.TrimSpace(input.OrgID)
+	if orgID == "" {
+		return nil, nil, errors.New("orgId is required")
+	}
+	// Note: Method needs to be added to API client
+	return nil, nil, errors.New("switch_organization not yet implemented in API client")
+}
+
+func handleGetActiveOrganization(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
+	// Note: Method needs to be added to API client
+	return nil, nil, errors.New("get_active_organization not yet implemented in API client")
+}
+
 type CreateDecisionInput struct {
 	Title        string `json:"title"`
 	Description  string `json:"description,omitempty"`
@@ -1054,6 +1517,93 @@ func ToolDefinitions() []toolDef {
 			Name:        "clear_focus",
 			Description: "🔴 ESSENTIAL | Clear user's active focus. Deactivates the current context pack.",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+
+		// ============================================================================
+		// 🟡 COMMON - Context Pack Management
+		// ============================================================================
+		{
+			Name:        "list_context_packs",
+			Description: "🟡 COMMON | List all context packs with optional filtering by type and status.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"type":   map[string]interface{}{"type": "string", "description": "Filter by type: project, integration, decision, custom"},
+					"status": map[string]interface{}{"type": "string", "description": "Filter by status: draft, published"},
+					"query":  map[string]interface{}{"type": "string", "description": "Search query"},
+					"limit":  map[string]interface{}{"type": "number", "description": "Max results (default: 50)"},
+				},
+			},
+		},
+		{
+			Name:        "create_context_pack",
+			Description: "🟡 COMMON | Create a new context pack. Use to bundle related contexts, memories, and tasks.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name":        map[string]interface{}{"type": "string", "description": "Pack name"},
+					"type":        map[string]interface{}{"type": "string", "description": "Pack type: project, integration, decision, custom"},
+					"description": map[string]interface{}{"type": "string", "description": "Pack description"},
+					"tags":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Tags"},
+				},
+				"required": []string{"name", "type"},
+			},
+		},
+		{
+			Name:        "get_context_pack",
+			Description: "🟡 COMMON | Get detailed context pack info including linked memories, tasks, and contexts.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{"packId": map[string]interface{}{"type": "string", "description": "Context pack ID"}},
+				"required":   []string{"packId"},
+			},
+		},
+		{
+			Name:        "update_context_pack",
+			Description: "🟡 COMMON | Update a context pack's name, description, type, or status.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"packId":      map[string]interface{}{"type": "string", "description": "Context pack ID"},
+					"name":        map[string]interface{}{"type": "string", "description": "New name"},
+					"description": map[string]interface{}{"type": "string", "description": "New description"},
+					"status":      map[string]interface{}{"type": "string", "description": "New status: draft, published"},
+				},
+				"required": []string{"packId"},
+			},
+		},
+		{
+			Name:        "delete_context_pack",
+			Description: "🟢 ADVANCED | Delete a context pack. ⚠️ Requires explicit user approval.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{"packId": map[string]interface{}{"type": "string", "description": "Context pack ID"}},
+				"required":   []string{"packId"},
+			},
+		},
+		{
+			Name:        "add_memory_to_pack",
+			Description: "🟡 COMMON | Add an existing memory to a context pack.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"packId":   map[string]interface{}{"type": "string", "description": "Context pack ID"},
+					"memoryId": map[string]interface{}{"type": "string", "description": "Memory ID"},
+				},
+				"required": []string{"packId", "memoryId"},
+			},
+		},
+		{
+			Name:        "add_task_to_pack",
+			Description: "🟡 COMMON | Add an existing task to a context pack.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"packId": map[string]interface{}{"type": "string", "description": "Context pack ID"},
+					"taskId": map[string]interface{}{"type": "string", "description": "Task ID"},
+				},
+				"required": []string{"packId", "taskId"},
+			},
 		},
 
 		// ============================================================================
@@ -1463,3 +2013,4 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 
 	return result, nil
 }
+// ============================================================================

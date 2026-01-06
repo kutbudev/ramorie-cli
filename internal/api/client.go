@@ -818,17 +818,25 @@ func (c *Client) LoginUser(email, password string) (string, error) {
 
 // ContextPack represents a context pack
 type ContextPack struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	OrgID       *string   `json:"org_id,omitempty"`
-	Type        string    `json:"type"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	Status      string    `json:"status"`
-	Version     int       `json:"version"`
-	Tags        []string  `json:"tags"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             string        `json:"id"`
+	UserID         string        `json:"user_id"`
+	OrgID          *string       `json:"org_id,omitempty"`
+	Type           string        `json:"type"`
+	Name           string        `json:"name"`
+	Description    *string       `json:"description,omitempty"`
+	Status         string        `json:"status"`
+	Version        int           `json:"version"`
+	Tags           []string      `json:"tags"`
+	Memories       []interface{} `json:"memories,omitempty"`
+	Tasks          []interface{} `json:"tasks,omitempty"`
+	Contexts       []interface{} `json:"contexts,omitempty"`
+	MemoryIDs      interface{}   `json:"memory_ids,omitempty"`
+	TaskIDs        interface{}   `json:"task_ids,omitempty"`
+	ContextsCount  int           `json:"contexts_count,omitempty"`
+	MemoriesCount  int           `json:"memories_count,omitempty"`
+	TasksCount     int           `json:"tasks_count,omitempty"`
+	CreatedAt      time.Time     `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 // ContextPackListResponse represents the response from listing context packs
@@ -979,6 +987,50 @@ func (c *Client) GetActiveContextPack() (*ContextPack, error) {
 // SetActiveContextPack sets the active context pack (alias for UseContextPack)
 func (c *Client) SetActiveContextPack(id string) (*ContextPack, error) {
 	return c.UseContextPack(id)
+}
+
+// AddMemoryToPack adds a memory to a context pack
+func (c *Client) AddMemoryToPack(packID, memoryID string) (*ContextPack, error) {
+	endpoint := fmt.Sprintf("/context-packs/%s/memories/%s", packID, memoryID)
+	respBody, err := c.makeRequest("POST", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var pack ContextPack
+	if err := json.Unmarshal(respBody, &pack); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal context pack: %w", err)
+	}
+	return &pack, nil
+}
+
+// AddTaskToPack adds a task to a context pack
+func (c *Client) AddTaskToPack(packID, taskID string) (*ContextPack, error) {
+	endpoint := fmt.Sprintf("/context-packs/%s/tasks/%s", packID, taskID)
+	respBody, err := c.makeRequest("POST", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var pack ContextPack
+	if err := json.Unmarshal(respBody, &pack); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal context pack: %w", err)
+	}
+	return &pack, nil
+}
+
+// RemoveMemoryFromPack removes a memory from a context pack
+func (c *Client) RemoveMemoryFromPack(packID, memoryID string) error {
+	endpoint := fmt.Sprintf("/context-packs/%s/memories/%s", packID, memoryID)
+	_, err := c.makeRequest("DELETE", endpoint, nil)
+	return err
+}
+
+// RemoveTaskFromPack removes a task from a context pack
+func (c *Client) RemoveTaskFromPack(packID, taskID string) error {
+	endpoint := fmt.Sprintf("/context-packs/%s/tasks/%s", packID, taskID)
+	_, err := c.makeRequest("DELETE", endpoint, nil)
+	return err
 }
 
 // Decision API methods
@@ -1240,4 +1292,103 @@ func (c *Client) CreateOrganization(name, description string) (*Organization, er
 		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
 	}
 	return &org, nil
+}
+
+// UpdateOrganization updates an organization
+func (c *Client) UpdateOrganization(id string, updates map[string]interface{}) (*Organization, error) {
+	endpoint := fmt.Sprintf("/organizations/%s", id)
+	respBody, err := c.makeRequest("PUT", endpoint, updates)
+	if err != nil {
+		return nil, err
+	}
+
+	var org Organization
+	if err := json.Unmarshal(respBody, &org); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
+	}
+	return &org, nil
+}
+
+// OrganizationMember represents a member of an organization
+type OrganizationMember struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	OrgID     string    `json:"org_id"`
+	Role      string    `json:"role"` // owner, admin, member
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// GetOrganizationMembers lists members of an organization
+func (c *Client) GetOrganizationMembers(orgID string) ([]OrganizationMember, error) {
+	endpoint := fmt.Sprintf("/organizations/%s/members", orgID)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var members []OrganizationMember
+	if err := json.Unmarshal(respBody, &members); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal members: %w", err)
+	}
+	return members, nil
+}
+
+// InviteToOrganization invites a user to an organization by email
+func (c *Client) InviteToOrganization(orgID, email, role string) (map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("/organizations/%s/invite", orgID)
+	reqBody := map[string]interface{}{
+		"email": email,
+	}
+	if role != "" {
+		reqBody["role"] = role
+	}
+
+	respBody, err := c.makeRequest("POST", endpoint, reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal invite response: %w", err)
+	}
+	return result, nil
+}
+
+// SwitchOrganization switches the active organization context
+func (c *Client) SwitchOrganization(orgID string) (*Organization, error) {
+	endpoint := fmt.Sprintf("/organizations/%s/switch", orgID)
+	respBody, err := c.makeRequest("POST", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var org Organization
+	if err := json.Unmarshal(respBody, &org); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
+	}
+	return &org, nil
+}
+
+// GetActiveOrganization gets the currently active organization
+func (c *Client) GetActiveOrganization() (*Organization, error) {
+	respBody, err := c.makeRequest("GET", "/me/organization", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var org Organization
+	if err := json.Unmarshal(respBody, &org); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
+	}
+	return &org, nil
+}
+
+// LeaveOrganization leaves the specified organization
+func (c *Client) LeaveOrganization(orgID string) error {
+	endpoint := fmt.Sprintf("/organizations/%s/leave", orgID)
+	_, err := c.makeRequest("POST", endpoint, nil)
+	return err
 }
