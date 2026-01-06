@@ -156,7 +156,7 @@ func registerTools(server *mcp.Server) {
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
-		Description: "🟡 COMMON | Record an architectural decision (ADR). Use for important technical choices.",
+		Description: "🟡 COMMON | Record an architectural decision (ADR). ⚠️ Agent creates DRAFTS only - user must approve. Use for important technical choices.",
 	}, handleCreateDecision)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -797,13 +797,20 @@ func handleCreateDecision(ctx context.Context, req *mcp.CallToolRequest, input C
 	if title == "" {
 		return nil, nil, errors.New("title is required")
 	}
+
+	// AGENT ENFORCEMENT: Force draft status and agent source
+	// Agents can only create drafts - users must approve them
+	status := "draft"
+	source := "agent"
+
 	decision, err := apiClient.CreateDecision(
 		title,
 		strings.TrimSpace(input.Description),
-		strings.TrimSpace(input.Status),
+		status, // Always "draft" for agent-created decisions
 		strings.TrimSpace(input.Area),
 		strings.TrimSpace(input.Context),
 		strings.TrimSpace(input.Consequences),
+		source, // Always "agent" for MCP-created decisions
 	)
 	if err != nil {
 		return nil, nil, err
@@ -1125,8 +1132,8 @@ func ToolDefinitions() []toolDef {
 		// ============================================================================
 		{
 			Name:        "create_decision",
-			Description: "🟡 COMMON | Record an architectural decision (ADR). Use for important technical choices.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"title": map[string]interface{}{"type": "string", "description": "Decision title"}, "description": map[string]interface{}{"type": "string"}, "status": map[string]interface{}{"type": "string", "description": "draft, proposed, approved, deprecated"}, "area": map[string]interface{}{"type": "string", "description": "Frontend, Backend, Architecture, etc."}, "context": map[string]interface{}{"type": "string", "description": "Why this decision?"}, "consequences": map[string]interface{}{"type": "string", "description": "What are the impacts?"}}, "required": []string{"title"}},
+			Description: "🟡 COMMON | Record an architectural decision (ADR). ⚠️ Agent creates DRAFTS only - user must approve. Use for important technical choices.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"title": map[string]interface{}{"type": "string", "description": "Decision title"}, "description": map[string]interface{}{"type": "string"}, "area": map[string]interface{}{"type": "string", "description": "Frontend, Backend, Architecture, etc."}, "context": map[string]interface{}{"type": "string", "description": "Why this decision?"}, "consequences": map[string]interface{}{"type": "string", "description": "What are the impacts?"}}, "required": []string{"title"}},
 		},
 		{
 			Name:        "list_decisions",

@@ -996,6 +996,7 @@ type Decision struct {
 	Content      *string   `json:"content,omitempty"`
 	Context      *string   `json:"context,omitempty"`
 	Consequences *string   `json:"consequences,omitempty"`
+	Source       string    `json:"source"` // "user", "agent", "import"
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -1053,7 +1054,7 @@ func (c *Client) GetDecision(identifier string) (*Decision, error) {
 }
 
 // CreateDecision creates a new decision (ADR)
-func (c *Client) CreateDecision(title, description, status, area, context, consequences string) (*Decision, error) {
+func (c *Client) CreateDecision(title, description, status, area, context, consequences, source string) (*Decision, error) {
 	reqBody := map[string]interface{}{
 		"title": title,
 	}
@@ -1071,6 +1072,9 @@ func (c *Client) CreateDecision(title, description, status, area, context, conse
 	}
 	if consequences != "" {
 		reqBody["consequences"] = consequences
+	}
+	if source != "" {
+		reqBody["source"] = source
 	}
 
 	respBody, err := c.makeRequest("POST", "/decisions", reqBody)
