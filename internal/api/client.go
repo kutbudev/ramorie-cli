@@ -217,6 +217,14 @@ func (c *Client) UpdateProject(id string, data map[string]interface{}) (*models.
 	return &project, nil
 }
 
+// AgentMetadata holds agent information for tracking task creation source
+type AgentMetadata struct {
+	AgentName  string
+	AgentModel string
+	SessionID  string
+	CreatedVia string
+}
+
 // Task API methods
 func (c *Client) CreateTask(projectID, title, description, priority string, tags ...string) (*models.Task, error) {
 	reqBody := map[string]interface{}{
@@ -229,6 +237,51 @@ func (c *Client) CreateTask(projectID, title, description, priority string, tags
 	// Add tags if provided
 	if len(tags) > 0 {
 		reqBody["tags"] = tags
+	}
+
+	respBody, err := c.makeRequest("POST", "/tasks", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var task models.Task
+	if err := json.Unmarshal(respBody, &task); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &task, nil
+}
+
+// CreateTaskWithMeta creates a task with agent metadata for MCP/CLI tracking
+func (c *Client) CreateTaskWithMeta(projectID, title, description, priority string, meta *AgentMetadata, tags ...string) (*models.Task, error) {
+	reqBody := map[string]interface{}{
+		"project_id":  projectID,
+		"title":       title,
+		"description": description,
+		"priority":    priority,
+	}
+
+	// Add tags if provided
+	if len(tags) > 0 {
+		reqBody["tags"] = tags
+	}
+
+	// Add agent metadata if provided
+	if meta != nil {
+		if meta.AgentName != "" {
+			reqBody["created_by_agent"] = meta.AgentName
+		}
+		if meta.AgentModel != "" {
+			reqBody["agent_model"] = meta.AgentModel
+		}
+		if meta.SessionID != "" {
+			reqBody["agent_session_id"] = meta.SessionID
+		}
+		if meta.CreatedVia != "" {
+			reqBody["created_via"] = meta.CreatedVia
+		} else {
+			reqBody["created_via"] = "mcp" // Default to 'mcp' for this method
+		}
 	}
 
 	respBody, err := c.makeRequest("POST", "/tasks", reqBody)
@@ -1359,17 +1412,32 @@ func (c *Client) InviteToOrganization(orgID, email, role string) (map[string]int
 
 // SwitchOrganization switches the active organization context
 func (c *Client) SwitchOrganization(orgID string) (*Organization, error) {
-	endpoint := fmt.Sprintf("/organizations/%s/switch", orgID)
-	respBody, err := c.makeRequest("POST", endpoint, nil)
+	// Backend endpoint: POST /auth/active-organization
+	// Returns: UserResponse with active_organization_id set
+	reqBody := map[string]interface{}{
+		"organization_id": orgID,
+	}
+	respBody, err := c.makeRequest("POST", "/auth/active-organization", reqBody)
 	if err != nil {
 		return nil, err
 	}
 
-	var org Organization
-	if err := json.Unmarshal(respBody, &org); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
+	// Backend returns UserResponse, not Organization directly
+	// Parse to verify success, then get full organization details
+	var userResp map[string]interface{}
+	if err := json.Unmarshal(respBody, &userResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
-	return &org, nil
+
+	// Verify active_organization_id was set correctly
+	if activeOrgID, ok := userResp["active_organization_id"].(string); ok {
+		if activeOrgID != orgID {
+			return nil, fmt.Errorf("failed to switch organization: active_organization_id mismatch")
+		}
+	}
+
+	// Get the full organization details
+	return c.GetOrganization(orgID)
 }
 
 // GetActiveOrganization gets the currently active organization

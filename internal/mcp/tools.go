@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
@@ -31,7 +32,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "setup_agent",
-		Description: "🔴 ESSENTIAL | Initialize agent session. Returns current context, active project, pending tasks, and recommended actions.",
+		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, and recommended actions.",
 	}, handleSetupAgent)
 
 	// ============================================================================
@@ -84,6 +85,11 @@ func registerTools(server *mcp.Server) {
 		Name:        "stop_task",
 		Description: "🟢 ADVANCED | Pause a task. Clears active task, keeps IN_PROGRESS status.",
 	}, handleStopTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "move_task",
+		Description: "🟡 COMMON | Move a task to a different project. Use this to fix tasks created in the wrong location.",
+	}, handleMoveTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_next_tasks",
@@ -302,20 +308,54 @@ func handleGetRamorieInfo(ctx context.Context, req *mcp.CallToolRequest, input E
 	return nil, getRamorieInfo(), nil
 }
 
-func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+type SetupAgentInput struct {
+	AgentName  string `json:"agent_name,omitempty"`
+	AgentModel string `json:"agent_model,omitempty"`
+}
+
+func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input SetupAgentInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	// Initialize session with agent info
+	agentName := strings.TrimSpace(input.AgentName)
+	if agentName == "" {
+		agentName = "unknown-agent"
+	}
+	agentModel := strings.TrimSpace(input.AgentModel)
+
+	// Initialize the session
+	session := InitializeSession(agentName, agentModel)
+
 	result, err := setupAgent(apiClient)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Add session info to result
+	result["session"] = map[string]interface{}{
+		"id":          session.ID,
+		"agent_name":  session.AgentName,
+		"agent_model": session.AgentModel,
+		"initialized": session.Initialized,
+	}
+
+	// Add clear next steps for workflow enforcement
+	result["workflow_guide"] = map[string]interface{}{
+		"step_1":  "✅ setup_agent called - session initialized",
+		"step_2":  "📋 Call list_projects to see available projects",
+		"step_3":  "🎯 Call set_active_project to choose your working project",
+		"step_4":  "📝 Now you can create tasks and memories in that project",
+		"warning": "⚠️ Tasks/memories created without set_active_project will use Personal workspace",
+	}
+
 	return nil, result, nil
 }
 
-func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
+func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	projects, err := apiClient.ListProjects()
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, projects, nil
+	// Wrap array response to fix "expected record, received array" error
+	return nil, formatMCPResponse(projects, getContextString()), nil
 }
 
 type SetActiveProjectInput struct {
@@ -323,6 +363,11 @@ type SetActiveProjectInput struct {
 }
 
 func handleSetActiveProject(ctx context.Context, req *mcp.CallToolRequest, input SetActiveProjectInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	// Check session initialization (but allow this tool even without init since it's part of setup workflow)
+	if err := checkSessionInit("set_active_project"); err != nil {
+		return nil, nil, err
+	}
+
 	projectName := strings.TrimSpace(input.ProjectName)
 	if projectName == "" {
 		return nil, nil, errors.New("projectName is required")
@@ -342,7 +387,17 @@ func handleSetActiveProject(ctx context.Context, req *mcp.CallToolRequest, input
 			}
 			cfg.ActiveProjectID = p.ID.String()
 			_ = config.SaveConfig(cfg)
-			return nil, map[string]interface{}{"ok": true, "project_id": p.ID.String(), "name": p.Name}, nil
+
+			// Store in session for workflow tracking
+			SetSessionProject(p.ID)
+
+			return nil, map[string]interface{}{
+				"ok":         true,
+				"project_id": p.ID.String(),
+				"name":       p.Name,
+				"_context":   getContextString(),
+				"_message":   "✅ Active project set to: " + p.Name + ". All new tasks and memories will be created in this project.",
+			}, nil
 		}
 	}
 	return nil, nil, errors.New("project not found")
@@ -371,7 +426,7 @@ type ListTasksInput struct {
 	Limit   float64 `json:"limit,omitempty"`
 }
 
-func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, interface{}, error) {
+func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	projectID := ""
 	if strings.TrimSpace(input.Project) != "" {
 		pid, err := resolveProjectID(apiClient, input.Project)
@@ -388,7 +443,8 @@ func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTa
 	if limit > 0 && limit < len(tasks) {
 		tasks = tasks[:limit]
 	}
-	return nil, tasks, nil
+	// Wrap array response to fix "expected record, received array" error
+	return nil, formatMCPResponse(tasks, getContextString()), nil
 }
 
 type CreateTaskInput struct {
@@ -397,21 +453,54 @@ type CreateTaskInput struct {
 	Project     string `json:"project,omitempty"`
 }
 
-func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, interface{}, error) {
+func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	// Check session initialization
+	if err := checkSessionInit("create_task"); err != nil {
+		return nil, nil, err
+	}
+
 	description := strings.TrimSpace(input.Description)
 	if description == "" {
 		return nil, nil, errors.New("description is required")
 	}
+
+	// Check if project is specified or active project is set
+	if strings.TrimSpace(input.Project) == "" && !RequiresActiveProject() {
+		return nil, nil, errors.New("⚠️ No project specified and no active project set. Please either:\n1. Call 'set_active_project' first to set your working project, OR\n2. Provide 'project' parameter to specify which project this task belongs to.\n\nThis prevents tasks from being created in unexpected locations.")
+	}
+
 	priority := normalizePriority(input.Priority)
 	projectID, err := resolveProjectID(apiClient, input.Project)
 	if err != nil {
 		return nil, nil, err
 	}
-	task, err := apiClient.CreateTask(projectID, description, "", priority)
+
+	// Get agent metadata from current session
+	session := GetCurrentSession()
+	var meta *api.AgentMetadata
+	if session != nil && session.Initialized {
+		meta = &api.AgentMetadata{
+			AgentName:  session.AgentName,
+			AgentModel: session.AgentModel,
+			SessionID:  session.ID,
+			CreatedVia: "mcp",
+		}
+	}
+
+	task, err := apiClient.CreateTaskWithMeta(projectID, description, "", priority, meta)
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, task, nil
+
+	// Return with context info showing where task was created
+	result := formatMCPResponse(task, getContextString())
+	result["_created_in_project"] = projectID
+	if session != nil {
+		result["_created_by_agent"] = session.AgentName
+	}
+	result["_message"] = "✅ Task created successfully in project " + projectID[:8] + "..."
+
+	return nil, result, nil
 }
 
 type TaskIDInput struct {
@@ -452,6 +541,48 @@ func handleCompleteTask(ctx context.Context, req *mcp.CallToolRequest, input Tas
 	return nil, map[string]interface{}{"ok": true}, nil
 }
 
+type MoveTaskInput struct {
+	TaskID    string `json:"taskId"`
+	ProjectID string `json:"projectId"`
+}
+
+func handleMoveTask(ctx context.Context, req *mcp.CallToolRequest, input MoveTaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	// Check session initialization
+	if err := checkSessionInit("move_task"); err != nil {
+		return nil, nil, err
+	}
+
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("taskId is required")
+	}
+
+	targetProject := strings.TrimSpace(input.ProjectID)
+	if targetProject == "" {
+		return nil, nil, errors.New("projectId is required - specify target project ID or name")
+	}
+
+	// Resolve project ID (can be name or UUID)
+	projectID, err := resolveProjectID(apiClient, targetProject)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to resolve project: %w", err)
+	}
+
+	// Update task with new project_id
+	task, err := apiClient.UpdateTask(taskID, map[string]interface{}{
+		"project_id": projectID,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to move task: %w", err)
+	}
+
+	result := formatMCPResponse(task, getContextString())
+	result["_moved_to_project"] = projectID
+	result["_message"] = "✅ Task moved successfully to project " + projectID[:8] + "..."
+
+	return nil, result, nil
+}
+
 func handleStopTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	taskID := strings.TrimSpace(input.TaskID)
 	if taskID == "" {
@@ -468,7 +599,7 @@ type GetNextTasksInput struct {
 	Project string  `json:"project,omitempty"`
 }
 
-func handleGetNextTasks(ctx context.Context, req *mcp.CallToolRequest, input GetNextTasksInput) (*mcp.CallToolResult, interface{}, error) {
+func handleGetNextTasks(ctx context.Context, req *mcp.CallToolRequest, input GetNextTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	count := int(input.Count)
 	if count <= 0 {
 		count = 5
@@ -496,7 +627,8 @@ func handleGetNextTasks(ctx context.Context, req *mcp.CallToolRequest, input Get
 	if count < len(tasks) {
 		tasks = tasks[:count]
 	}
-	return nil, tasks, nil
+	// Wrap array response to fix "expected record, received array" error
+	return nil, formatMCPResponse(tasks, getContextString()), nil
 }
 
 type AddTaskNoteInput struct {
@@ -545,7 +677,7 @@ type SearchTasksInput struct {
 	Limit   float64 `json:"limit,omitempty"`
 }
 
-func handleSearchTasks(ctx context.Context, req *mcp.CallToolRequest, input SearchTasksInput) (*mcp.CallToolResult, interface{}, error) {
+func handleSearchTasks(ctx context.Context, req *mcp.CallToolRequest, input SearchTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	query := strings.TrimSpace(input.Query)
 	if query == "" {
 		return nil, nil, errors.New("query is required")
@@ -566,7 +698,8 @@ func handleSearchTasks(ctx context.Context, req *mcp.CallToolRequest, input Sear
 	if limit > 0 && limit < len(tasks) {
 		tasks = tasks[:limit]
 	}
-	return nil, tasks, nil
+	// Wrap array response to fix "expected record, received array" error
+	return nil, formatMCPResponse(tasks, getContextString()), nil
 }
 
 func handleGetActiveTask(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
@@ -582,20 +715,38 @@ type AddMemoryInput struct {
 	Project string `json:"project,omitempty"`
 }
 
-func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, interface{}, error) {
+func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	// Check session initialization
+	if err := checkSessionInit("add_memory"); err != nil {
+		return nil, nil, err
+	}
+
 	content := strings.TrimSpace(input.Content)
 	if content == "" {
 		return nil, nil, errors.New("content is required")
 	}
+
+	// Check if project is specified or active project is set
+	if strings.TrimSpace(input.Project) == "" && !RequiresActiveProject() {
+		return nil, nil, errors.New("⚠️ No project specified and no active project set. Please either:\n1. Call 'set_active_project' first to set your working project, OR\n2. Provide 'project' parameter to specify which project this memory belongs to.\n\nThis prevents memories from being created in unexpected locations.")
+	}
+
 	projectID, err := resolveProjectID(apiClient, input.Project)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	memory, err := apiClient.CreateMemory(projectID, content)
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, memory, nil
+
+	// Return with context info showing where memory was created
+	result := formatMCPResponse(memory, getContextString())
+	result["_created_in_project"] = projectID
+	result["_message"] = "✅ Memory created successfully in project " + projectID[:8] + "..."
+
+	return nil, result, nil
 }
 
 type ListMemoriesInput struct {
@@ -604,7 +755,7 @@ type ListMemoriesInput struct {
 	Limit   float64 `json:"limit,omitempty"`
 }
 
-func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input ListMemoriesInput) (*mcp.CallToolResult, interface{}, error) {
+func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input ListMemoriesInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	projectID := ""
 	if strings.TrimSpace(input.Project) != "" {
 		pid, err := resolveProjectID(apiClient, input.Project)
@@ -631,7 +782,8 @@ func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input Lis
 	if limit > 0 && limit < len(memories) {
 		memories = memories[:limit]
 	}
-	return nil, memories, nil
+	// Wrap array response to fix "expected record, received array" error
+	return nil, formatMCPResponse(memories, getContextString()), nil
 }
 
 type GetMemoryInput struct {
@@ -894,7 +1046,7 @@ type ListContextPacksInput struct {
 	Limit  float64 `json:"limit,omitempty"`
 }
 
-func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input ListContextPacksInput) (*mcp.CallToolResult, interface{}, error) {
+func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input ListContextPacksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	limit := int(input.Limit)
 	if limit == 0 {
 		limit = 50
@@ -909,7 +1061,8 @@ func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, result, nil
+	// Wrap response to fix "expected record, received array" error
+	return nil, formatMCPResponse(result, getContextString()), nil
 }
 
 type CreateContextPackInput struct {
@@ -1147,12 +1300,13 @@ func handleAIFindDependencies(ctx context.Context, req *mcp.CallToolRequest, inp
 // ORGANIZATION HANDLERS
 // ============================================================================
 
-func handleListOrganizations(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
+func handleListOrganizations(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	orgs, err := apiClient.ListOrganizations()
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, orgs, nil
+	// Wrap array response to fix "expected record, received array" error
+	return nil, formatMCPResponse(orgs, getContextString()), nil
 }
 
 type GetOrganizationInput struct {
@@ -1199,8 +1353,24 @@ func handleUpdateOrganization(ctx context.Context, req *mcp.CallToolRequest, inp
 	if orgID == "" {
 		return nil, nil, errors.New("orgId is required")
 	}
-	// Note: Update method needs to be added to API client
-	return nil, nil, errors.New("update_organization not yet implemented in API client")
+
+	updates := make(map[string]interface{})
+	if input.Name != "" {
+		updates["name"] = input.Name
+	}
+	if input.Description != "" {
+		updates["description"] = input.Description
+	}
+
+	if len(updates) == 0 {
+		return nil, nil, errors.New("at least one field (name or description) must be provided")
+	}
+
+	org, err := apiClient.UpdateOrganization(orgID, updates)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, org, nil
 }
 
 func handleGetOrganizationMembers(ctx context.Context, req *mcp.CallToolRequest, input GetOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
@@ -1208,8 +1378,12 @@ func handleGetOrganizationMembers(ctx context.Context, req *mcp.CallToolRequest,
 	if orgID == "" {
 		return nil, nil, errors.New("orgId is required")
 	}
-	// Note: Method needs to be added to API client
-	return nil, nil, errors.New("get_organization_members not yet implemented in API client")
+
+	members, err := apiClient.GetOrganizationMembers(orgID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, formatMCPResponse(members, getContextString()), nil
 }
 
 type InviteToOrganizationInput struct {
@@ -1224,8 +1398,17 @@ func handleInviteToOrganization(ctx context.Context, req *mcp.CallToolRequest, i
 	if orgID == "" || email == "" {
 		return nil, nil, errors.New("orgId and email are required")
 	}
-	// Note: Method needs to be added to API client
-	return nil, nil, errors.New("invite_to_organization not yet implemented in API client")
+
+	role := strings.TrimSpace(input.Role)
+	if role == "" {
+		role = "member"
+	}
+
+	result, err := apiClient.InviteToOrganization(orgID, email, role)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, result, nil
 }
 
 type SwitchOrganizationInput struct {
@@ -1237,13 +1420,54 @@ func handleSwitchOrganization(ctx context.Context, req *mcp.CallToolRequest, inp
 	if orgID == "" {
 		return nil, nil, errors.New("orgId is required")
 	}
-	// Note: Method needs to be added to API client
-	return nil, nil, errors.New("switch_organization not yet implemented in API client")
+
+	// Switch organization via API
+	org, err := apiClient.SwitchOrganization(orgID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Update session with the new active organization
+	orgUUID, parseErr := uuid.Parse(orgID)
+	if parseErr == nil {
+		SetSessionOrganization(orgUUID)
+	}
+
+	return nil, org, nil
 }
 
 func handleGetActiveOrganization(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
-	// Note: Method needs to be added to API client
-	return nil, nil, errors.New("get_active_organization not yet implemented in API client")
+	session := GetCurrentSession()
+
+	// If session has an active organization, get its details
+	if session.ActiveOrgID != nil {
+		org, err := apiClient.GetOrganization(session.ActiveOrgID.String())
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, org, nil
+	}
+
+	// Otherwise, list organizations and return info
+	orgs, err := apiClient.ListOrganizations()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(orgs) == 0 {
+		return nil, nil, errors.New("no organizations found")
+	}
+
+	// If only one organization, return it as the default
+	if len(orgs) == 1 {
+		return nil, &orgs[0], nil
+	}
+
+	// Multiple organizations - inform user to select one
+	return nil, map[string]interface{}{
+		"message":       "Multiple organizations found. Use switch_organization to select one.",
+		"organizations": orgs,
+	}, nil
 }
 
 type CreateDecisionInput struct {
@@ -1287,12 +1511,13 @@ type ListDecisionsInput struct {
 	Limit  float64 `json:"limit,omitempty"`
 }
 
-func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, interface{}, error) {
+func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	decisions, err := apiClient.ListDecisions(strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), int(input.Limit))
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, decisions, nil
+	// Wrap array response to fix "expected record, received array" error
+	return nil, formatMCPResponse(decisions, getContextString()), nil
 }
 
 type GetStatsInput struct {
@@ -1434,8 +1659,14 @@ func ToolDefinitions() []toolDef {
 		},
 		{
 			Name:        "setup_agent",
-			Description: "🔴 ESSENTIAL | Initialize agent session. Returns current context, active project, pending tasks, and recommended actions.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, and recommended actions.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_name":  map[string]interface{}{"type": "string", "description": "Your agent identifier (e.g., 'claude-code', 'cursor', 'gemini')"},
+					"agent_model": map[string]interface{}{"type": "string", "description": "Model being used (e.g., 'claude-opus-4-5-20250514', 'gpt-4')"},
+				},
+			},
 		},
 
 		// ============================================================================
@@ -1722,6 +1953,18 @@ func ToolDefinitions() []toolDef {
 			Name:        "stop_task",
 			Description: "🟢 ADVANCED | Pause a task. Clears active task, keeps IN_PROGRESS status.",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
+		},
+		{
+			Name:        "move_task",
+			Description: "🟡 COMMON | Move a task to a different project. Use this to fix tasks created in the wrong location.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"taskId":    map[string]interface{}{"type": "string", "description": "ID of the task to move"},
+					"projectId": map[string]interface{}{"type": "string", "description": "Target project ID or name"},
+				},
+				"required": []string{"taskId", "projectId"},
+			},
 		},
 	}
 }
