@@ -12,9 +12,9 @@ const (
 	// Legacy config directory name (for backward compatibility)
 	configDirLegacy    = ".jbrain"
 	configFileName     = "config.json"
-	DefaultApiURL      = "https://jbraincli-go-backend-production.up.railway.app"
-	DefaultAuthURL     = "https://jbraincli-go-backend-production.up.railway.app/auth"
-	V1ApiURL           = "https://jbraincli-go-backend-production.up.railway.app/v1"
+	DefaultApiURL      = "https://ramorie-backend-production.up.railway.app"
+	DefaultAuthURL     = "https://ramorie-backend-production.up.railway.app/auth"
+	V1ApiURL           = "https://ramorie-backend-production.up.railway.app/v1"
 	activeProjectIDKey = "active_project_id"
 	apiURLKey          = "api_url"
 )

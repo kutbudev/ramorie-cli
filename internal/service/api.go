@@ -11,7 +11,7 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/models"
 )
 
-const BaseURL = "https://jbraincli-go-backend-production.up.railway.app/v1"
+const BaseURL = "https://ramorie-backend-production.up.railway.app/v1"
 
 type APIService struct {
 	client *http.Client
