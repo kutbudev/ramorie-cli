@@ -45,7 +45,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "set_active_project",
-		Description: "🔴 ESSENTIAL | Set the active project. All new tasks and memories will be created in this project.",
+		Description: "⚠️ DEPRECATED | Set the active project. Use explicit 'project' parameter in tools instead.",
 	}, handleSetActiveProject)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -58,12 +58,12 @@ func registerTools(server *mcp.Server) {
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "🔴 ESSENTIAL | List tasks with filtering. 💡 Call before create_task to check for duplicates.",
+		Description: "🔴 ESSENTIAL | List tasks with filtering. REQUIRED: project parameter. 💡 Call before create_task to check for duplicates.",
 	}, handleListTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_task",
-		Description: "🔴 ESSENTIAL | Create a new task. ⚠️ Always check list_tasks first to avoid duplicates!",
+		Description: "🔴 ESSENTIAL | Create a new task. REQUIRED: project, description parameters. ⚠️ Always check list_tasks first to avoid duplicates!",
 	}, handleCreateTask)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -93,7 +93,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_next_tasks",
-		Description: "🔴 ESSENTIAL | Get prioritized TODO tasks. 💡 Use at session start to see what needs attention.",
+		Description: "🔴 ESSENTIAL | Get prioritized TODO tasks. REQUIRED: project parameter. 💡 Use at session start to see what needs attention.",
 	}, handleGetNextTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -121,12 +121,12 @@ func registerTools(server *mcp.Server) {
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store important information to knowledge base. Auto-links to active task. 💡 If it matters later, add it here!",
+		Description: "🔴 ESSENTIAL | Store important information to knowledge base. REQUIRED: project, content parameters. 💡 If it matters later, add it here!",
 	}, handleAddMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_memories",
-		Description: "🔴 ESSENTIAL | List memories with optional filtering by project or term.",
+		Description: "🔴 ESSENTIAL | List memories with filtering. REQUIRED: project parameter.",
 	}, handleListMemories)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -279,7 +279,7 @@ func registerTools(server *mcp.Server) {
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_stats",
-		Description: "🟡 COMMON | Get task statistics and completion rates.",
+		Description: "🟡 COMMON | Get task statistics and completion rates. REQUIRED: project parameter.",
 	}, handleGetStats)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -396,7 +396,8 @@ func handleSetActiveProject(ctx context.Context, req *mcp.CallToolRequest, input
 				"project_id": p.ID.String(),
 				"name":       p.Name,
 				"_context":   getContextString(),
-				"_message":   "✅ Active project set to: " + p.Name + ". All new tasks and memories will be created in this project.",
+				"_message":   "✅ Active project set to: " + p.Name,
+				"_warning":   "⚠️ DEPRECATED: set_active_project is deprecated. Use explicit 'project' parameter in create_task, add_memory, list_tasks, etc. instead. This tool will be removed in a future version.",
 			}, nil
 		}
 	}
@@ -422,18 +423,19 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 
 type ListTasksInput struct {
 	Status  string  `json:"status,omitempty"`
-	Project string  `json:"project,omitempty"`
+	Project string  `json:"project"` // REQUIRED - project name or ID
 	Limit   float64 `json:"limit,omitempty"`
 }
 
 func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	projectID := ""
-	if strings.TrimSpace(input.Project) != "" {
-		pid, err := resolveProjectID(apiClient, input.Project)
-		if err != nil {
-			return nil, nil, err
-		}
-		projectID = pid
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project to list tasks from.\n\nUse list_projects to see available projects.\nExample: list_tasks(project=\"my-project\")")
+	}
+
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
 	}
 	tasks, err := apiClient.ListTasks(projectID, strings.TrimSpace(input.Status))
 	if err != nil {
@@ -450,7 +452,7 @@ func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTa
 type CreateTaskInput struct {
 	Description string `json:"description"`
 	Priority    string `json:"priority,omitempty"`
-	Project     string `json:"project,omitempty"`
+	Project     string `json:"project"` // REQUIRED - project name or ID
 }
 
 func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
@@ -464,9 +466,9 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 		return nil, nil, errors.New("description is required")
 	}
 
-	// Check if project is specified or active project is set
-	if strings.TrimSpace(input.Project) == "" && !RequiresActiveProject() {
-		return nil, nil, errors.New("⚠️ No project specified and no active project set. Please either:\n1. Call 'set_active_project' first to set your working project, OR\n2. Provide 'project' parameter to specify which project this task belongs to.\n\nThis prevents tasks from being created in unexpected locations.")
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this task belongs to.\n\nUse list_projects to see available projects.\nExample: create_task(description=\"...\", project=\"my-project\")")
 	}
 
 	priority := normalizePriority(input.Priority)
@@ -596,21 +598,23 @@ func handleStopTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDI
 
 type GetNextTasksInput struct {
 	Count   float64 `json:"count,omitempty"`
-	Project string  `json:"project,omitempty"`
+	Project string  `json:"project"` // REQUIRED - project name or ID
 }
 
 func handleGetNextTasks(ctx context.Context, req *mcp.CallToolRequest, input GetNextTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project to get next tasks from.\n\nUse list_projects to see available projects.\nExample: get_next_tasks(project=\"my-project\")")
+	}
+
 	count := int(input.Count)
 	if count <= 0 {
 		count = 5
 	}
-	projectID := ""
-	if strings.TrimSpace(input.Project) != "" {
-		pid, err := resolveProjectID(apiClient, input.Project)
-		if err != nil {
-			return nil, nil, err
-		}
-		projectID = pid
+
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
 	}
 	tasks, err := apiClient.ListTasksQuery(projectID, "TODO", "", nil, nil)
 	if err != nil {
@@ -712,7 +716,7 @@ func handleGetActiveTask(ctx context.Context, req *mcp.CallToolRequest, input Em
 
 type AddMemoryInput struct {
 	Content string `json:"content"`
-	Project string `json:"project,omitempty"`
+	Project string `json:"project"` // REQUIRED - project name or ID
 }
 
 func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, map[string]interface{}, error) {
@@ -726,9 +730,9 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 		return nil, nil, errors.New("content is required")
 	}
 
-	// Check if project is specified or active project is set
-	if strings.TrimSpace(input.Project) == "" && !RequiresActiveProject() {
-		return nil, nil, errors.New("⚠️ No project specified and no active project set. Please either:\n1. Call 'set_active_project' first to set your working project, OR\n2. Provide 'project' parameter to specify which project this memory belongs to.\n\nThis prevents memories from being created in unexpected locations.")
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this memory belongs to.\n\nUse list_projects to see available projects.\nExample: add_memory(content=\"...\", project=\"my-project\")")
 	}
 
 	projectID, err := resolveProjectID(apiClient, input.Project)
@@ -750,19 +754,20 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 }
 
 type ListMemoriesInput struct {
-	Project string  `json:"project,omitempty"`
+	Project string  `json:"project"` // REQUIRED - project name or ID
 	Term    string  `json:"term,omitempty"`
 	Limit   float64 `json:"limit,omitempty"`
 }
 
 func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input ListMemoriesInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	projectID := ""
-	if strings.TrimSpace(input.Project) != "" {
-		pid, err := resolveProjectID(apiClient, input.Project)
-		if err != nil {
-			return nil, nil, err
-		}
-		projectID = pid
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project to list memories from.\n\nUse list_projects to see available projects.\nExample: list_memories(project=\"my-project\")")
+	}
+
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
 	}
 	memories, err := apiClient.ListMemories(projectID, "")
 	if err != nil {
@@ -1521,11 +1526,22 @@ func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input Li
 }
 
 type GetStatsInput struct {
-	Project string `json:"project,omitempty"`
+	Project string `json:"project"` // REQUIRED - project name or ID
 }
 
 func handleGetStats(ctx context.Context, req *mcp.CallToolRequest, input GetStatsInput) (*mcp.CallToolResult, interface{}, error) {
-	b, err := apiClient.Request("GET", "/reports/stats", nil)
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project to get stats for.\n\nUse list_projects to see available projects.\nExample: get_stats(project=\"my-project\")")
+	}
+
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Get stats for specific project
+	b, err := apiClient.Request("GET", fmt.Sprintf("/reports/stats?project_id=%s", projectID), nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1679,7 +1695,7 @@ func ToolDefinitions() []toolDef {
 		},
 		{
 			Name:        "set_active_project",
-			Description: "🔴 ESSENTIAL | Set the active project. All new tasks and memories will be created in this project.",
+			Description: "⚠️ DEPRECATED | Set the active project. Use explicit 'project' parameter in tools instead.",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"projectName": map[string]interface{}{"type": "string", "description": "Project name or ID"}}, "required": []string{"projectName"}},
 		},
 
@@ -1688,13 +1704,13 @@ func ToolDefinitions() []toolDef {
 		// ============================================================================
 		{
 			Name:        "list_tasks",
-			Description: "🔴 ESSENTIAL | List tasks with filtering. 💡 Call before create_task to check for duplicates.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"status": map[string]interface{}{"type": "string", "description": "Filter: TODO, IN_PROGRESS, COMPLETED"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID"}, "limit": map[string]interface{}{"type": "number", "description": "Max results"}}},
+			Description: "🔴 ESSENTIAL | List tasks with filtering. REQUIRED: project parameter. 💡 Call before create_task to check for duplicates.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"status": map[string]interface{}{"type": "string", "description": "Filter: TODO, IN_PROGRESS, COMPLETED"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}, "limit": map[string]interface{}{"type": "number", "description": "Max results"}}, "required": []string{"project"}},
 		},
 		{
 			Name:        "create_task",
-			Description: "🔴 ESSENTIAL | Create a new task. ⚠️ Always check list_tasks first to avoid duplicates!",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"description": map[string]interface{}{"type": "string", "description": "Task description - clear and actionable"}, "priority": map[string]interface{}{"type": "string", "description": "Priority: H=High, M=Medium, L=Low"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (uses active if not specified)"}}, "required": []string{"description"}},
+			Description: "🔴 ESSENTIAL | Create a new task. REQUIRED: project, description parameters. ⚠️ Always check list_tasks first to avoid duplicates!",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"description": map[string]interface{}{"type": "string", "description": "Task description - clear and actionable"}, "priority": map[string]interface{}{"type": "string", "description": "Priority: H=High, M=Medium, L=Low"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"description", "project"}},
 		},
 		{
 			Name:        "get_task",
@@ -1713,8 +1729,8 @@ func ToolDefinitions() []toolDef {
 		},
 		{
 			Name:        "get_next_tasks",
-			Description: "🔴 ESSENTIAL | Get prioritized TODO tasks. 💡 Use at session start to see what needs attention.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"count": map[string]interface{}{"type": "number", "description": "Number of tasks (default: 5)"}, "project": map[string]interface{}{"type": "string"}}},
+			Description: "🔴 ESSENTIAL | Get prioritized TODO tasks. REQUIRED: project parameter. 💡 Use at session start to see what needs attention.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"count": map[string]interface{}{"type": "number", "description": "Number of tasks (default: 5)"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"project"}},
 		},
 
 		// ============================================================================
@@ -1722,13 +1738,13 @@ func ToolDefinitions() []toolDef {
 		// ============================================================================
 		{
 			Name:        "add_memory",
-			Description: "🔴 ESSENTIAL | Store important information to knowledge base. Auto-links to active task. 💡 If it matters later, add it here!",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"content": map[string]interface{}{"type": "string", "description": "Memory content - be descriptive"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID"}}, "required": []string{"content"}},
+			Description: "🔴 ESSENTIAL | Store important information to knowledge base. REQUIRED: project, content parameters. 💡 If it matters later, add it here!",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"content": map[string]interface{}{"type": "string", "description": "Memory content - be descriptive"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"content", "project"}},
 		},
 		{
 			Name:        "list_memories",
-			Description: "🔴 ESSENTIAL | List memories with optional filtering by project or term.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string"}, "term": map[string]interface{}{"type": "string", "description": "Filter by keyword"}, "limit": map[string]interface{}{"type": "number"}}},
+			Description: "🔴 ESSENTIAL | List memories with filtering. REQUIRED: project parameter.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}, "term": map[string]interface{}{"type": "string", "description": "Filter by keyword"}, "limit": map[string]interface{}{"type": "number"}}, "required": []string{"project"}},
 		},
 
 		// ============================================================================
@@ -1927,8 +1943,8 @@ func ToolDefinitions() []toolDef {
 		// ============================================================================
 		{
 			Name:        "get_stats",
-			Description: "🟡 COMMON | Get task statistics and completion rates.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string"}}},
+			Description: "🔴 ESSENTIAL | Get task statistics and completion rates. REQUIRED: project parameter.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"project"}},
 		},
 
 		// ============================================================================
