@@ -8,7 +8,9 @@ import (
 	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
+	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/urfave/cli/v2"
 )
 
@@ -177,13 +179,48 @@ func taskCreateCmd() *cli.Command {
 				return fmt.Errorf("no active project set. Use 'ramorie project use <id>' or specify --project")
 			}
 
-			task, err := client.CreateTask(projectID, title, description, priority, tags...)
+			var task *models.Task
+
+			if crypto.IsVaultUnlocked() {
+				// Encrypt title and description before sending (zero-knowledge encryption)
+				encTitle, titleNonce, titleEncrypted, encErr := crypto.EncryptContent(title)
+				if encErr != nil {
+					return fmt.Errorf("encryption failed: %w", encErr)
+				}
+
+				encDesc := ""
+				descNonce := ""
+				if description != "" {
+					encDesc, descNonce, _, encErr = crypto.EncryptContent(description)
+					if encErr != nil {
+						return fmt.Errorf("encryption failed: %w", encErr)
+					}
+				}
+
+				if titleEncrypted {
+					task, err = client.CreateEncryptedTask(projectID, encTitle, titleNonce, encDesc, descNonce, priority, tags...)
+					if err == nil {
+						fmt.Printf("🔐 Task encrypted and created successfully!\n")
+					}
+				} else {
+					task, err = client.CreateTask(projectID, title, description, priority, tags...)
+					if err == nil {
+						fmt.Printf("✅ Task '%s' created successfully!\n", task.Title)
+					}
+				}
+			} else {
+				// Vault is locked - send plaintext
+				task, err = client.CreateTask(projectID, title, description, priority, tags...)
+				if err == nil {
+					fmt.Printf("✅ Task '%s' created successfully!\n", task.Title)
+				}
+			}
+
 			if err != nil {
 				fmt.Println(apierrors.ParseAPIError(err))
 				return err
 			}
 
-			fmt.Printf("✅ Task '%s' created successfully!\n", task.Title)
 			fmt.Printf("ID: %s\n", task.ID.String()[:8])
 			if len(tags) > 0 {
 				fmt.Printf("Tags: %s\n", strings.Join(tags, ", "))

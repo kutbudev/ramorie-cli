@@ -252,6 +252,36 @@ func (c *Client) CreateTask(projectID, title, description, priority string, tags
 	return &task, nil
 }
 
+// CreateEncryptedTask creates a task with encrypted title and description (zero-knowledge encryption)
+func (c *Client) CreateEncryptedTask(projectID, encryptedTitle, titleNonce, encryptedDesc, descNonce, priority string, tags ...string) (*models.Task, error) {
+	reqBody := map[string]interface{}{
+		"project_id":            projectID,
+		"encrypted_title":       encryptedTitle, // base64 ciphertext
+		"title_nonce":           titleNonce,     // base64 nonce
+		"encrypted_description": encryptedDesc,  // base64 ciphertext
+		"description_nonce":     descNonce,      // base64 nonce
+		"is_encrypted":          true,
+		"priority":              priority,
+	}
+
+	// Add tags if provided
+	if len(tags) > 0 {
+		reqBody["tags"] = tags
+	}
+
+	respBody, err := c.makeRequest("POST", "/tasks", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var task models.Task
+	if err := json.Unmarshal(respBody, &task); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &task, nil
+}
+
 // CreateTaskWithMeta creates a task with agent metadata for MCP/CLI tracking
 func (c *Client) CreateTaskWithMeta(projectID, title, description, priority string, meta *AgentMetadata, tags ...string) (*models.Task, error) {
 	reqBody := map[string]interface{}{
@@ -548,6 +578,33 @@ func (c *Client) CreateMemory(projectID, content string, tags ...string) (*model
 	reqBody := map[string]interface{}{
 		"project_id": projectID,
 		"content":    content,
+	}
+
+	// Add tags if provided
+	if len(tags) > 0 {
+		reqBody["tags"] = tags
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var memory models.Memory
+	if err := json.Unmarshal(respBody, &memory); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &memory, nil
+}
+
+// CreateEncryptedMemory creates a memory with encrypted content (zero-knowledge encryption)
+func (c *Client) CreateEncryptedMemory(projectID, encryptedContent, contentNonce string, tags ...string) (*models.Memory, error) {
+	reqBody := map[string]interface{}{
+		"project_id":        projectID,
+		"encrypted_content": encryptedContent, // base64 ciphertext
+		"content_nonce":     contentNonce,     // base64 nonce
+		"is_encrypted":      true,
 	}
 
 	// Add tags if provided
@@ -865,6 +922,53 @@ func (c *Client) LoginUser(email, password string) (string, error) {
 	}
 
 	return response.Data.APIKey, nil
+}
+
+// EncryptionConfig represents the user's encryption configuration from the server
+type EncryptionConfig struct {
+	EncryptionEnabled     bool   `json:"encryption_enabled"`
+	EncryptedSymmetricKey string `json:"encrypted_symmetric_key"` // base64
+	KeyNonce              string `json:"key_nonce"`               // base64 (or stored with encrypted key)
+	Salt                  string `json:"salt"`                    // base64
+	KDFIterations         int    `json:"kdf_iterations"`
+	KDFAlgorithm          string `json:"kdf_algorithm"`
+	KDFMemory             int    `json:"kdf_memory,omitempty"`
+	KDFParallelism        int    `json:"kdf_parallelism,omitempty"`
+	EncryptionVersion     int    `json:"encryption_version,omitempty"`
+}
+
+// GetEncryptionConfig fetches the user's encryption configuration
+func (c *Client) GetEncryptionConfig() (*EncryptionConfig, error) {
+	respBody, err := c.makeRequest("GET", "/auth/encryption-config", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool              `json:"success"`
+		Data    *EncryptionConfig `json:"data"`
+		Error   string            `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		// Try direct unmarshal if not wrapped
+		var config EncryptionConfig
+		if err2 := json.Unmarshal(respBody, &config); err2 == nil {
+			return &config, nil
+		}
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !response.Success && response.Error != "" {
+		return nil, fmt.Errorf("failed to get encryption config: %s", response.Error)
+	}
+
+	if response.Data == nil {
+		// No encryption enabled
+		return &EncryptionConfig{EncryptionEnabled: false}, nil
+	}
+
+	return response.Data, nil
 }
 
 // Context Pack API methods

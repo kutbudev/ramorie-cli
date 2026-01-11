@@ -9,6 +9,7 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/constants"
+	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/urfave/cli/v2"
@@ -87,12 +88,43 @@ func rememberCmd() *cli.Command {
 			}
 
 			client := api.NewClient()
-			memory, err := client.CreateMemory(projectID, content, tags...)
+
+			// Check if vault is unlocked for encryption
+			var memory *models.Memory
+			var err error
+
+			if crypto.IsVaultUnlocked() {
+				// Encrypt content before sending (zero-knowledge encryption)
+				encryptedContent, nonce, isEncrypted, encErr := crypto.EncryptContent(content)
+				if encErr != nil {
+					return fmt.Errorf("encryption failed: %w", encErr)
+				}
+
+				if isEncrypted {
+					memory, err = client.CreateEncryptedMemory(projectID, encryptedContent, nonce, tags...)
+					if err == nil {
+						fmt.Printf("🔐 Memory encrypted and stored! (ID: %s)\n", memory.ID.String()[:8])
+					}
+				} else {
+					// Fallback to unencrypted if encryption didn't happen
+					memory, err = client.CreateMemory(projectID, content, tags...)
+					if err == nil {
+						fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
+					}
+				}
+			} else {
+				// Vault is locked - send plaintext
+				memory, err = client.CreateMemory(projectID, content, tags...)
+				if err == nil {
+					fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
+				}
+			}
+
 			if err != nil {
 				fmt.Println(apierrors.ParseAPIError(err))
 				return err
 			}
-			fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
+
 			fmt.Printf("   Size: %d chars (~%d tokens)\n", chars, tokens)
 			if len(tags) > 0 {
 				fmt.Printf("   Tags: %s\n", strings.Join(tags, ", "))

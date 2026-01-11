@@ -11,6 +11,7 @@ import (
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
+	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/term"
@@ -42,7 +43,7 @@ func NewSetupCommand() *cli.Command {
 			{
 				Name:    "login",
 				Aliases: []string{"l"},
-				Usage:   "Login with your JosephsBrain account",
+				Usage:   "Login with your Ramorie account",
 				Action: func(c *cli.Context) error {
 					return handleUserLogin()
 				},
@@ -66,6 +67,27 @@ func NewSetupCommand() *cli.Command {
 				Usage: "Remove saved credentials",
 				Action: func(c *cli.Context) error {
 					return handleLogout()
+				},
+			},
+			{
+				Name:  "unlock",
+				Usage: "Unlock your encrypted vault with master password",
+				Action: func(c *cli.Context) error {
+					return handleVaultUnlock()
+				},
+			},
+			{
+				Name:  "lock",
+				Usage: "Lock your encrypted vault (clear keys from memory)",
+				Action: func(c *cli.Context) error {
+					return handleVaultLock()
+				},
+			},
+			{
+				Name:  "vault-status",
+				Usage: "Check encryption vault status",
+				Action: func(c *cli.Context) error {
+					return handleVaultStatus()
 				},
 			},
 		},
@@ -154,11 +176,36 @@ func handleUserLogin() error {
 	}
 
 	fmt.Println(" ✅")
-	fmt.Println()
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println("✅ Login successful!")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println()
+
+	// Fetch encryption config with the new API key
+	client.APIKey = apiKey
+	encConfig, err := client.GetEncryptionConfig()
+	if err == nil && encConfig != nil && encConfig.EncryptionEnabled {
+		// Save encryption config
+		cfg.EncryptionEnabled = encConfig.EncryptionEnabled
+		cfg.EncryptedSymmetricKey = encConfig.EncryptedSymmetricKey
+		cfg.KeyNonce = encConfig.KeyNonce
+		cfg.Salt = encConfig.Salt
+		cfg.KDFIterations = encConfig.KDFIterations
+		cfg.KDFAlgorithm = encConfig.KDFAlgorithm
+		_ = config.SaveConfig(cfg) // Best effort
+
+		fmt.Println()
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		fmt.Println("✅ Login successful!")
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		fmt.Println()
+		fmt.Println("🔐 Encryption is enabled for this account.")
+		fmt.Println("   Run 'ramorie setup unlock' to unlock your vault.")
+		fmt.Println()
+	} else {
+		fmt.Println()
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		fmt.Println("✅ Login successful!")
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		fmt.Println()
+	}
+
 	fmt.Println("You can now use ramorie commands:")
 	fmt.Println("  ramorie projects      - List your projects")
 	fmt.Println("  ramorie list          - List your tasks")
@@ -323,4 +370,133 @@ func handleInteractiveSetup() error {
 		fmt.Println("Invalid option. Please run 'ramorie setup' again.")
 		return nil
 	}
+}
+
+// handleVaultUnlock prompts for master password and unlocks the vault
+func handleVaultUnlock() error {
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg.APIKey == "" {
+		fmt.Println()
+		fmt.Println("❌ Not authenticated")
+		fmt.Println("   Please run 'ramorie setup login' first.")
+		return nil
+	}
+
+	if !cfg.EncryptionEnabled {
+		fmt.Println()
+		fmt.Println("ℹ️  Encryption is not enabled for this account.")
+		fmt.Println("   Enable encryption in the web dashboard at:")
+		fmt.Printf("   %s/settings/security\n", webURL)
+		return nil
+	}
+
+	if crypto.IsVaultUnlocked() {
+		fmt.Println()
+		fmt.Println("✅ Vault is already unlocked")
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("🔐 Vault Unlock")
+	fmt.Println("━━━━━━━━━━━━━━━")
+	fmt.Println()
+
+	// Secure password input
+	fmt.Print("Master Password: ")
+	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return fmt.Errorf("could not read password: %w", err)
+	}
+	masterPassword := string(passwordBytes)
+
+	if masterPassword == "" {
+		return fmt.Errorf("master password is required")
+	}
+
+	fmt.Print("🔄 Unlocking vault...")
+
+	// Create vault config from stored encryption data
+	vaultConfig := &crypto.VaultConfig{
+		EncryptionEnabled:     cfg.EncryptionEnabled,
+		EncryptedSymmetricKey: cfg.EncryptedSymmetricKey,
+		KeyNonce:              cfg.KeyNonce,
+		Salt:                  cfg.Salt,
+		KDFIterations:         cfg.KDFIterations,
+		KDFAlgorithm:          cfg.KDFAlgorithm,
+	}
+
+	err = crypto.UnlockVault(masterPassword, vaultConfig)
+	if err != nil {
+		fmt.Println(" ❌")
+		fmt.Println()
+		fmt.Println("Invalid master password. Please try again.")
+		return nil
+	}
+
+	fmt.Println(" ✅")
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("🔓 Vault unlocked successfully!")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+	fmt.Println("Your memories and tasks will now be encrypted/decrypted automatically.")
+	fmt.Println("Run 'ramorie setup lock' to lock your vault when done.")
+	fmt.Println()
+	return nil
+}
+
+// handleVaultLock clears keys from memory
+func handleVaultLock() error {
+	if !crypto.IsVaultUnlocked() {
+		fmt.Println()
+		fmt.Println("ℹ️  Vault is already locked")
+		return nil
+	}
+
+	crypto.LockVault()
+
+	fmt.Println()
+	fmt.Println("🔒 Vault locked successfully!")
+	fmt.Println("   Encryption keys have been cleared from memory.")
+	fmt.Println()
+	return nil
+}
+
+// handleVaultStatus shows the current vault status
+func handleVaultStatus() error {
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg.APIKey == "" {
+		fmt.Println()
+		fmt.Println("❌ Not authenticated")
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("🔐 Vault Status")
+	fmt.Println("━━━━━━━━━━━━━━━")
+	fmt.Println()
+
+	if !cfg.EncryptionEnabled {
+		fmt.Println("Encryption: Disabled")
+		fmt.Println()
+		fmt.Println("Enable encryption in the web dashboard at:")
+		fmt.Printf("  %s/settings/security\n", webURL)
+		return nil
+	}
+
+	fmt.Println("Encryption: ✅ Enabled")
+
+	if crypto.IsVaultUnlocked() {
+		fmt.Println("Vault:      🔓 Unlocked")
+		fmt.Println()
+		fmt.Println("Your data is being encrypted/decrypted automatically.")
+	} else {
+		fmt.Println("Vault:      🔒 Locked")
+		fmt.Println()
+		fmt.Println("Run 'ramorie setup unlock' to unlock your vault.")
+	}
+
+	fmt.Println()
+	return nil
 }
