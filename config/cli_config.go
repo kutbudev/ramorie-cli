@@ -12,9 +12,9 @@ const (
 	// Legacy config directory name (for backward compatibility)
 	configDirLegacy    = ".jbrain"
 	configFileName     = "config.json"
-	DefaultApiURL      = "https://ramorie-backend-production.up.railway.app"
-	DefaultAuthURL     = "https://ramorie-backend-production.up.railway.app/auth"
-	V1ApiURL           = "https://ramorie-backend-production.up.railway.app/v1"
+	DefaultApiURL      = "https://api.ramorie.com"
+	DefaultAuthURL     = "https://api.ramorie.com/auth"
+	V1ApiURL           = "https://api.ramorie.com/v1"
 	activeProjectIDKey = "active_project_id"
 	apiURLKey          = "api_url"
 )

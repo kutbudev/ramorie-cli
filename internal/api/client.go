@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	baseURL = "https://ramorie-backend-production.up.railway.app/v1"
+	baseURL = "https://api.ramorie.com/v1"
 )
 
 type Client struct {
@@ -33,7 +33,7 @@ func (c *Client) Request(method, endpoint string, body interface{}) ([]byte, err
 func NewClient() *Client {
 	baseURL := os.Getenv("API_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://ramorie-backend-production.up.railway.app/v1"
+		baseURL = "https://api.ramorie.com/v1"
 	}
 
 	// Load API key from config
