@@ -9,9 +9,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
+	"github.com/kutbudev/ramorie-cli/internal/crypto"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ToolInput is a generic input struct for tools that use map[string]interface{}
@@ -489,6 +490,42 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 		}
 	}
 
+	// Check if user has encryption enabled and vault is unlocked
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.EncryptionEnabled {
+		if !crypto.IsVaultUnlocked() {
+			return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
+				"To unlock, the user must run:\n" +
+				"  ramorie setup unlock\n\n" +
+				"This only needs to be done once per session (until computer restarts).\n" +
+				"Please inform the user to unlock their vault.")
+		}
+
+		// Encrypt task description with vault key
+		encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(description)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encryption failed: %w", err)
+		}
+
+		if isEncrypted {
+			// Use encrypted task creation with agent metadata
+			task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, priority, meta)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			result := formatMCPResponse(task, getContextString())
+			result["_created_in_project"] = projectID
+			result["_encrypted"] = true
+			if session != nil {
+				result["_created_by_agent"] = session.AgentName
+			}
+			result["_message"] = "✅ Task created (encrypted) in project " + projectID[:8] + "..."
+			return nil, result, nil
+		}
+	}
+
+	// Non-encrypted task creation (user doesn't have encryption enabled)
 	task, err := apiClient.CreateTaskWithMeta(projectID, description, "", priority, meta)
 	if err != nil {
 		return nil, nil, err
@@ -740,6 +777,39 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 		return nil, nil, err
 	}
 
+	// Check if user has encryption enabled and vault is unlocked
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.EncryptionEnabled {
+		if !crypto.IsVaultUnlocked() {
+			return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
+				"To unlock, the user must run:\n" +
+				"  ramorie setup unlock\n\n" +
+				"This only needs to be done once per session (until computer restarts).\n" +
+				"Please inform the user to unlock their vault.")
+		}
+
+		// Encrypt memory content with vault key
+		encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encryption failed: %w", err)
+		}
+
+		if isEncrypted {
+			// Use encrypted memory creation
+			memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			result := formatMCPResponse(memory, getContextString())
+			result["_created_in_project"] = projectID
+			result["_encrypted"] = true
+			result["_message"] = "✅ Memory created (encrypted) in project " + projectID[:8] + "..."
+			return nil, result, nil
+		}
+	}
+
+	// Non-encrypted memory creation (user doesn't have encryption enabled)
 	memory, err := apiClient.CreateMemory(projectID, content)
 	if err != nil {
 		return nil, nil, err
@@ -1072,7 +1142,7 @@ func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input
 
 type CreateContextPackInput struct {
 	Name        string   `json:"name"`
-	Type        string   `json:"type"`        // project, integration, decision, custom
+	Type        string   `json:"type"` // project, integration, decision, custom
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 }
@@ -2272,4 +2342,5 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 
 	return result, nil
 }
+
 // ============================================================================

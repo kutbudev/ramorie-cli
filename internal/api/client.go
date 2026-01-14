@@ -282,6 +282,47 @@ func (c *Client) CreateEncryptedTask(projectID, encryptedTitle, titleNonce, encr
 	return &task, nil
 }
 
+// CreateEncryptedTaskWithMeta creates an encrypted task with agent metadata for MCP/CLI tracking
+func (c *Client) CreateEncryptedTaskWithMeta(projectID, encryptedTitle, titleNonce, priority string, meta *AgentMetadata) (*models.Task, error) {
+	reqBody := map[string]interface{}{
+		"project_id":      projectID,
+		"encrypted_title": encryptedTitle,
+		"title_nonce":     titleNonce,
+		"is_encrypted":    true,
+		"priority":        priority,
+	}
+
+	// Add agent metadata if provided
+	if meta != nil {
+		if meta.AgentName != "" {
+			reqBody["created_by_agent"] = meta.AgentName
+		}
+		if meta.AgentModel != "" {
+			reqBody["agent_model"] = meta.AgentModel
+		}
+		if meta.SessionID != "" {
+			reqBody["agent_session_id"] = meta.SessionID
+		}
+		if meta.CreatedVia != "" {
+			reqBody["created_via"] = meta.CreatedVia
+		} else {
+			reqBody["created_via"] = "mcp"
+		}
+	}
+
+	respBody, err := c.makeRequest("POST", "/tasks", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var task models.Task
+	if err := json.Unmarshal(respBody, &task); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &task, nil
+}
+
 // CreateTaskWithMeta creates a task with agent metadata for MCP/CLI tracking
 func (c *Client) CreateTaskWithMeta(projectID, title, description, priority string, meta *AgentMetadata, tags ...string) (*models.Task, error) {
 	reqBody := map[string]interface{}{
@@ -975,25 +1016,25 @@ func (c *Client) GetEncryptionConfig() (*EncryptionConfig, error) {
 
 // ContextPack represents a context pack
 type ContextPack struct {
-	ID             string        `json:"id"`
-	UserID         string        `json:"user_id"`
-	OrgID          *string       `json:"org_id,omitempty"`
-	Type           string        `json:"type"`
-	Name           string        `json:"name"`
-	Description    *string       `json:"description,omitempty"`
-	Status         string        `json:"status"`
-	Version        int           `json:"version"`
-	Tags           []string      `json:"tags"`
-	Memories       []interface{} `json:"memories,omitempty"`
-	Tasks          []interface{} `json:"tasks,omitempty"`
-	Contexts       []interface{} `json:"contexts,omitempty"`
-	MemoryIDs      interface{}   `json:"memory_ids,omitempty"`
-	TaskIDs        interface{}   `json:"task_ids,omitempty"`
-	ContextsCount  int           `json:"contexts_count,omitempty"`
-	MemoriesCount  int           `json:"memories_count,omitempty"`
-	TasksCount     int           `json:"tasks_count,omitempty"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
+	ID            string        `json:"id"`
+	UserID        string        `json:"user_id"`
+	OrgID         *string       `json:"org_id,omitempty"`
+	Type          string        `json:"type"`
+	Name          string        `json:"name"`
+	Description   *string       `json:"description,omitempty"`
+	Status        string        `json:"status"`
+	Version       int           `json:"version"`
+	Tags          []string      `json:"tags"`
+	Memories      []interface{} `json:"memories,omitempty"`
+	Tasks         []interface{} `json:"tasks,omitempty"`
+	Contexts      []interface{} `json:"contexts,omitempty"`
+	MemoryIDs     interface{}   `json:"memory_ids,omitempty"`
+	TaskIDs       interface{}   `json:"task_ids,omitempty"`
+	ContextsCount int           `json:"contexts_count,omitempty"`
+	MemoriesCount int           `json:"memories_count,omitempty"`
+	TasksCount    int           `json:"tasks_count,omitempty"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 // ContextPackListResponse represents the response from listing context packs
@@ -1324,20 +1365,20 @@ func (c *Client) DeleteDecision(id string) error {
 
 // UserFocus represents the user's current focus state
 type UserFocus struct {
-	ActiveContextPackID *string         `json:"active_context_pack_id"`
+	ActiveContextPackID *string          `json:"active_context_pack_id"`
 	ActivePack          *FocusPackDetail `json:"active_pack"`
 }
 
 // FocusPackDetail represents a context pack in focus response
 type FocusPackDetail struct {
-	ID            string               `json:"id"`
-	Name          string               `json:"name"`
-	Description   *string              `json:"description,omitempty"`
-	Type          string               `json:"type"`
-	Status        string               `json:"status"`
-	ContextsCount int                  `json:"contexts_count"`
-	MemoriesCount int                  `json:"memories_count"`
-	TasksCount    int                  `json:"tasks_count"`
+	ID            string                `json:"id"`
+	Name          string                `json:"name"`
+	Description   *string               `json:"description,omitempty"`
+	Type          string                `json:"type"`
+	Status        string                `json:"status"`
+	ContextsCount int                   `json:"contexts_count"`
+	MemoriesCount int                   `json:"memories_count"`
+	TasksCount    int                   `json:"tasks_count"`
 	Contexts      []FocusContextPreview `json:"contexts"`
 }
 
