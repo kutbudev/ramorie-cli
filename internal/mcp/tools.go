@@ -683,6 +683,33 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 	if taskID == "" || note == "" {
 		return nil, nil, errors.New("taskId and note are required")
 	}
+
+	// Check if user has encryption enabled and vault is unlocked
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.EncryptionEnabled {
+		if !crypto.IsVaultUnlocked() {
+			return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
+				"To unlock, the user must run:\n" +
+				"  ramorie setup unlock\n\n" +
+				"This only needs to be done once per session (until computer restarts).\n" +
+				"Please inform the user to unlock their vault.")
+		}
+
+		// Encrypt note content with vault key
+		encryptedNote, nonce, isEncrypted, err := crypto.EncryptContent(note)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encryption failed: %w", err)
+		}
+
+		if isEncrypted {
+			annotation, err := apiClient.CreateEncryptedAnnotation(taskID, encryptedNote, nonce)
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, annotation, nil
+		}
+	}
+
 	annotation, err := apiClient.CreateAnnotation(taskID, note)
 	if err != nil {
 		return nil, nil, err

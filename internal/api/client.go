@@ -799,6 +799,28 @@ func (c *Client) CreateAnnotation(taskID, content string) (*models.Annotation, e
 	return &annotation, nil
 }
 
+// CreateEncryptedAnnotation creates an annotation with encrypted content
+func (c *Client) CreateEncryptedAnnotation(taskID, encryptedContent, contentNonce string) (*models.Annotation, error) {
+	reqBody := map[string]interface{}{
+		"encrypted_content": encryptedContent,
+		"content_nonce":     contentNonce,
+		"is_encrypted":      true,
+	}
+
+	url := fmt.Sprintf("/tasks/%s/annotations", taskID)
+	respBody, err := c.makeRequest("POST", url, reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var annotation models.Annotation
+	if err := json.Unmarshal(respBody, &annotation); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &annotation, nil
+}
+
 func (c *Client) ListAnnotations(taskID string) ([]models.Annotation, error) {
 	if strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("task ID is required")
