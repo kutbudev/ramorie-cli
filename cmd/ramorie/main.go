@@ -19,6 +19,7 @@ func main() {
 		Commands: []*cli.Command{
 			// Core commands
 			commands.NewSetupCommand(),
+			commands.NewVaultCommand(), // Alias for vault operations (ramorie vault unlock)
 			commands.NewTaskCommand(),
 			commands.NewProjectCommand(),
 			commands.NewMemoryCommand(),
@@ -40,16 +41,16 @@ func main() {
 			// Context & Focus
 			commands.NewContextCommand(),
 			commands.NewContextPackCommand(),
-			commands.NewFocusCommand(),      // NEW
+			commands.NewFocusCommand(), // NEW
 
 			// Decisions (ADRs)
-			commands.NewDecisionCommand(),   // NEW
+			commands.NewDecisionCommand(), // NEW
 
 			// Organizations
 			commands.NewOrganizationCommand(), // NEW
 
 			// AI Features
-			commands.NewAICommand(),         // NEW
+			commands.NewAICommand(), // NEW
 
 			// Subtasks
 			commands.NewSubtaskCommand(),

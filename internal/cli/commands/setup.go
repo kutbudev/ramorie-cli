@@ -382,19 +382,41 @@ func handleVaultUnlock() error {
 		return nil
 	}
 
-	if !cfg.EncryptionEnabled {
+	if crypto.IsVaultUnlocked() {
+		fmt.Println()
+		fmt.Println("✅ Vault is already unlocked")
+		return nil
+	}
+
+	// Fetch encryption config from API (always fresh, not from local cache)
+	fmt.Print("🔄 Checking encryption status...")
+	client := api.NewClient()
+	client.APIKey = cfg.APIKey
+	encConfig, err := client.GetEncryptionConfig()
+	if err != nil {
+		fmt.Println(" ❌")
+		fmt.Println()
+		fmt.Printf("Failed to check encryption status: %v\n", err)
+		return nil
+	}
+
+	if !encConfig.EncryptionEnabled {
+		fmt.Println(" ℹ️")
 		fmt.Println()
 		fmt.Println("ℹ️  Encryption is not enabled for this account.")
 		fmt.Println("   Enable encryption in the web dashboard at:")
 		fmt.Printf("   %s/settings/security\n", webURL)
 		return nil
 	}
+	fmt.Println(" ✅")
 
-	if crypto.IsVaultUnlocked() {
-		fmt.Println()
-		fmt.Println("✅ Vault is already unlocked")
-		return nil
-	}
+	// Update local config with encryption data for future use
+	cfg.EncryptionEnabled = encConfig.EncryptionEnabled
+	cfg.EncryptedSymmetricKey = encConfig.EncryptedSymmetricKey
+	cfg.Salt = encConfig.Salt
+	cfg.KDFIterations = encConfig.KDFIterations
+	cfg.KDFAlgorithm = encConfig.KDFAlgorithm
+	_ = config.SaveConfig(cfg) // Best effort cache update
 
 	fmt.Println()
 	fmt.Println("🔐 Vault Unlock")
@@ -416,14 +438,14 @@ func handleVaultUnlock() error {
 
 	fmt.Print("🔄 Unlocking vault...")
 
-	// Create vault config from stored encryption data
+	// Create vault config from API encryption data
 	vaultConfig := &crypto.VaultConfig{
-		EncryptionEnabled:     cfg.EncryptionEnabled,
-		EncryptedSymmetricKey: cfg.EncryptedSymmetricKey,
-		KeyNonce:              cfg.KeyNonce,
-		Salt:                  cfg.Salt,
-		KDFIterations:         cfg.KDFIterations,
-		KDFAlgorithm:          cfg.KDFAlgorithm,
+		EncryptionEnabled:     encConfig.EncryptionEnabled,
+		EncryptedSymmetricKey: encConfig.EncryptedSymmetricKey,
+		KeyNonce:              encConfig.KeyNonce,
+		Salt:                  encConfig.Salt,
+		KDFIterations:         encConfig.KDFIterations,
+		KDFAlgorithm:          encConfig.KDFAlgorithm,
 	}
 
 	err = crypto.UnlockVault(masterPassword, vaultConfig)
@@ -494,9 +516,46 @@ func handleVaultStatus() error {
 	} else {
 		fmt.Println("Vault:      🔒 Locked")
 		fmt.Println()
-		fmt.Println("Run 'ramorie setup unlock' to unlock your vault.")
+		fmt.Println("Run 'ramorie vault unlock' to unlock your vault.")
 	}
 
 	fmt.Println()
 	return nil
+}
+
+// NewVaultCommand creates a top-level vault command as an alias for setup vault commands
+// This allows users to run 'ramorie vault unlock' instead of 'ramorie setup unlock'
+func NewVaultCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "vault",
+		Usage: "Manage your encrypted vault (alias for setup vault commands)",
+		Subcommands: []*cli.Command{
+			{
+				Name:  "unlock",
+				Usage: "Unlock your encrypted vault with master password",
+				Action: func(c *cli.Context) error {
+					return handleVaultUnlock()
+				},
+			},
+			{
+				Name:  "lock",
+				Usage: "Lock your encrypted vault (clear keys from memory)",
+				Action: func(c *cli.Context) error {
+					return handleVaultLock()
+				},
+			},
+			{
+				Name:    "status",
+				Aliases: []string{"s"},
+				Usage:   "Check encryption vault status",
+				Action: func(c *cli.Context) error {
+					return handleVaultStatus()
+				},
+			},
+		},
+		Action: func(c *cli.Context) error {
+			// Default action - show vault status
+			return handleVaultStatus()
+		},
+	}
 }

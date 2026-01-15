@@ -1002,7 +1002,7 @@ type EncryptionConfig struct {
 
 // GetEncryptionConfig fetches the user's encryption configuration
 func (c *Client) GetEncryptionConfig() (*EncryptionConfig, error) {
-	respBody, err := c.makeRequest("GET", "/auth/encryption-config", nil)
+	respBody, err := c.makeRequest("GET", "/auth/encryption-status", nil)
 	if err != nil {
 		return nil, err
 	}

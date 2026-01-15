@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
-
 	"github.com/google/uuid"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"sort"
+	"strings"
 )
 
 // ToolInput is a generic input struct for tools that use map[string]interface{}
