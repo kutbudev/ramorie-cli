@@ -1007,31 +1007,13 @@ func (c *Client) GetEncryptionConfig() (*EncryptionConfig, error) {
 		return nil, err
 	}
 
-	var response struct {
-		Success bool              `json:"success"`
-		Data    *EncryptionConfig `json:"data"`
-		Error   string            `json:"error"`
+	// API returns direct JSON (not wrapped in success/data)
+	var config EncryptionConfig
+	if err := json.Unmarshal(respBody, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal encryption config: %w", err)
 	}
 
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		// Try direct unmarshal if not wrapped
-		var config EncryptionConfig
-		if err2 := json.Unmarshal(respBody, &config); err2 == nil {
-			return &config, nil
-		}
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	if !response.Success && response.Error != "" {
-		return nil, fmt.Errorf("failed to get encryption config: %s", response.Error)
-	}
-
-	if response.Data == nil {
-		// No encryption enabled
-		return &EncryptionConfig{EncryptionEnabled: false}, nil
-	}
-
-	return response.Data, nil
+	return &config, nil
 }
 
 // Context Pack API methods
