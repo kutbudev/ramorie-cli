@@ -72,14 +72,30 @@ func UnlockVault(masterPassword string, config *VaultConfig) error {
 		return fmt.Errorf("invalid salt: %w", err)
 	}
 
-	encryptedKey, err := Base64ToBytes(config.EncryptedSymmetricKey)
+	encryptedKeyWithNonce, err := Base64ToBytes(config.EncryptedSymmetricKey)
 	if err != nil {
 		return fmt.Errorf("invalid encrypted key: %w", err)
 	}
 
-	nonce, err := Base64ToBytes(config.KeyNonce)
-	if err != nil {
-		return fmt.Errorf("invalid nonce: %w", err)
+	// Handle two formats:
+	// 1. Frontend format: encrypted_symmetric_key contains [12 bytes nonce][ciphertext]
+	// 2. Legacy format: nonce is stored separately in KeyNonce field
+	var nonce, encryptedKey []byte
+	if config.KeyNonce != "" {
+		// Legacy format - nonce is separate
+		nonce, err = Base64ToBytes(config.KeyNonce)
+		if err != nil {
+			return fmt.Errorf("invalid nonce: %w", err)
+		}
+		encryptedKey = encryptedKeyWithNonce
+	} else {
+		// Frontend format - nonce is prepended to ciphertext
+		// Format: [12 bytes nonce][ciphertext]
+		if len(encryptedKeyWithNonce) < NonceLength {
+			return fmt.Errorf("encrypted key too short: expected at least %d bytes for nonce", NonceLength)
+		}
+		nonce = encryptedKeyWithNonce[:NonceLength]
+		encryptedKey = encryptedKeyWithNonce[NonceLength:]
 	}
 
 	iterations := config.KDFIterations
