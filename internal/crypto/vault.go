@@ -32,29 +32,78 @@ var (
 )
 
 // IsVaultUnlocked returns whether the vault is currently unlocked
+// Checks both in-memory state and system keyring for cross-process support
 func IsVaultUnlocked() bool {
 	vaultMutex.RLock()
-	defer vaultMutex.RUnlock()
-	return currentVault != nil && currentVault.IsUnlocked
+	if currentVault != nil && currentVault.IsUnlocked {
+		vaultMutex.RUnlock()
+		return true
+	}
+	vaultMutex.RUnlock()
+
+	// Check if key exists in system keyring (unlocked by another process)
+	if HasStoredKey() {
+		// Try to restore vault state from keyring
+		if err := restoreVaultFromKeyring(); err == nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+// restoreVaultFromKeyring restores the vault state from system keyring
+func restoreVaultFromKeyring() error {
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
+
+	// Double-check after acquiring lock
+	if currentVault != nil && currentVault.IsUnlocked {
+		return nil
+	}
+
+	// Retrieve key from keyring
+	symmetricKey, err := RetrieveSymmetricKey()
+	if err != nil {
+		return err
+	}
+
+	// Restore vault state
+	currentVault = &VaultState{
+		IsUnlocked:   true,
+		SymmetricKey: symmetricKey,
+	}
+
+	return nil
 }
 
 // GetSymmetricKey returns the current symmetric key if vault is unlocked
+// Checks both in-memory state and system keyring for cross-process support
 func GetSymmetricKey() ([]byte, error) {
 	vaultMutex.RLock()
-	defer vaultMutex.RUnlock()
+	if currentVault != nil && currentVault.IsUnlocked && currentVault.SymmetricKey != nil {
+		// Return a copy to prevent external modification
+		keyCopy := make([]byte, len(currentVault.SymmetricKey))
+		copy(keyCopy, currentVault.SymmetricKey)
+		vaultMutex.RUnlock()
+		return keyCopy, nil
+	}
+	vaultMutex.RUnlock()
 
-	if currentVault == nil || !currentVault.IsUnlocked {
-		return nil, fmt.Errorf("vault is locked - run 'ramorie unlock' first")
+	// Try to restore from keyring (unlocked by another process)
+	if HasStoredKey() {
+		if err := restoreVaultFromKeyring(); err == nil {
+			vaultMutex.RLock()
+			defer vaultMutex.RUnlock()
+			if currentVault != nil && currentVault.SymmetricKey != nil {
+				keyCopy := make([]byte, len(currentVault.SymmetricKey))
+				copy(keyCopy, currentVault.SymmetricKey)
+				return keyCopy, nil
+			}
+		}
 	}
 
-	if currentVault.SymmetricKey == nil {
-		return nil, fmt.Errorf("symmetric key not available")
-	}
-
-	// Return a copy to prevent external modification
-	keyCopy := make([]byte, len(currentVault.SymmetricKey))
-	copy(keyCopy, currentVault.SymmetricKey)
-	return keyCopy, nil
+	return nil, fmt.Errorf("vault is locked - run 'ramorie unlock' first")
 }
 
 // UnlockVault decrypts the symmetric key with the master password
@@ -112,12 +161,19 @@ func UnlockVault(masterPassword string, config *VaultConfig) error {
 		return fmt.Errorf("invalid master password")
 	}
 
-	// Store in vault state
+	// Store in vault state (in-memory)
 	currentVault = &VaultState{
 		IsUnlocked:   true,
 		SymmetricKey: symmetricKey,
 		Salt:         salt,
 		Iterations:   iterations,
+	}
+
+	// Store symmetric key in system keyring for cross-process access
+	if err := StoreSymmetricKey(symmetricKey); err != nil {
+		// Log warning but don't fail - in-memory vault still works
+		// This might happen on headless systems without keyring
+		fmt.Fprintf(os.Stderr, "Warning: Could not store key in system keyring: %v\n", err)
 	}
 
 	// Zero out the stretched master key
@@ -128,7 +184,7 @@ func UnlockVault(masterPassword string, config *VaultConfig) error {
 	return nil
 }
 
-// LockVault clears the symmetric key from memory
+// LockVault clears the symmetric key from memory and system keyring
 func LockVault() {
 	vaultMutex.Lock()
 	defer vaultMutex.Unlock()
@@ -142,6 +198,9 @@ func LockVault() {
 		}
 		currentVault = nil
 	}
+
+	// Remove from system keyring
+	_ = DeleteSymmetricKey()
 }
 
 // GetVaultConfigPath returns the path to the vault config file
