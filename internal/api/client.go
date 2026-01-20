@@ -652,9 +652,19 @@ func (c *Client) AIDependencies(taskID string) (map[string]interface{}, error) {
 
 // Memory API methods
 func (c *Client) CreateMemory(projectID, content string, tags ...string) (*models.Memory, error) {
+	return c.CreateMemoryWithType(projectID, content, "", tags...)
+}
+
+// CreateMemoryWithType creates a memory with an optional type classification
+func (c *Client) CreateMemoryWithType(projectID, content, memoryType string, tags ...string) (*models.Memory, error) {
 	reqBody := map[string]interface{}{
 		"project_id": projectID,
 		"content":    content,
+	}
+
+	// Add type if provided
+	if memoryType != "" {
+		reqBody["type"] = memoryType
 	}
 
 	// Add tags if provided
@@ -1644,4 +1654,227 @@ func (c *Client) LeaveOrganization(orgID string) error {
 	endpoint := fmt.Sprintf("/organizations/%s/leave", orgID)
 	_, err := c.makeRequest("POST", endpoint, nil)
 	return err
+}
+
+// ============================================================================
+// Agent Events API
+// ============================================================================
+
+// AgentEventItem represents a single agent event in the timeline
+type AgentEventItem struct {
+	ID             string  `json:"id"`
+	EventType      string  `json:"event_type"`
+	EntityType     string  `json:"entity_type"`
+	EntityID       string  `json:"entity_id"`
+	AgentName      string  `json:"agent_name"`
+	AgentModel     *string `json:"agent_model,omitempty"`
+	AgentSessionID *string `json:"agent_session_id,omitempty"`
+	CreatedVia     string  `json:"created_via"`
+	ProjectID      *string `json:"project_id,omitempty"`
+	ProjectName    *string `json:"project_name,omitempty"`
+	EntityTitle    *string `json:"entity_title,omitempty"`
+	EntityPreview  *string `json:"entity_preview,omitempty"`
+	CreatedAt      string  `json:"created_at"`
+	IsEncrypted    bool    `json:"is_encrypted"`
+}
+
+// AgentEventListResponse represents the paginated response from agent events API
+type AgentEventListResponse struct {
+	Events      []AgentEventItem `json:"events"`
+	NextCursor  string           `json:"next_cursor,omitempty"`
+	HasMore     bool             `json:"has_more"`
+	Total       int64            `json:"total_estimate,omitempty"`
+	QueryTimeMs int64            `json:"query_time_ms,omitempty"`
+}
+
+// AgentEventFilter contains filter parameters for listing events
+type AgentEventFilter struct {
+	ProjectID  string
+	AgentName  string
+	EventType  string
+	EntityType string
+	Limit      int
+}
+
+// GetAgentEvents retrieves agent activity events with optional filtering
+func (c *Client) GetAgentEvents(filter AgentEventFilter) (*AgentEventListResponse, error) {
+	endpoint := "/agent-events"
+	params := url.Values{}
+
+	if filter.ProjectID != "" {
+		params.Add("project_id", filter.ProjectID)
+	}
+	if filter.AgentName != "" {
+		params.Add("agent_name", filter.AgentName)
+	}
+	if filter.EventType != "" {
+		params.Add("event_type", filter.EventType)
+	}
+	if filter.EntityType != "" {
+		params.Add("entity_type", filter.EntityType)
+	}
+	if filter.Limit > 0 {
+		params.Add("limit", fmt.Sprintf("%d", filter.Limit))
+	} else {
+		params.Add("limit", "20") // Default limit
+	}
+
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response AgentEventListResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal agent events: %w", err)
+	}
+	return &response, nil
+}
+
+// ============================================================================
+// Task Dependencies API
+// ============================================================================
+
+// TaskDependency represents a dependency between two tasks
+type TaskDependency struct {
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	DependsOnID string    `json:"depends_on_id"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// TaskDependencyInfo contains dependency info with task details
+type TaskDependencyInfo struct {
+	ID              string    `json:"id"`
+	TaskID          string    `json:"task_id"`
+	TaskTitle       string    `json:"task_title,omitempty"`
+	TaskStatus      string    `json:"task_status,omitempty"`
+	DependsOnID     string    `json:"depends_on_id"`
+	DependsOnTitle  string    `json:"depends_on_title,omitempty"`
+	DependsOnStatus string    `json:"depends_on_status,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// AddTaskDependency creates a dependency where taskID depends on dependsOnID
+func (c *Client) AddTaskDependency(taskID, dependsOnID string) (*TaskDependency, error) {
+	endpoint := fmt.Sprintf("/tasks/%s/dependencies", taskID)
+	body := map[string]string{
+		"depends_on_id": dependsOnID,
+	}
+
+	respBody, err := c.makeRequest("POST", endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+
+	var dep TaskDependency
+	if err := json.Unmarshal(respBody, &dep); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal task dependency: %w", err)
+	}
+	return &dep, nil
+}
+
+// GetTaskDependencies returns all tasks that the specified task depends on (prerequisites)
+func (c *Client) GetTaskDependencies(taskID string) ([]TaskDependencyInfo, error) {
+	endpoint := fmt.Sprintf("/tasks/%s/dependencies", taskID)
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var deps []TaskDependencyInfo
+	if err := json.Unmarshal(respBody, &deps); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal task dependencies: %w", err)
+	}
+	return deps, nil
+}
+
+// GetTaskDependents returns all tasks that depend on the specified task
+func (c *Client) GetTaskDependents(taskID string) ([]TaskDependencyInfo, error) {
+	endpoint := fmt.Sprintf("/tasks/%s/dependents", taskID)
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var deps []TaskDependencyInfo
+	if err := json.Unmarshal(respBody, &deps); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal task dependents: %w", err)
+	}
+	return deps, nil
+}
+
+// RemoveTaskDependency removes a dependency between two tasks
+func (c *Client) RemoveTaskDependency(taskID, dependsOnID string) error {
+	endpoint := fmt.Sprintf("/tasks/%s/dependencies/%s", taskID, dependsOnID)
+
+	_, err := c.makeRequest("DELETE", endpoint, nil)
+	return err
+}
+
+// CheckTaskDependencyCycle checks if adding a dependency would create a circular dependency
+func (c *Client) CheckTaskDependencyCycle(taskID, dependsOnID string) (bool, error) {
+	endpoint := fmt.Sprintf("/tasks/%s/dependencies/%s/check-cycle", taskID, dependsOnID)
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return false, err
+	}
+
+	var result struct {
+		WouldCreateCycle bool `json:"would_create_cycle"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return false, fmt.Errorf("failed to unmarshal cycle check result: %w", err)
+	}
+	return result.WouldCreateCycle, nil
+}
+
+// ============================================================================
+// Subtasks API (Enhanced)
+// ============================================================================
+
+// UpdateSubtaskRequest is the request body for updating a subtask
+type UpdateSubtaskRequest struct {
+	Description *string `json:"description,omitempty"`
+	Status      *string `json:"status,omitempty"`
+	Priority    *string `json:"priority,omitempty"`
+	Completed   *int    `json:"completed,omitempty"`
+}
+
+// UpdateSubtask updates an existing subtask
+func (c *Client) UpdateSubtask(subtaskID string, req UpdateSubtaskRequest) (*models.Subtask, error) {
+	endpoint := fmt.Sprintf("/subtasks/%s", subtaskID)
+
+	respBody, err := c.makeRequest("PATCH", endpoint, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var subtask models.Subtask
+	if err := json.Unmarshal(respBody, &subtask); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal subtask: %w", err)
+	}
+	return &subtask, nil
+}
+
+// DeleteSubtask deletes a subtask
+func (c *Client) DeleteSubtask(subtaskID string) error {
+	endpoint := fmt.Sprintf("/subtasks/%s", subtaskID)
+	_, err := c.makeRequest("DELETE", endpoint, nil)
+	return err
+}
+
+// CompleteSubtask marks a subtask as completed
+func (c *Client) CompleteSubtask(subtaskID string) (*models.Subtask, error) {
+	completed := 1
+	return c.UpdateSubtask(subtaskID, UpdateSubtaskRequest{
+		Completed: &completed,
+	})
 }

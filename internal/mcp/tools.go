@@ -198,7 +198,7 @@ func registerTools(server *mcp.Server) {
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store important information to knowledge base. REQUIRED: project, content parameters. 💡 If it matters later, add it here!",
+		Description: "🔴 ESSENTIAL | Store important information to knowledge base. REQUIRED: project, content parameters. Optional: type (general, decision, bug_fix, preference, pattern, reference - auto-detected if not provided). Auto-checks for similar memories - use force=true to bypass.",
 	}, handleAddMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -213,7 +213,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "recall",
-		Description: "🟡 COMMON | Advanced memory search with multi-word support, filters, and relations. Supports: OR search (space-separated), AND search (comma-separated), project/tag filtering.",
+		Description: "🟡 COMMON | Advanced memory search with multi-word support, filters, and relations. Supports: OR search (space-separated), AND search (comma-separated), project/tag/type filtering.",
 	}, handleRecall)
 
 	// ============================================================================
@@ -307,6 +307,60 @@ func registerTools(server *mcp.Server) {
 		Name:        "ai_find_dependencies",
 		Description: "🟡 COMMON | Get AI-identified dependencies and prerequisites for a task.",
 	}, handleAIFindDependencies)
+
+	// ============================================================================
+	// 🟡 COMMON - Task Dependencies
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "add_task_dependency",
+		Description: "🟡 COMMON | Add a dependency between tasks. The task_id depends on depends_on_id (depends_on_id must be completed first). Prevents circular dependencies.",
+	}, handleAddTaskDependency)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_task_dependencies",
+		Description: "🟡 COMMON | Get all tasks that a task depends on (prerequisites that must be completed first).",
+	}, handleGetTaskDependencies)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_task_dependents",
+		Description: "🟡 COMMON | Get all tasks that depend on a task (tasks blocked by this one).",
+	}, handleGetTaskDependents)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "remove_task_dependency",
+		Description: "🟡 COMMON | Remove a dependency between two tasks.",
+	}, handleRemoveTaskDependency)
+
+	// ============================================================================
+	// 🟡 COMMON - Subtasks
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_subtask",
+		Description: "🟡 COMMON | Create a subtask under a parent task. Break down complex tasks into smaller, manageable steps.",
+	}, handleCreateSubtask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_subtasks",
+		Description: "🟡 COMMON | Get all subtasks for a task. Shows the breakdown of a task into smaller steps.",
+	}, handleGetSubtasks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "complete_subtask",
+		Description: "🟡 COMMON | Mark a subtask as completed.",
+	}, handleCompleteSubtask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_subtask",
+		Description: "🟡 COMMON | Update a subtask's description, status, or priority.",
+	}, handleUpdateSubtask)
+
+	// ============================================================================
+	// 🟡 COMMON - Agent Activity Timeline
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_agent_activity",
+		Description: "🟡 COMMON | Get recent agent activity timeline. Filter by project, agent_name, or event_type (memory_created, task_created, task_updated, etc.).",
+	}, handleGetAgentActivity)
 
 	// ============================================================================
 	// 🟡 COMMON - Organizations
@@ -963,7 +1017,9 @@ func handleGetActiveTask(ctx context.Context, req *mcp.CallToolRequest, input Em
 
 type AddMemoryInput struct {
 	Content string `json:"content"`
-	Project string `json:"project"` // REQUIRED - project name or ID
+	Project string `json:"project"`         // REQUIRED - project name or ID
+	Type    string `json:"type,omitempty"`  // Memory type: general, decision, bug_fix, preference, pattern, reference (auto-detected if not provided)
+	Force   bool   `json:"force,omitempty"` // Skip similarity check and force creation
 }
 
 func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, map[string]interface{}, error) {
@@ -985,6 +1041,28 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 	projectID, err := resolveProjectID(apiClient, input.Project)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Check for similar memories unless force=true
+	if !input.Force {
+		// Fetch existing memories for this project
+		existingMemories, err := apiClient.ListMemories(projectID, "")
+		if err == nil && len(existingMemories) > 0 {
+			// Check for similar content
+			similarMemories := CheckSimilarMemories(existingMemories, content, SimilarityThreshold)
+			if len(similarMemories) > 0 {
+				// Return warning with similar memories
+				result := map[string]interface{}{
+					"status":           "similar_exists",
+					"message":          "Similar memories already exist. Use force=true to create anyway.",
+					"similar_count":    len(similarMemories),
+					"similar_memories": similarMemories,
+					"threshold":        SimilarityThreshold,
+					"_context":         getContextString(),
+				}
+				return nil, result, nil
+			}
+		}
 	}
 
 	// Check if user has encryption enabled and vault is unlocked
@@ -1019,8 +1097,16 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 		}
 	}
 
+	// Determine memory type - use provided or auto-detect
+	memoryType := strings.TrimSpace(input.Type)
+	if memoryType == "" {
+		memoryType = DetectMemoryType(content)
+	} else if !IsValidMemoryType(memoryType) {
+		return nil, nil, fmt.Errorf("invalid memory type '%s'. Valid types: %v", memoryType, ValidMemoryTypes())
+	}
+
 	// Non-encrypted memory creation (user doesn't have encryption enabled)
-	memory, err := apiClient.CreateMemory(projectID, content)
+	memory, err := apiClient.CreateMemoryWithType(projectID, content, memoryType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1028,6 +1114,8 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 	// Return with context info showing where memory was created
 	result := formatMCPResponse(memory, getContextString())
 	result["_created_in_project"] = projectID
+	result["_type"] = memoryType
+	result["_type_auto_detected"] = input.Type == ""
 	result["_message"] = "✅ Memory created successfully in project " + projectID[:8] + "..."
 
 	return nil, result, nil
@@ -1144,6 +1232,7 @@ type RecallInput struct {
 	Term             string  `json:"term"`
 	Project          string  `json:"project,omitempty"`
 	Tag              string  `json:"tag,omitempty"`
+	Type             string  `json:"type,omitempty"` // Filter by memory type: general, decision, bug_fix, preference, pattern, reference
 	LinkedTask       bool    `json:"linked_task,omitempty"`
 	IncludeRelations bool    `json:"include_relations,omitempty"`
 	Limit            float64 `json:"limit,omitempty"`
@@ -2607,6 +2696,443 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 	result["next_steps"] = recommendations
 
 	return result, nil
+}
+
+// ============================================================================
+// Agent Activity Timeline Handlers
+// ============================================================================
+
+type GetAgentActivityInput struct {
+	Project   string  `json:"project,omitempty"`   // Optional: filter by project name or ID
+	AgentName string  `json:"agent_name,omitempty"` // Optional: filter by agent name
+	EventType string  `json:"event_type,omitempty"` // Optional: filter by event type (memory_created, task_created, etc.)
+	Limit     float64 `json:"limit,omitempty"`      // Optional: max results (default 20, max 50)
+}
+
+func handleGetAgentActivity(ctx context.Context, req *mcp.CallToolRequest, input GetAgentActivityInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	// Build filter
+	filter := api.AgentEventFilter{
+		AgentName: strings.TrimSpace(input.AgentName),
+		EventType: strings.TrimSpace(input.EventType),
+	}
+
+	// Set limit
+	limit := int(input.Limit)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	filter.Limit = limit
+
+	// Resolve project ID if provided
+	if project := strings.TrimSpace(input.Project); project != "" {
+		projectID, err := resolveProjectID(apiClient, project)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to resolve project: %w", err)
+		}
+		filter.ProjectID = projectID
+	}
+
+	// Get agent events
+	response, err := apiClient.GetAgentEvents(filter)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get agent activity: %w", err)
+	}
+
+	// Format events for agent-friendly output
+	events := make([]map[string]interface{}, 0, len(response.Events))
+	for _, event := range response.Events {
+		e := map[string]interface{}{
+			"event_type":  event.EventType,
+			"entity_type": event.EntityType,
+			"agent_name":  event.AgentName,
+			"created_at":  event.CreatedAt,
+			"created_via": event.CreatedVia,
+		}
+		if event.EntityTitle != nil {
+			e["entity_title"] = *event.EntityTitle
+		}
+		if event.ProjectName != nil {
+			e["project_name"] = *event.ProjectName
+		}
+		if event.AgentModel != nil {
+			e["agent_model"] = *event.AgentModel
+		}
+		events = append(events, e)
+	}
+
+	result := map[string]interface{}{
+		"events":   events,
+		"count":    len(events),
+		"has_more": response.HasMore,
+		"_context": getContextString(),
+	}
+
+	if response.Total > 0 {
+		result["total_estimate"] = response.Total
+	}
+
+	return nil, result, nil
+}
+
+// ============================================================================
+// Task Dependency Handlers
+// ============================================================================
+
+type AddTaskDependencyInput struct {
+	TaskID      string `json:"task_id"`       // The task that has a dependency
+	DependsOnID string `json:"depends_on_id"` // The prerequisite task
+}
+
+func handleAddTaskDependency(ctx context.Context, req *mcp.CallToolRequest, input AddTaskDependencyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("task_id is required")
+	}
+	dependsOnID := strings.TrimSpace(input.DependsOnID)
+	if dependsOnID == "" {
+		return nil, nil, errors.New("depends_on_id is required")
+	}
+
+	// Validate UUIDs
+	if _, err := uuid.Parse(taskID); err != nil {
+		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
+	}
+	if _, err := uuid.Parse(dependsOnID); err != nil {
+		return nil, nil, errors.New("invalid depends_on_id format - must be a valid UUID")
+	}
+
+	dep, err := apiClient.AddTaskDependency(taskID, dependsOnID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to add task dependency: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":            dep.ID,
+		"task_id":       dep.TaskID,
+		"depends_on_id": dep.DependsOnID,
+		"created_at":    dep.CreatedAt,
+		"message":       "Dependency created successfully. Task cannot be started until the prerequisite task is completed.",
+		"_context":      getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type GetTaskDependenciesInput struct {
+	TaskID string `json:"task_id"`
+}
+
+func handleGetTaskDependencies(ctx context.Context, req *mcp.CallToolRequest, input GetTaskDependenciesInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("task_id is required")
+	}
+
+	if _, err := uuid.Parse(taskID); err != nil {
+		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
+	}
+
+	deps, err := apiClient.GetTaskDependencies(taskID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get task dependencies: %w", err)
+	}
+
+	// Format dependencies for agent-friendly output
+	formattedDeps := make([]map[string]interface{}, 0, len(deps))
+	for _, dep := range deps {
+		d := map[string]interface{}{
+			"id":                dep.ID,
+			"depends_on_id":     dep.DependsOnID,
+			"depends_on_title":  dep.DependsOnTitle,
+			"depends_on_status": dep.DependsOnStatus,
+			"created_at":        dep.CreatedAt,
+		}
+		formattedDeps = append(formattedDeps, d)
+	}
+
+	result := map[string]interface{}{
+		"task_id":      taskID,
+		"dependencies": formattedDeps,
+		"count":        len(formattedDeps),
+		"message":      "These are the tasks that must be completed before this task can be started.",
+		"_context":     getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type GetTaskDependentsInput struct {
+	TaskID string `json:"task_id"`
+}
+
+func handleGetTaskDependents(ctx context.Context, req *mcp.CallToolRequest, input GetTaskDependentsInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("task_id is required")
+	}
+
+	if _, err := uuid.Parse(taskID); err != nil {
+		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
+	}
+
+	deps, err := apiClient.GetTaskDependents(taskID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get task dependents: %w", err)
+	}
+
+	// Format dependents for agent-friendly output
+	formattedDeps := make([]map[string]interface{}, 0, len(deps))
+	for _, dep := range deps {
+		d := map[string]interface{}{
+			"id":          dep.ID,
+			"task_id":     dep.TaskID,
+			"task_title":  dep.TaskTitle,
+			"task_status": dep.TaskStatus,
+			"created_at":  dep.CreatedAt,
+		}
+		formattedDeps = append(formattedDeps, d)
+	}
+
+	result := map[string]interface{}{
+		"prerequisite_task_id": taskID,
+		"dependents":           formattedDeps,
+		"count":                len(formattedDeps),
+		"message":              "These are the tasks that are waiting for this task to be completed.",
+		"_context":             getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type RemoveTaskDependencyInput struct {
+	TaskID      string `json:"task_id"`
+	DependsOnID string `json:"depends_on_id"`
+}
+
+func handleRemoveTaskDependency(ctx context.Context, req *mcp.CallToolRequest, input RemoveTaskDependencyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("task_id is required")
+	}
+	dependsOnID := strings.TrimSpace(input.DependsOnID)
+	if dependsOnID == "" {
+		return nil, nil, errors.New("depends_on_id is required")
+	}
+
+	if _, err := uuid.Parse(taskID); err != nil {
+		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
+	}
+	if _, err := uuid.Parse(dependsOnID); err != nil {
+		return nil, nil, errors.New("invalid depends_on_id format - must be a valid UUID")
+	}
+
+	err := apiClient.RemoveTaskDependency(taskID, dependsOnID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to remove task dependency: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"task_id":       taskID,
+		"depends_on_id": dependsOnID,
+		"status":        "removed",
+		"message":       "Dependency removed successfully. The task can now be started independently.",
+		"_context":      getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+// ============================================================================
+// Subtask Handlers
+// ============================================================================
+
+type CreateSubtaskInput struct {
+	TaskID      string `json:"task_id"`      // Parent task ID
+	Description string `json:"description"`  // Subtask description
+}
+
+func handleCreateSubtask(ctx context.Context, req *mcp.CallToolRequest, input CreateSubtaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("task_id is required")
+	}
+	description := strings.TrimSpace(input.Description)
+	if description == "" {
+		return nil, nil, errors.New("description is required")
+	}
+
+	if _, err := uuid.Parse(taskID); err != nil {
+		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
+	}
+
+	subtask, err := apiClient.CreateSubtask(taskID, description)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create subtask: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":          subtask.ID.String(),
+		"task_id":     subtask.TaskID.String(),
+		"description": subtask.Description,
+		"completed":   subtask.Completed,
+		"status":      subtask.Status,
+		"created_at":  subtask.CreatedAt,
+		"message":     "Subtask created successfully.",
+		"_context":    getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type GetSubtasksInput struct {
+	TaskID string `json:"task_id"`
+}
+
+func handleGetSubtasks(ctx context.Context, req *mcp.CallToolRequest, input GetSubtasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return nil, nil, errors.New("task_id is required")
+	}
+
+	if _, err := uuid.Parse(taskID); err != nil {
+		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
+	}
+
+	subtasks, err := apiClient.ListSubtasks(taskID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get subtasks: %w", err)
+	}
+
+	// Format subtasks for agent-friendly output
+	formattedSubtasks := make([]map[string]interface{}, 0, len(subtasks))
+	completedCount := 0
+	for _, st := range subtasks {
+		s := map[string]interface{}{
+			"id":          st.ID.String(),
+			"description": st.Description,
+			"completed":   st.Completed,
+			"status":      st.Status,
+			"priority":    st.Priority,
+			"created_at":  st.CreatedAt,
+		}
+		if st.Completed == 1 {
+			completedCount++
+		}
+		formattedSubtasks = append(formattedSubtasks, s)
+	}
+
+	result := map[string]interface{}{
+		"task_id":         taskID,
+		"subtasks":        formattedSubtasks,
+		"total_count":     len(formattedSubtasks),
+		"completed_count": completedCount,
+		"pending_count":   len(formattedSubtasks) - completedCount,
+		"_context":        getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type CompleteSubtaskInput struct {
+	SubtaskID string `json:"subtask_id"`
+}
+
+func handleCompleteSubtask(ctx context.Context, req *mcp.CallToolRequest, input CompleteSubtaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	subtaskID := strings.TrimSpace(input.SubtaskID)
+	if subtaskID == "" {
+		return nil, nil, errors.New("subtask_id is required")
+	}
+
+	if _, err := uuid.Parse(subtaskID); err != nil {
+		return nil, nil, errors.New("invalid subtask_id format - must be a valid UUID")
+	}
+
+	subtask, err := apiClient.CompleteSubtask(subtaskID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to complete subtask: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":          subtask.ID.String(),
+		"description": subtask.Description,
+		"completed":   subtask.Completed,
+		"status":      subtask.Status,
+		"message":     "Subtask marked as completed.",
+		"_context":    getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type UpdateSubtaskInput struct {
+	SubtaskID   string  `json:"subtask_id"`
+	Description *string `json:"description,omitempty"`
+	Status      *string `json:"status,omitempty"`      // TODO, IN_PROGRESS, COMPLETED
+	Priority    *string `json:"priority,omitempty"`    // L, M, H
+}
+
+func handleUpdateSubtask(ctx context.Context, req *mcp.CallToolRequest, input UpdateSubtaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	subtaskID := strings.TrimSpace(input.SubtaskID)
+	if subtaskID == "" {
+		return nil, nil, errors.New("subtask_id is required")
+	}
+
+	if _, err := uuid.Parse(subtaskID); err != nil {
+		return nil, nil, errors.New("invalid subtask_id format - must be a valid UUID")
+	}
+
+	// Build update request
+	updateReq := api.UpdateSubtaskRequest{}
+	if input.Description != nil {
+		desc := strings.TrimSpace(*input.Description)
+		if desc != "" {
+			updateReq.Description = &desc
+		}
+	}
+	if input.Status != nil {
+		status := strings.TrimSpace(*input.Status)
+		if status != "" {
+			// Validate status
+			validStatuses := map[string]bool{"TODO": true, "IN_PROGRESS": true, "COMPLETED": true}
+			if !validStatuses[strings.ToUpper(status)] {
+				return nil, nil, errors.New("invalid status - must be TODO, IN_PROGRESS, or COMPLETED")
+			}
+			upperStatus := strings.ToUpper(status)
+			updateReq.Status = &upperStatus
+		}
+	}
+	if input.Priority != nil {
+		priority := strings.TrimSpace(*input.Priority)
+		if priority != "" {
+			// Validate priority
+			validPriorities := map[string]bool{"L": true, "M": true, "H": true}
+			if !validPriorities[strings.ToUpper(priority)] {
+				return nil, nil, errors.New("invalid priority - must be L (Low), M (Medium), or H (High)")
+			}
+			upperPriority := strings.ToUpper(priority)
+			updateReq.Priority = &upperPriority
+		}
+	}
+
+	subtask, err := apiClient.UpdateSubtask(subtaskID, updateReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to update subtask: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":          subtask.ID.String(),
+		"description": subtask.Description,
+		"completed":   subtask.Completed,
+		"status":      subtask.Status,
+		"priority":    subtask.Priority,
+		"message":     "Subtask updated successfully.",
+		"_context":    getContextString(),
+	}
+
+	return nil, result, nil
 }
 
 // ============================================================================

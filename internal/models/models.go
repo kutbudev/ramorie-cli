@@ -82,11 +82,14 @@ type Annotation struct {
 }
 
 type Subtask struct {
-	ID          uuid.UUID `json:"id"`
-	TaskID      uuid.UUID `json:"task_id"`
-	Description string    `json:"description"`
-	Completed   int       `json:"completed"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	TaskID          uuid.UUID  `json:"task_id"`
+	Description     string     `json:"description"`
+	Completed       int        `json:"completed"`
+	Status          string     `json:"status,omitempty"`
+	Priority        string     `json:"priority,omitempty"`
+	ParentSubtaskID *uuid.UUID `json:"parent_subtask_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // Context represents a context in the system
