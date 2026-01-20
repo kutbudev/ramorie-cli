@@ -203,6 +203,42 @@ func (c *Client) SetProjectActive(id string) error {
 	return err
 }
 
+// ProjectSuggestion represents a similar project suggestion
+type ProjectSuggestion struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Similarity float64 `json:"similarity"`
+	OrgName    string  `json:"org_name,omitempty"`
+}
+
+// SuggestProjectsResponse represents the response from the project suggest endpoint
+type SuggestProjectsResponse struct {
+	ExactMatch *models.Project     `json:"exact_match"`
+	Similar    []ProjectSuggestion `json:"similar"`
+}
+
+// SuggestProjects finds similar existing projects by name
+func (c *Client) SuggestProjects(name string, orgID string) (*SuggestProjectsResponse, error) {
+	params := url.Values{}
+	params.Add("name", name)
+	if orgID != "" {
+		params.Add("org_id", orgID)
+	}
+
+	endpoint := "/projects/suggest?" + params.Encode()
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response SuggestProjectsResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal suggest response: %w", err)
+	}
+
+	return &response, nil
+}
+
 func (c *Client) UpdateProject(id string, data map[string]interface{}) (*models.Project, error) {
 	respBody, err := c.makeRequest("PUT", "/projects/"+id, data)
 	if err != nil {

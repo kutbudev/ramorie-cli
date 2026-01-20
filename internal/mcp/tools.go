@@ -50,7 +50,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_project",
-		Description: "🟢 ADVANCED | Create a new project. ⚠️ Check list_projects first - don't create duplicates!",
+		Description: "🟢 ADVANCED | Create a new project. ⚠️ Auto-checks for duplicates - returns similar projects if found. Use force=true to bypass.",
 	}, handleCreateProject)
 
 	// ============================================================================
@@ -407,6 +407,8 @@ func handleSetActiveProject(ctx context.Context, req *mcp.CallToolRequest, input
 type CreateProjectInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Force       bool   `json:"force,omitempty"` // Set true to bypass similarity check
+	OrgID       string `json:"org_id,omitempty"` // Organization ID for scoping
 }
 
 func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input CreateProjectInput) (*mcp.CallToolResult, interface{}, error) {
@@ -414,11 +416,59 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 	if name == "" {
 		return nil, nil, errors.New("name is required")
 	}
+
+	// Step 1: Check for similar projects (unless force=true)
+	if !input.Force {
+		suggestions, err := apiClient.SuggestProjects(name, strings.TrimSpace(input.OrgID))
+		if err == nil && suggestions != nil {
+			// If exact match exists, don't create duplicate
+			if suggestions.ExactMatch != nil {
+				return nil, map[string]interface{}{
+					"status":        "exists",
+					"exact_match":   suggestions.ExactMatch,
+					"_message":      "✅ Project already exists with this name. Use existing project instead of creating a duplicate.",
+					"_action":       "Use set_active_project or specify this project name in your create_task/add_memory calls.",
+				}, nil
+			}
+
+			// If similar projects found (>60% similarity), warn and require confirmation
+			if len(suggestions.Similar) > 0 {
+				// Build similar projects list for response
+				similarList := make([]map[string]interface{}, 0, len(suggestions.Similar))
+				for _, s := range suggestions.Similar {
+					if s.Similarity >= 0.6 { // Only show projects with >60% similarity
+						similarList = append(similarList, map[string]interface{}{
+							"id":         s.ID,
+							"name":       s.Name,
+							"similarity": fmt.Sprintf("%.0f%%", s.Similarity*100),
+							"org_name":   s.OrgName,
+						})
+					}
+				}
+
+				if len(similarList) > 0 {
+					return nil, map[string]interface{}{
+						"status":           "needs_confirmation",
+						"similar_projects": similarList,
+						"requested_name":   name,
+						"_message":         "⚠️ Similar projects found. To avoid duplicates:\n1. Use an existing project from the list above, OR\n2. Call create_project with force=true to create anyway",
+						"_action":          "Either use set_active_project(projectName=\"existing-name\") or call create_project(name=\"...\", force=true)",
+					}, nil
+				}
+			}
+		}
+		// If suggest API fails or returns no similar, proceed with creation
+	}
+
+	// Step 2: Create the project
 	project, err := apiClient.CreateProject(name, strings.TrimSpace(input.Description))
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, project, nil
+	return nil, map[string]interface{}{
+		"project":  project,
+		"_message": "✅ Project created successfully: " + project.Name,
+	}, nil
 }
 
 type ListTasksInput struct {
@@ -2048,8 +2098,8 @@ func ToolDefinitions() []toolDef {
 		// ============================================================================
 		{
 			Name:        "create_project",
-			Description: "🟢 ADVANCED | Create a new project. ⚠️ Check list_projects first - don't create duplicates!",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"name": map[string]interface{}{"type": "string", "description": "Project name - must be unique"}, "description": map[string]interface{}{"type": "string"}}, "required": []string{"name"}},
+			Description: "🟢 ADVANCED | Create a new project. ⚠️ Auto-checks for duplicates - returns similar projects if found. Use force=true to bypass.",
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"name": map[string]interface{}{"type": "string", "description": "Project name - auto-checked for duplicates"}, "description": map[string]interface{}{"type": "string"}, "force": map[string]interface{}{"type": "boolean", "description": "Set true to bypass duplicate check and force creation"}, "org_id": map[string]interface{}{"type": "string", "description": "Organization ID to scope project to"}}, "required": []string{"name"}},
 		},
 		{
 			Name:        "get_cursor_rules",
