@@ -109,7 +109,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "setup_agent",
-		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, and recommended actions.",
+		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
 	}, handleSetupAgent)
 
 	// ============================================================================
@@ -422,6 +422,9 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 		"step_4":  "📝 Now you can create tasks and memories in that project",
 		"warning": "⚠️ Tasks/memories created without set_active_project will use Personal workspace",
 	}
+
+	// Add agent directives for proactive behavior
+	result["agent_directives"] = GetDirectivesAsMap()
 
 	return nil, result, nil
 }
@@ -2008,7 +2011,7 @@ func ToolDefinitions() []toolDef {
 		},
 		{
 			Name:        "setup_agent",
-			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, and recommended actions.",
+			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -2524,7 +2527,7 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",
 		"message": "🧠 Ramorie agent session initialized",
-		"version": "2.1.0",
+		"version": "3.9.0",
 	}
 
 	// Get active project
