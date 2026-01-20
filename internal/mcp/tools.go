@@ -9,10 +9,87 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
+	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"sort"
 	"strings"
 )
+
+// ============================================================================
+// Encryption Helper Functions for Zero-Knowledge Decryption
+// ============================================================================
+
+// decryptMemoryContent decrypts memory content if encrypted and vault is unlocked.
+// Returns the plaintext content or a fallback message.
+func decryptMemoryContent(m *models.Memory) string {
+	if !m.IsEncrypted {
+		return m.Content
+	}
+
+	// Check if we have encrypted content to decrypt
+	if m.EncryptedContent == "" {
+		// Content might be "[Encrypted]" placeholder from backend
+		return m.Content
+	}
+
+	if !crypto.IsVaultUnlocked() {
+		return "[Vault Locked - Unlock to view]"
+	}
+
+	plaintext, err := crypto.DecryptContent(m.EncryptedContent, m.ContentNonce, true)
+	if err != nil {
+		return "[Decryption Failed]"
+	}
+
+	return plaintext
+}
+
+// decryptTaskFields decrypts task title and description if encrypted and vault is unlocked.
+// Returns decrypted title and description.
+func decryptTaskFields(t *models.Task) (title, description string) {
+	if !t.IsEncrypted {
+		return t.Title, t.Description
+	}
+
+	// Check if vault is unlocked
+	if !crypto.IsVaultUnlocked() {
+		title = "[Vault Locked - Unlock to view]"
+		description = "[Vault Locked - Unlock to view]"
+		if t.Title != "" && t.Title != "[Encrypted]" {
+			title = t.Title
+		}
+		if t.Description != "" && t.Description != "[Encrypted]" {
+			description = t.Description
+		}
+		return title, description
+	}
+
+	// Decrypt title
+	if t.EncryptedTitle != "" {
+		decrypted, err := crypto.DecryptContent(t.EncryptedTitle, t.TitleNonce, true)
+		if err != nil {
+			title = "[Decryption Failed]"
+		} else {
+			title = decrypted
+		}
+	} else {
+		title = t.Title
+	}
+
+	// Decrypt description
+	if t.EncryptedDescription != "" {
+		decrypted, err := crypto.DecryptContent(t.EncryptedDescription, t.DescriptionNonce, true)
+		if err != nil {
+			description = "[Decryption Failed]"
+		} else {
+			description = decrypted
+		}
+	} else {
+		description = t.Description
+	}
+
+	return title, description
+}
 
 // ToolInput is a generic input struct for tools that use map[string]interface{}
 type ToolInput struct {
@@ -495,8 +572,37 @@ func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTa
 	if limit > 0 && limit < len(tasks) {
 		tasks = tasks[:limit]
 	}
+
+	// Decrypt task fields before returning
+	var decryptedTasks []map[string]interface{}
+	for _, t := range tasks {
+		decryptedTitle, decryptedDesc := decryptTaskFields(&t)
+		taskMap := map[string]interface{}{
+			"id":           t.ID.String(),
+			"project_id":   t.ProjectID.String(),
+			"title":        decryptedTitle,
+			"description":  decryptedDesc,
+			"status":       t.Status,
+			"priority":     t.Priority,
+			"tags":         t.Tags,
+			"created_at":   t.CreatedAt,
+			"updated_at":   t.UpdatedAt,
+			"is_encrypted": t.IsEncrypted,
+		}
+		if t.Project != nil {
+			taskMap["project"] = map[string]interface{}{
+				"id":   t.Project.ID.String(),
+				"name": t.Project.Name,
+			}
+		}
+		if len(t.Annotations) > 0 {
+			taskMap["annotations"] = t.Annotations
+		}
+		decryptedTasks = append(decryptedTasks, taskMap)
+	}
+
 	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(tasks, getContextString()), nil
+	return nil, formatMCPResponse(decryptedTasks, getContextString()), nil
 }
 
 type CreateTaskInput struct {
@@ -604,7 +710,32 @@ func handleGetTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDIn
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, task, nil
+
+	// Decrypt task fields before returning
+	decryptedTitle, decryptedDesc := decryptTaskFields(task)
+	result := map[string]interface{}{
+		"id":           task.ID.String(),
+		"project_id":   task.ProjectID.String(),
+		"title":        decryptedTitle,
+		"description":  decryptedDesc,
+		"status":       task.Status,
+		"priority":     task.Priority,
+		"tags":         task.Tags,
+		"created_at":   task.CreatedAt,
+		"updated_at":   task.UpdatedAt,
+		"is_encrypted": task.IsEncrypted,
+	}
+	if task.Project != nil {
+		result["project"] = map[string]interface{}{
+			"id":   task.Project.ID.String(),
+			"name": task.Project.Name,
+		}
+	}
+	if len(task.Annotations) > 0 {
+		result["annotations"] = task.Annotations
+	}
+
+	return nil, result, nil
 }
 
 func handleStartTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
@@ -919,22 +1050,53 @@ func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input Lis
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Filter by term using decrypted content
 	term := strings.TrimSpace(input.Term)
 	if term != "" {
 		filtered := memories[:0]
 		for _, m := range memories {
-			if strings.Contains(strings.ToLower(m.Content), strings.ToLower(term)) {
+			// CRITICAL: Decrypt content before filtering
+			decryptedContent := decryptMemoryContent(&m)
+			if strings.Contains(strings.ToLower(decryptedContent), strings.ToLower(term)) {
 				filtered = append(filtered, m)
 			}
 		}
 		memories = filtered
 	}
+
 	limit := int(input.Limit)
 	if limit > 0 && limit < len(memories) {
 		memories = memories[:limit]
 	}
+
+	// Decrypt all memory content before returning
+	var decryptedMemories []map[string]interface{}
+	for _, m := range memories {
+		decryptedContent := decryptMemoryContent(&m)
+		memMap := map[string]interface{}{
+			"id":           m.ID.String(),
+			"project_id":   m.ProjectID.String(),
+			"content":      decryptedContent,
+			"tags":         m.Tags,
+			"created_at":   m.CreatedAt,
+			"updated_at":   m.UpdatedAt,
+			"is_encrypted": m.IsEncrypted,
+		}
+		if m.LinkedTaskID != nil {
+			memMap["linked_task_id"] = m.LinkedTaskID.String()
+		}
+		if m.Project != nil {
+			memMap["project"] = map[string]interface{}{
+				"id":   m.Project.ID.String(),
+				"name": m.Project.Name,
+			}
+		}
+		decryptedMemories = append(decryptedMemories, memMap)
+	}
+
 	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(memories, getContextString()), nil
+	return nil, formatMCPResponse(decryptedMemories, getContextString()), nil
 }
 
 type GetMemoryInput struct {
@@ -950,7 +1112,29 @@ func handleGetMemory(ctx context.Context, req *mcp.CallToolRequest, input GetMem
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, memory, nil
+
+	// Decrypt memory content before returning
+	decryptedContent := decryptMemoryContent(memory)
+	result := map[string]interface{}{
+		"id":           memory.ID.String(),
+		"project_id":   memory.ProjectID.String(),
+		"content":      decryptedContent,
+		"tags":         memory.Tags,
+		"created_at":   memory.CreatedAt,
+		"updated_at":   memory.UpdatedAt,
+		"is_encrypted": memory.IsEncrypted,
+	}
+	if memory.LinkedTaskID != nil {
+		result["linked_task_id"] = memory.LinkedTaskID.String()
+	}
+	if memory.Project != nil {
+		result["project"] = map[string]interface{}{
+			"id":   memory.Project.ID.String(),
+			"name": memory.Project.Name,
+		}
+	}
+
+	return nil, result, nil
 }
 
 type RecallInput struct {
@@ -1038,7 +1222,10 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 			}
 		}
 
-		contentLower := strings.ToLower(m.Content)
+		// CRITICAL: Decrypt memory content if encrypted
+		// Without this, encrypted memories search against "[Encrypted]" and never match
+		decryptedContent := decryptMemoryContent(&m)
+		contentLower := strings.ToLower(decryptedContent)
 		score := 0
 		matchCount := 0
 
@@ -1079,7 +1266,7 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 
 		result := map[string]interface{}{
 			"id":         m.ID.String(),
-			"content":    m.Content,
+			"content":    decryptedContent, // Use decrypted content in result
 			"score":      score,
 			"created_at": m.CreatedAt,
 		}

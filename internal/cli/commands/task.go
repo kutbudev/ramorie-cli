@@ -108,9 +108,11 @@ func taskListCmd() *cli.Command {
 			fmt.Fprintln(w, "--\t-----\t------\t--------")
 
 			for _, t := range tasks {
+				// CRITICAL: Decrypt task fields before displaying
+				decryptedTitle, _ := decryptTaskForCLI(&t)
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 					t.ID.String()[:8],
-					truncateString(t.Title, 40),
+					truncateString(decryptedTitle, 40),
 					t.Status,
 					t.Priority)
 			}
@@ -250,11 +252,14 @@ func taskShowCmd() *cli.Command {
 				return err
 			}
 
-			fmt.Printf("Task Details: %s\n", task.Title)
+			// CRITICAL: Decrypt task fields before displaying
+			decryptedTitle, decryptedDesc := decryptTaskForCLI(task)
+
+			fmt.Printf("Task Details: %s\n", decryptedTitle)
 			fmt.Println(strings.Repeat("-", 40))
 			fmt.Printf("ID:          %s\n", task.ID.String())
-			fmt.Printf("Title:       %s\n", task.Title)
-			fmt.Printf("Description: %s\n", task.Description)
+			fmt.Printf("Title:       %s\n", decryptedTitle)
+			fmt.Printf("Description: %s\n", decryptedDesc)
 			fmt.Printf("Status:      %s\n", task.Status)
 			fmt.Printf("Priority:    %s\n", task.Priority)
 			fmt.Printf("Project ID:  %s\n", task.ProjectID.String())
@@ -475,10 +480,13 @@ func taskActiveCmd() *cli.Command {
 				return nil
 			}
 
+			// CRITICAL: Decrypt task fields before displaying
+			decryptedTitle, _ := decryptTaskForCLI(task)
+
 			fmt.Println("🎯 Active Task:")
 			fmt.Println(strings.Repeat("-", 50))
 			fmt.Printf("ID:       %s\n", task.ID.String()[:8])
-			fmt.Printf("Title:    %s\n", task.Title)
+			fmt.Printf("Title:    %s\n", decryptedTitle)
 			fmt.Printf("Status:   %s\n", task.Status)
 			fmt.Printf("Priority: %s\n", task.Priority)
 			fmt.Println(strings.Repeat("-", 50))
@@ -775,12 +783,14 @@ func taskNextCmd() *cli.Command {
 
 			for i, s := range scored {
 				t := tasks[s.idx]
+				// CRITICAL: Decrypt task fields before displaying
+				decryptedTitle, _ := decryptTaskForCLI(&t)
 				fmt.Fprintf(w, "%d	%s	%s	%s	%s\n",
 					i+1,
 					t.ID.String()[:8],
 					t.Priority,
 					t.Status,
-					truncateString(t.Title, 35))
+					truncateString(decryptedTitle, 35))
 			}
 			w.Flush()
 			return nil
@@ -828,9 +838,59 @@ func taskProgressCmd() *cli.Command {
 			empty := 20 - filled
 			bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
 
-			fmt.Printf("📊 Task '%s' progress updated\n", truncateString(task.Title, 30))
+			// CRITICAL: Decrypt task fields before displaying
+			decryptedTitle, _ := decryptTaskForCLI(task)
+			fmt.Printf("📊 Task '%s' progress updated\n", truncateString(decryptedTitle, 30))
 			fmt.Printf("   [%s] %d%%\n", bar, progress)
 			return nil
 		},
 	}
+}
+
+// decryptTaskForCLI decrypts task title and description if encrypted and vault is unlocked.
+// Returns decrypted title and description.
+func decryptTaskForCLI(t *models.Task) (title, description string) {
+	if !t.IsEncrypted {
+		return t.Title, t.Description
+	}
+
+	// Check if vault is unlocked
+	if !crypto.IsVaultUnlocked() {
+		title = "[Vault Locked - run 'ramorie setup unlock']"
+		description = "[Vault Locked - run 'ramorie setup unlock']"
+		// If we have non-placeholder titles, use them
+		if t.Title != "" && t.Title != "[Encrypted]" {
+			title = t.Title
+		}
+		if t.Description != "" && t.Description != "[Encrypted]" {
+			description = t.Description
+		}
+		return title, description
+	}
+
+	// Decrypt title
+	if t.EncryptedTitle != "" {
+		decrypted, err := crypto.DecryptContent(t.EncryptedTitle, t.TitleNonce, true)
+		if err != nil {
+			title = "[Decryption Failed]"
+		} else {
+			title = decrypted
+		}
+	} else {
+		title = t.Title
+	}
+
+	// Decrypt description
+	if t.EncryptedDescription != "" {
+		decrypted, err := crypto.DecryptContent(t.EncryptedDescription, t.DescriptionNonce, true)
+		if err != nil {
+			description = "[Decryption Failed]"
+		} else {
+			description = decrypted
+		}
+	} else {
+		description = t.Description
+	}
+
+	return title, description
 }

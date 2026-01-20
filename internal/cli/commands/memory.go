@@ -246,7 +246,9 @@ func memoriesCmd() *cli.Command {
 						tagsStr = tagsStr[:12] + "..."
 					}
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", m.ID.String()[:8], tagsStr, truncateString(m.Content, 55))
+				// CRITICAL: Decrypt memory content before displaying
+				displayContent := decryptMemoryForCLI(&m)
+				fmt.Fprintf(w, "%s\t%s\t%s\n", m.ID.String()[:8], tagsStr, truncateString(displayContent, 55))
 			}
 			w.Flush()
 			return nil
@@ -312,7 +314,9 @@ func recallCmd() *cli.Command {
 			fmt.Fprintln(w, "ID\tCONTENT")
 			fmt.Fprintln(w, "--\t-------")
 			for _, m := range memories {
-				fmt.Fprintf(w, "%s\t%s\n", m.ID.String()[:8], truncateString(m.Content, 70))
+				// CRITICAL: Decrypt memory content before displaying
+				displayContent := decryptMemoryForCLI(&m)
+				fmt.Fprintf(w, "%s\t%s\n", m.ID.String()[:8], truncateString(displayContent, 70))
 			}
 			w.Flush()
 			return nil
@@ -339,7 +343,9 @@ func getCmd() *cli.Command {
 				return err
 			}
 
-			fmt.Printf("Memory %s:\n%s\n", memory.ID.String()[:8], memory.Content)
+			// CRITICAL: Decrypt memory content before displaying
+			displayContent := decryptMemoryForCLI(memory)
+			fmt.Printf("Memory %s:\n%s\n", memory.ID.String()[:8], displayContent)
 			return nil
 		},
 	}
@@ -393,4 +399,29 @@ func getTagsAsStrings(tags interface{}) []string {
 	}
 
 	return nil
+}
+
+// decryptMemoryForCLI decrypts memory content if encrypted and vault is unlocked.
+// Returns the plaintext content or a fallback message.
+func decryptMemoryForCLI(m *models.Memory) string {
+	if !m.IsEncrypted {
+		return m.Content
+	}
+
+	// Check if we have encrypted content to decrypt
+	if m.EncryptedContent == "" {
+		// Content might be "[Encrypted]" placeholder from backend
+		return m.Content
+	}
+
+	if !crypto.IsVaultUnlocked() {
+		return "[Vault Locked - run 'ramorie setup unlock']"
+	}
+
+	plaintext, err := crypto.DecryptContent(m.EncryptedContent, m.ContentNonce, true)
+	if err != nil {
+		return "[Decryption Failed]"
+	}
+
+	return plaintext
 }

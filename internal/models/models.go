@@ -42,6 +42,12 @@ type Task struct {
 	Project     *Project     `json:"project,omitempty"`
 	CreatedAt   time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
+	// Encryption fields for zero-knowledge encryption
+	EncryptedTitle       string `json:"encrypted_title,omitempty"`
+	TitleNonce           string `json:"title_nonce,omitempty"`
+	EncryptedDescription string `json:"encrypted_description,omitempty"`
+	DescriptionNonce     string `json:"description_nonce,omitempty"`
+	IsEncrypted          bool   `json:"is_encrypted"`
 }
 
 // Memory represents a memory/knowledge item
@@ -54,6 +60,10 @@ type Memory struct {
 	Project      *Project    `json:"project,omitempty"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
+	// Encryption fields for zero-knowledge encryption
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+	ContentNonce     string `json:"content_nonce,omitempty"`
+	IsEncrypted      bool   `json:"is_encrypted"`
 }
 
 type Tag struct {
