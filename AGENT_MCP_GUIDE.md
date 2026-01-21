@@ -7,11 +7,12 @@
 1. [MCP Nedir ve Neden Kullanmalı?](#mcp-nedir)
 2. [Kurulum](#kurulum)
 3. [Temel Konseptler](#temel-konseptler)
-4. [MCP Tool Kategorileri](#mcp-tool-kategorileri)
-5. [Agent İş Akışları](#agent-iş-akışları)
-6. [Windsurf/Cursor Rules Entegrasyonu](#rules-entegrasyonu)
-7. [Best Practices](#best-practices)
-8. [Tam Tool Referansı](#tool-referansı)
+4. [Agent Timeline (Aktivite Takibi)](#agent-timeline)
+5. [MCP Tool Kategorileri](#mcp-tool-kategorileri)
+6. [Agent İş Akışları](#agent-iş-akışları)
+7. [Windsurf/Cursor Rules Entegrasyonu](#rules-entegrasyonu)
+8. [Best Practices](#best-practices)
+9. [Tam Tool Referansı](#tool-referansı)
 
 ---
 
@@ -137,6 +138,133 @@ Architectural Decision Records. Önemli teknik kararların kaydı.
 ### 5. Context Pack (Aktif Bağlam)
 Şu an üzerinde çalışılan konu/hedef. Agent'ın odak noktası.
 
+### 6. Agent Timeline (Aktivite Akışı)
+AI agentların tüm aktivitelerinin gerçek zamanlı izlendiği sistem. Her MCP operasyonu otomatik olarak kaydedilir.
+
+---
+
+## 📊 Agent Timeline (Aktivite Takibi) {#agent-timeline}
+
+Agent Timeline, tüm AI agent aktivitelerini gerçek zamanlı olarak izleyen ve kaydeden sistemdir. Dashboard üzerinden (`/agent-timeline`) veya `get_agent_activity` tool'u ile erişilebilir.
+
+### Neden Agent Timeline?
+
+| Özellik | Açıklama |
+|---------|----------|
+| **Gerçek Zamanlı İzleme** | SSE ile anlık event bildirimleri |
+| **Agent Tanımlama** | Hangi agent'ın hangi işlemi yaptığı görülebilir |
+| **Oturum Takibi** | Session ID ile ilişkili aktiviteler gruplandırılır |
+| **Filtreleme** | Event tipi, agent adı, entity tipi ile filtreleme |
+| **Şifreleme** | Hassas veriler şifreli saklanır |
+
+### İzlenen Event Tipleri
+
+#### Task Events
+| Event Type | Açıklama | Tetikleyen Tool |
+|------------|----------|-----------------|
+| `task_created` | Yeni görev oluşturuldu | `create_task` |
+| `task_started` | Görev başlatıldı | `start_task` |
+| `task_stopped` | Görev duraklatıldı | `stop_task` |
+| `task_completed` | Görev tamamlandı | `complete_task` |
+| `task_deleted` | Görev silindi | `delete_task` |
+| `task_updated` | Görev güncellendi | `update_task` |
+| `task_note_added` | Göreve not eklendi | `add_task_note` |
+| `task_progress_updated` | İlerleme güncellendi | `update_progress` |
+
+#### Subtask Events
+| Event Type | Açıklama | Tetikleyen Tool |
+|------------|----------|-----------------|
+| `subtask_created` | Alt görev oluşturuldu | `create_subtask` |
+| `subtask_updated` | Alt görev güncellendi | `update_subtask` |
+| `subtask_completed` | Alt görev tamamlandı | `complete_subtask` |
+| `subtask_deleted` | Alt görev silindi | `delete_subtask` |
+
+#### Memory Events
+| Event Type | Açıklama | Tetikleyen Tool |
+|------------|----------|-----------------|
+| `memory_created` | Hafıza oluşturuldu | `add_memory` |
+| `memory_updated` | Hafıza güncellendi | `update_memory` |
+| `memory_deleted` | Hafıza silindi | `delete_memory` |
+
+#### Decision Events (ADR)
+| Event Type | Açıklama | Tetikleyen Tool |
+|------------|----------|-----------------|
+| `decision_created` | Karar kaydedildi | `create_decision` |
+| `decision_updated` | Karar güncellendi | `update_decision` |
+| `decision_deleted` | Karar silindi | `delete_decision` |
+
+#### Dependency Events
+| Event Type | Açıklama | Tetikleyen Tool |
+|------------|----------|-----------------|
+| `dependency_added` | Bağımlılık eklendi | `add_task_dependency` |
+| `dependency_removed` | Bağımlılık kaldırıldı | `remove_task_dependency` |
+
+#### Context & Focus Events
+| Event Type | Açıklama | Tetikleyen Tool |
+|------------|----------|-----------------|
+| `pack_created` | Context pack oluşturuldu | `create_context_pack` |
+| `pack_updated` | Context pack güncellendi | `update_context_pack` |
+| `pack_deleted` | Context pack silindi | `delete_context_pack` |
+| `focus_changed` | Odak değiştirildi | `set_focus` |
+| `focus_cleared` | Odak temizlendi | `clear_focus` |
+| `project_activated` | Proje aktifleştirildi | `set_active_project` |
+
+#### AI Operation Events
+| Event Type | Açıklama | Tetikleyen Tool |
+|------------|----------|-----------------|
+| `ai_time_estimate` | Zaman tahmini yapıldı | `ai_estimate_time` |
+| `ai_risk_analysis` | Risk analizi yapıldı | `ai_analyze_risks` |
+| `ai_next_step` | Sonraki adım önerisi | `ai_next_step` |
+| `ai_dependencies` | Bağımlılık analizi | `ai_find_dependencies` |
+
+### Agent Timeline Kullanımı
+
+#### Tool ile Sorgulama
+
+```
+get_agent_activity {
+  "project": "my-project",     // Opsiyonel: Proje filtresi
+  "agent_name": "Claude",       // Opsiyonel: Agent filtresi
+  "event_type": "task_created", // Opsiyonel: Event tipi filtresi
+  "limit": 20                   // Opsiyonel: Sonuç limiti (varsayılan: 10)
+}
+```
+
+#### Dashboard Üzerinden
+
+1. `https://ramorie.app/agent-timeline` adresine gidin
+2. Sol taraftaki filtrelerden:
+   - **Event Types**: Görmek istediğiniz event tiplerini seçin
+   - **Entity Types**: task, memory, decision vb. filtreleyin
+   - **Agent Names**: Belirli agent'ları filtreleyin
+   - **Created Via**: MCP, API veya CLI kaynaklarını filtreleyin
+3. Sağ üstteki "Refresh" butonu veya SSE ile otomatik güncelleme
+
+### Agent Bilgilerinin Takibi
+
+Her MCP çağrısında aşağıdaki bilgiler otomatik olarak kaydedilir:
+
+| Bilgi | Açıklama | Örnek |
+|-------|----------|-------|
+| `agent_name` | Agent'ın adı | `Claude Opus 4.5` |
+| `agent_model` | Model bilgisi | `claude-opus-4-5-20251101` |
+| `agent_session_id` | Oturum ID'si | `uuid-v4` |
+| `created_via` | Kaynak | `mcp` / `api` / `cli` |
+
+**Not:** Bu bilgiler `setup_agent` tool'u çağrıldıktan sonra tüm API isteklerine otomatik olarak eklenir.
+
+### Entity Tipleri
+
+| Entity Type | Açıklama |
+|-------------|----------|
+| `task` | Görevler |
+| `subtask` | Alt görevler |
+| `memory` | Hafızalar |
+| `decision` | Mimari kararlar (ADR) |
+| `context_pack` | Bağlam paketleri |
+| `project` | Projeler |
+| `dependency` | Görev bağımlılıkları |
+
 ---
 
 ## 🛠️ MCP Tool Kategorileri {#mcp-tool-kategorileri}
@@ -161,6 +289,25 @@ Architectural Decision Records. Önemli teknik kararların kaydı.
 | `get_next_tasks` | Öncelikli görevler | - |
 | `bulk_start_tasks` | Toplu başlat | `taskIds` |
 | `bulk_complete_tasks` | Toplu tamamla | `taskIds` |
+
+### Subtasks (5 tool)
+
+| Tool | Açıklama | Zorunlu Parametreler |
+|------|----------|---------------------|
+| `create_subtask` | Alt görev oluştur | `task_id`, `description` |
+| `get_subtasks` | Alt görevleri listele | `task_id` |
+| `update_subtask` | Alt görev güncelle | `subtask_id` |
+| `complete_subtask` | Alt görevi tamamla | `subtask_id` |
+| `delete_subtask` | Alt görevi sil | `subtask_id` |
+
+### Task Dependencies (4 tool)
+
+| Tool | Açıklama | Zorunlu Parametreler |
+|------|----------|---------------------|
+| `add_task_dependency` | Bağımlılık ekle | `task_id`, `depends_on_id` |
+| `remove_task_dependency` | Bağımlılık kaldır | `task_id`, `depends_on_id` |
+| `get_task_dependencies` | Bağımlılıkları getir | `task_id` |
+| `get_task_dependents` | Bağımlı görevleri getir | `task_id` |
 
 ### Memories (9 tool)
 
@@ -217,12 +364,13 @@ Architectural Decision Records. Önemli teknik kararların kaydı.
 | `get_organization` | Organizasyon detayı | `orgId` |
 | `create_organization` | Yeni organizasyon | `name` |
 
-### Reports & Analysis (6 tool)
+### Reports & Analysis (7 tool)
 
 | Tool | Açıklama |
 |------|----------|
 | `get_stats` | İstatistikler |
 | `get_history` | Aktivite geçmişi |
+| `get_agent_activity` | **Agent Timeline** - Agent aktivitelerini sorgula |
 | `timeline` | Zaman çizelgesi |
 | `export_project` | Proje raporu |
 | `analyze_task_risks` | Risk analizi |
@@ -463,4 +611,15 @@ Eğer yoksa: list_context_packs → activate_context_pack
 
 ---
 
-*Bu guide v1.7.0 için güncellenmiştir. Toplam 57 MCP tool desteklenmektedir.*
+*Bu guide v3.14.0 için güncellenmiştir. Toplam 57+ MCP tool desteklenmektedir.*
+
+---
+
+## 📝 Changelog
+
+### v3.14.0
+- ✨ Agent Timeline bölümü eklendi
+- ✨ Tüm MCP operasyonları artık timeline'da görünüyor
+- ✨ Yeni event tipleri: subtask, decision, dependency, task_progress_updated
+- 📖 Subtasks ve Task Dependencies tool referansları eklendi
+- 📖 `get_agent_activity` tool dokümantasyonu eklendi
