@@ -23,6 +23,19 @@ type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
 	APIKey     string
+
+	// Agent metadata for all requests (set via SetAgentInfo)
+	AgentName      string
+	AgentModel     string
+	AgentSessionID string
+}
+
+// SetAgentInfo sets agent metadata that will be included in all subsequent requests.
+// This allows all API calls to be attributed to the correct agent session.
+func (c *Client) SetAgentInfo(name, model, sessionID string) {
+	c.AgentName = name
+	c.AgentModel = model
+	c.AgentSessionID = sessionID
 }
 
 func (c *Client) Request(method, endpoint string, body interface{}) ([]byte, error) {
@@ -125,6 +138,18 @@ func (c *Client) makeRequest(method, endpoint string, body interface{}) ([]byte,
 	// Add Authorization header if API key is available
 	if c.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+
+	// Add agent headers if agent info is set (enables event tracking in backend)
+	if c.AgentName != "" {
+		req.Header.Set("X-Created-Via", "mcp")
+		req.Header.Set("X-Agent-Name", c.AgentName)
+	}
+	if c.AgentModel != "" {
+		req.Header.Set("X-Agent-Model", c.AgentModel)
+	}
+	if c.AgentSessionID != "" {
+		req.Header.Set("X-Agent-Session-ID", c.AgentSessionID)
 	}
 
 	resp, err := c.HTTPClient.Do(req)

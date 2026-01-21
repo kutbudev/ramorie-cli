@@ -455,6 +455,10 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	// Initialize the session
 	session := InitializeSession(agentName, agentModel)
 
+	// Set agent info on API client so ALL subsequent requests include agent headers
+	// This enables proper event tracking in the backend timeline
+	apiClient.SetAgentInfo(session.AgentName, session.AgentModel, session.ID)
+
 	result, err := setupAgent(apiClient)
 	if err != nil {
 		return nil, nil, err
