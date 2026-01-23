@@ -39,7 +39,6 @@ func NewOverviewCommand() *cli.Command {
   ramorie project list           List all projects
   ramorie project create "name"  Create a new project
   ramorie project show <id>      Show project details
-  ramorie project use <name>     Set active project
   ramorie project delete <id>    Delete a project
 
 🧠 MEMORY (KNOWLEDGE BASE)

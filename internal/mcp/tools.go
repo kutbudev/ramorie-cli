@@ -109,7 +109,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "setup_agent",
-		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
+		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
 	}, handleSetupAgent)
 
 	// ============================================================================
@@ -497,11 +497,10 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 
 	// Add clear next steps for workflow enforcement
 	result["workflow_guide"] = map[string]interface{}{
-		"step_1":  "✅ setup_agent called - session initialized",
-		"step_2":  "📋 Call list_projects to see available projects",
-		"step_3":  "🎯 Call set_active_project to choose your working project",
-		"step_4":  "📝 Now you can create tasks and memories in that project",
-		"warning": "⚠️ Tasks/memories created without set_active_project will use Personal workspace",
+		"step_1": "✅ setup_agent called - session initialized",
+		"step_2": "📋 Call list_projects to see available projects",
+		"step_3": "📝 Specify 'project' parameter in create_task/add_memory calls",
+		"note":   "Always pass the 'project' parameter explicitly when creating tasks or memories",
 	}
 
 	// Add agent directives for proactive behavior
@@ -542,7 +541,7 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 					"status":        "exists",
 					"exact_match":   suggestions.ExactMatch,
 					"_message":      "✅ Project already exists with this name. Use existing project instead of creating a duplicate.",
-					"_action":       "Use set_active_project or specify this project name in your create_task/add_memory calls.",
+					"_action":       "Specify this project name in your create_task/add_memory calls.",
 				}, nil
 			}
 
@@ -567,7 +566,7 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 						"similar_projects": similarList,
 						"requested_name":   name,
 						"_message":         "⚠️ Similar projects found. To avoid duplicates:\n1. Use an existing project from the list above, OR\n2. Call create_project with force=true to create anyway",
-						"_action":          "Either use set_active_project(projectName=\"existing-name\") or call create_project(name=\"...\", force=true)",
+						"_action":          "Either specify 'project' parameter with an existing project name, or call create_project(name=\"...\", force=true)",
 					}, nil
 				}
 			}
@@ -2081,7 +2080,7 @@ func ToolDefinitions() []toolDef {
 		},
 		{
 			Name:        "setup_agent",
-			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, active project, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
+			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -2405,20 +2404,7 @@ func priorityRank(p string) int {
 func resolveProjectID(client *api.Client, projectIdentifier string) (string, error) {
 	projectIdentifier = strings.TrimSpace(projectIdentifier)
 	if projectIdentifier == "" {
-		cfg, err := config.LoadConfig()
-		if err == nil && cfg.ActiveProjectID != "" {
-			return cfg.ActiveProjectID, nil
-		}
-		projects, err := client.ListProjects()
-		if err != nil {
-			return "", err
-		}
-		for _, p := range projects {
-			if p.IsActive {
-				return p.ID.String(), nil
-			}
-		}
-		return "", errors.New("no active project - specify the 'project' parameter")
+		return "", errors.New("project parameter is required")
 	}
 
 	projects, err := client.ListProjects()
@@ -2593,12 +2579,6 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		"version": "3.9.0",
 	}
 
-	// Get active project
-	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.ActiveProjectID != "" {
-		result["active_project_id"] = cfg.ActiveProjectID
-	}
-
 	// Get current focus (active workspace)
 	focus, err := client.GetFocus()
 	if err == nil && focus != nil && focus.ActivePack != nil {
@@ -2614,15 +2594,6 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 	// List projects
 	projects, err := client.ListProjects()
 	if err == nil {
-		for _, p := range projects {
-			if p.IsActive {
-				result["active_project"] = map[string]interface{}{
-					"id":   p.ID.String(),
-					"name": p.Name,
-				}
-				break
-			}
-		}
 		result["projects_count"] = len(projects)
 	}
 
@@ -2633,14 +2604,6 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 			"id":     activeTask.ID.String(),
 			"title":  activeTask.Title,
 			"status": activeTask.Status,
-		}
-	}
-
-	// Get TODO tasks count
-	if cfg != nil && cfg.ActiveProjectID != "" {
-		tasks, err := client.ListTasks(cfg.ActiveProjectID, "TODO")
-		if err == nil {
-			result["pending_tasks_count"] = len(tasks)
 		}
 	}
 
@@ -2657,9 +2620,6 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 	recommendations := []string{}
 	if result["active_focus"] == nil {
 		recommendations = append(recommendations, "💡 Set an active focus: set_focus (for workspace context)")
-	}
-	if result["active_project"] == nil {
-		recommendations = append(recommendations, "💡 Specify 'project' parameter when creating tasks or memories")
 	}
 	if result["active_task"] == nil {
 		recommendations = append(recommendations, "💡 Start a task for memory auto-linking: start_task")

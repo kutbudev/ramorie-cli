@@ -2,11 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
-	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/urfave/cli/v2"
 )
@@ -25,14 +23,9 @@ func NewKanbanCmd() *cli.Command {
 		},
 		Action: func(c *cli.Context) error {
 			projectID := c.String("project")
-			cfg, err := config.LoadConfig()
-			if err != nil {
-				fmt.Printf("Error loading config: %v\n", err)
-				os.Exit(1)
-			}
 
-			if projectID == "" && cfg.ActiveProjectID != "" {
-				projectID = cfg.ActiveProjectID
+			if projectID == "" {
+				return fmt.Errorf("--project flag is required. Use 'ramorie project list' to see available projects")
 			}
 
 			client := api.NewClient()

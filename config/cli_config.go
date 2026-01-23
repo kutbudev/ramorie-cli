@@ -12,11 +12,10 @@ const (
 	// Legacy config directory name (for backward compatibility)
 	configDirLegacy    = ".jbrain"
 	configFileName     = "config.json"
-	DefaultApiURL      = "https://api.ramorie.com"
-	DefaultAuthURL     = "https://api.ramorie.com/auth"
-	V1ApiURL           = "https://api.ramorie.com/v1"
-	activeProjectIDKey = "active_project_id"
-	apiURLKey          = "api_url"
+	DefaultApiURL = "https://api.ramorie.com"
+	DefaultAuthURL = "https://api.ramorie.com/auth"
+	V1ApiURL       = "https://api.ramorie.com/v1"
+	apiURLKey      = "api_url"
 )
 
 // GetV1ApiURL returns the V1 API URL.
@@ -27,8 +26,7 @@ func GetV1ApiURL() string {
 
 // CliConfig holds the configuration for the CLI tool.
 type CliConfig struct {
-	ActiveProjectID string `json:"active_project_id"`
-	ApiURL          string `json:"api_url"`
+	ApiURL string `json:"api_url"`
 }
 
 // getConfigPath returns the full path to the configuration file.

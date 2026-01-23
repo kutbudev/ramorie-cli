@@ -46,7 +46,7 @@ func taskListCmd() *cli.Command {
 		Aliases: []string{"ls"},
 		Usage:   "List tasks",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Filter by project ID or name. If not provided, active project is used."},
+			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Filter by project ID or name"},
 			&cli.StringFlag{Name: "status", Aliases: []string{"s"}, Usage: "Filter by status (TODO, IN_PROGRESS, COMPLETED)"},
 			&cli.IntFlag{Name: "limit", Aliases: []string{"n"}, Usage: "Limit number of results", Value: 0},
 		},
@@ -57,23 +57,13 @@ func taskListCmd() *cli.Command {
 
 			client := api.NewClient()
 
-			// Fetch projects for name resolution and active project lookup
-			projects, err := client.ListProjects()
-			if err != nil {
-				return fmt.Errorf("could not fetch projects: %w", err)
-			}
-
+			// Resolve project name/short-id to full UUID
 			var projectID string
-			if projectArg == "" {
-				// If no project is specified, find the active one
-				for _, p := range projects {
-					if p.IsActive {
-						projectID = p.ID.String()
-						break
-					}
+			if projectArg != "" {
+				projects, err := client.ListProjects()
+				if err != nil {
+					return fmt.Errorf("could not fetch projects: %w", err)
 				}
-			} else {
-				// Resolve project name/short-id to full UUID
 				for _, p := range projects {
 					if p.ID.String() == projectArg ||
 						strings.HasPrefix(p.ID.String(), projectArg) ||
@@ -130,7 +120,7 @@ func taskCreateCmd() *cli.Command {
 		ArgsUsage:              "[title]",
 		UseShortOptionHandling: true,
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Project ID. Defaults to active project."},
+			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Project ID or name (required)", Required: true},
 			&cli.StringFlag{Name: "description", Aliases: []string{"d"}, Usage: "Task description"},
 			&cli.StringFlag{Name: "priority", Aliases: []string{"P"}, Usage: "Priority (H, M, L)", Value: "M"},
 			&cli.StringSliceFlag{Name: "tags", Aliases: []string{"t"}, Usage: "Tags (comma-separated or multiple -t flags)"},
@@ -147,38 +137,23 @@ func taskCreateCmd() *cli.Command {
 
 			client := api.NewClient()
 
-			// Fetch projects for name resolution and active project lookup
+			// Resolve project name/short-id to full UUID
 			projects, err := client.ListProjects()
 			if err != nil {
 				return fmt.Errorf("could not fetch projects: %w", err)
 			}
 
 			var projectID string
-			if projectArg == "" {
-				// If no project is specified, find the active one
-				for _, p := range projects {
-					if p.IsActive {
-						projectID = p.ID.String()
-						break
-					}
-				}
-			} else {
-				// Resolve project name/short-id to full UUID
-				for _, p := range projects {
-					if p.ID.String() == projectArg ||
-						strings.HasPrefix(p.ID.String(), projectArg) ||
-						strings.EqualFold(p.Name, projectArg) {
-						projectID = p.ID.String()
-						break
-					}
-				}
-				if projectID == "" {
-					return fmt.Errorf("project '%s' not found", projectArg)
+			for _, p := range projects {
+				if p.ID.String() == projectArg ||
+					strings.HasPrefix(p.ID.String(), projectArg) ||
+					strings.EqualFold(p.Name, projectArg) {
+					projectID = p.ID.String()
+					break
 				}
 			}
-
 			if projectID == "" {
-				return fmt.Errorf("no active project set. Use 'ramorie project use <id>' or specify --project")
+				return fmt.Errorf("project '%s' not found", projectArg)
 			}
 
 			var task *models.Task
@@ -698,23 +673,13 @@ func taskNextCmd() *cli.Command {
 
 			client := api.NewClient()
 
-			// Fetch projects for name resolution and active project lookup
-			projects, err := client.ListProjects()
-			if err != nil {
-				return fmt.Errorf("could not fetch projects: %w", err)
-			}
-
+			// Resolve project name/short-id to full UUID
 			var projectID string
-			if projectArg == "" {
-				// Find active project
-				for _, p := range projects {
-					if p.IsActive {
-						projectID = p.ID.String()
-						break
-					}
+			if projectArg != "" {
+				projects, err := client.ListProjects()
+				if err != nil {
+					return fmt.Errorf("could not fetch projects: %w", err)
 				}
-			} else {
-				// Resolve project name/short-id to full UUID
 				for _, p := range projects {
 					if p.ID.String() == projectArg ||
 						strings.HasPrefix(p.ID.String(), projectArg) ||

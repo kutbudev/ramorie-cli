@@ -36,12 +36,6 @@ func configShowCmd() *cli.Command {
 			} else {
 				fmt.Println("API Key:     Not set")
 			}
-
-			if cliCfg.ActiveProjectID != "" {
-				fmt.Printf("Active Project: %s\n", cliCfg.ActiveProjectID)
-			} else {
-				fmt.Println("Active Project: Not set")
-			}
 			fmt.Println("-----------------------")
 
 			return nil

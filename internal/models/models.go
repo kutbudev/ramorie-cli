@@ -22,7 +22,6 @@ type Project struct {
 	Name           string                 `json:"name"`
 	Description    string                 `json:"description"`
 	Configuration  map[string]interface{} `json:"configuration,omitempty"`
-	IsActive       bool                   `json:"is_active"`
 	OrganizationID *uuid.UUID             `json:"organization_id,omitempty"`
 	Organization   *Organization          `json:"organization,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`

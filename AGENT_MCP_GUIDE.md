@@ -207,7 +207,6 @@ Agent Timeline, tüm AI agent aktivitelerini gerçek zamanlı olarak izleyen ve 
 | `pack_deleted` | Context pack silindi | `delete_context_pack` |
 | `focus_changed` | Odak değiştirildi | `set_focus` |
 | `focus_cleared` | Odak temizlendi | `clear_focus` |
-| `project_activated` | Proje aktifleştirildi | `set_active_project` |
 
 #### AI Operation Events
 | Event Type | Açıklama | Tetikleyen Tool |
@@ -342,7 +341,6 @@ Her MCP çağrısında aşağıdaki bilgiler otomatik olarak kaydedilir:
 | `get_project` | Proje detayı | `projectId` |
 | `update_project` | Proje güncelle | `projectId` |
 | `delete_project` | Proje sil | `projectId` |
-| `set_active_project` | Aktif proje ayarla | `projectName` |
 
 ### Context Packs (7 tool)
 

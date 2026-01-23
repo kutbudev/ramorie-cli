@@ -7,7 +7,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
-	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/urfave/cli/v2"
 )
 
@@ -21,7 +20,6 @@ func NewProjectCommand() *cli.Command {
 			projectListCmd(),
 			projectCreateCmd(),
 			projectShowCmd(),
-			projectUseCmd(),
 			projectDeleteCmd(),
 			projectUpdateCmd(),
 		},
@@ -48,16 +46,11 @@ func projectListCmd() *cli.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ACTIVE\tID\tNAME\tDESCRIPTION")
-			fmt.Fprintln(w, "------\t--\t----\t-----------")
+			fmt.Fprintln(w, "ID\tNAME\tDESCRIPTION")
+			fmt.Fprintln(w, "--\t----\t-----------")
 
 			for _, p := range projects {
-				active := ""
-				if p.IsActive {
-					active = "✅"
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-					active,
+				fmt.Fprintf(w, "%s\t%s\t%s\n",
 					p.ID.String()[:8],
 					p.Name,
 					truncateString(p.Description, 40))
@@ -134,64 +127,6 @@ func projectShowCmd() *cli.Command {
 			}
 			fmt.Printf("Created At:  %s\n", project.CreatedAt.Format("2006-01-02 15:04:05"))
 			fmt.Printf("Updated At:  %s\n", project.UpdatedAt.Format("2006-01-02 15:04:05"))
-			return nil
-		},
-	}
-}
-
-// projectUseCmd sets a project as the active one.
-func projectUseCmd() *cli.Command {
-	return &cli.Command{
-		Name:      "use",
-		Usage:     "Set the active project",
-		ArgsUsage: "[project-name-or-id]",
-		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
-				return fmt.Errorf("project name or ID is required")
-			}
-			projectIdentifier := c.Args().First()
-
-			client := api.NewClient()
-
-			// First, get all projects to find the correct ID
-			projects, err := client.ListProjects()
-			if err != nil {
-				fmt.Printf("Error listing projects: %v\n", err)
-				return err
-			}
-
-			var targetProjectID string
-			var targetProjectName string
-
-			// Try to find project by name or ID
-			for _, p := range projects {
-				if p.Name == projectIdentifier || p.ID.String()[:8] == projectIdentifier || p.ID.String() == projectIdentifier {
-					targetProjectID = p.ID.String()
-					targetProjectName = p.Name
-					break
-				}
-			}
-
-			if targetProjectID == "" {
-				return fmt.Errorf("project '%s' not found", projectIdentifier)
-			}
-
-			if err := client.SetProjectActive(targetProjectID); err != nil {
-				fmt.Printf("Error setting active project: %v\n", err)
-				return err
-			}
-
-			// Update local config with the actual UUID
-			cfg, err := config.LoadConfig()
-			if err != nil {
-				cfg = &config.Config{}
-			}
-			cfg.ActiveProjectID = targetProjectID
-			if err := config.SaveConfig(cfg); err != nil {
-				fmt.Printf("Warning: Could not save active project to local config: %v\n", err)
-			}
-
-			fmt.Printf("✅ Active project set to '%s' (ID: %s)\n", targetProjectName, targetProjectID[:8])
 			return nil
 		},
 	}

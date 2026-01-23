@@ -10,14 +10,13 @@ import (
 
 // Session represents an MCP agent session with context
 type Session struct {
-	ID              string
-	Initialized     bool
-	AgentName       string
-	AgentModel      string
-	ActiveProjectID *uuid.UUID
-	ActiveOrgID     *uuid.UUID
-	CreatedAt       time.Time
-	LastActivityAt  time.Time
+	ID             string
+	Initialized    bool
+	AgentName      string
+	AgentModel     string
+	ActiveOrgID    *uuid.UUID
+	CreatedAt      time.Time
+	LastActivityAt time.Time
 }
 
 // SessionManager manages MCP sessions
@@ -65,17 +64,6 @@ func InitializeSession(agentName, agentModel string) *Session {
 	return sessionManager.currentSession
 }
 
-// SetSessionProject sets the active project for the session
-func SetSessionProject(projectID uuid.UUID) {
-	sessionManager.mu.Lock()
-	defer sessionManager.mu.Unlock()
-
-	if sessionManager.currentSession != nil {
-		sessionManager.currentSession.ActiveProjectID = &projectID
-		sessionManager.currentSession.LastActivityAt = time.Now()
-	}
-}
-
 // SetSessionOrganization sets the active organization for the session
 func SetSessionOrganization(orgID uuid.UUID) {
 	sessionManager.mu.Lock()
@@ -95,14 +83,6 @@ func IsSessionInitialized() bool {
 	return sessionManager.currentSession != nil && sessionManager.currentSession.Initialized
 }
 
-// RequiresActiveProject checks if the session has an active project set
-func RequiresActiveProject() bool {
-	sessionManager.mu.RLock()
-	defer sessionManager.mu.RUnlock()
-
-	return sessionManager.currentSession != nil && sessionManager.currentSession.ActiveProjectID != nil
-}
-
 // GetSessionContext returns a context string for response metadata
 func GetSessionContext() string {
 	sessionManager.mu.RLock()
@@ -120,12 +100,6 @@ func GetSessionContext() string {
 	context := "Agent: " + s.AgentName
 	if s.AgentModel != "" {
 		context += " (" + s.AgentModel + ")"
-	}
-
-	if s.ActiveProjectID != nil {
-		context += " | Project: " + s.ActiveProjectID.String()[:8] + "..."
-	} else {
-		context += " | No active project"
 	}
 
 	return context
@@ -159,14 +133,3 @@ func setAgentInfoFromSession(client *api.Client) {
 	}
 }
 
-// RequiresProject returns true if the tool requires an active project to be set
-func RequiresProject(toolName string) bool {
-	// These tools require an active project
-	projectTools := map[string]bool{
-		"create_task":     true,
-		"add_memory":      true,
-		"add_task_note":   true,
-		"update_progress": true,
-	}
-	return projectTools[toolName]
-}

@@ -223,11 +223,6 @@ func (c *Client) DeleteProject(id string) error {
 	return err
 }
 
-func (c *Client) SetProjectActive(id string) error {
-	_, err := c.makeRequest("POST", "/projects/"+id+"/use", nil)
-	return err
-}
-
 // ProjectSuggestion represents a similar project suggestion
 type ProjectSuggestion struct {
 	ID         string  `json:"id"`

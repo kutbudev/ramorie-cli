@@ -38,7 +38,7 @@ User account has encryption enabled in frontend. Backend now requires encrypted 
 ### Agent & Session
 | Tool | Status | Notes |
 |------|--------|-------|
-| `setup_agent` | ✅ Working | Returns session info, active project, stats |
+| `setup_agent` | ✅ Working | Returns session info, stats |
 | `get_ramorie_info` | ✅ Working | Returns tool guide and quickstart |
 | `get_cursor_rules` | ⚠️ Not tested | |
 
@@ -46,7 +46,6 @@ User account has encryption enabled in frontend. Backend now requires encrypted 
 | Tool | Status | Notes |
 |------|--------|-------|
 | `list_projects` | ✅ Working | Returns 20 projects |
-| `set_active_project` | ⚠️ Deprecated | Use explicit project param |
 | `create_project` | ⚠️ Not tested | |
 
 ### Tasks (READ operations)

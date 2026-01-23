@@ -7,7 +7,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
-	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/constants"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
@@ -45,9 +44,10 @@ func rememberCmd() *cli.Command {
 		UseShortOptionHandling: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "project",
-				Aliases: []string{"p"},
-				Usage:   "Project ID. Defaults to the active project.",
+				Name:     "project",
+				Aliases:  []string{"p"},
+				Usage:    "Project ID (required)",
+				Required: true,
 			},
 			&cli.StringSliceFlag{
 				Name:    "tags",
@@ -77,14 +77,6 @@ func rememberCmd() *cli.Command {
 			chars, tokens, usage := constants.GetContentStats(content)
 			if usage >= constants.WarningThresholdPercent {
 				fmt.Printf("⚠️  Warning: Content is %.1f%% of maximum limit (%d chars)\n", usage, chars)
-			}
-
-			if projectID == "" {
-				cfg, err := config.LoadConfig()
-				if err != nil || cfg.ActiveProjectID == "" {
-					return fmt.Errorf("no active project set. Use 'ramorie project use <id>' or specify --project")
-				}
-				projectID = cfg.ActiveProjectID
 			}
 
 			client := api.NewClient()
@@ -149,7 +141,7 @@ func memoriesCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:    "project",
 				Aliases: []string{"p"},
-				Usage:   "Filter by project ID. If not provided, lists for the active project.",
+				Usage:   "Filter by project ID",
 			},
 			&cli.BoolFlag{
 				Name:    "all",
@@ -179,12 +171,6 @@ func memoriesCmd() *cli.Command {
 			limit := c.Int("limit")
 			tagFilter := c.String("tag")
 
-			if !showAll && projectID == "" {
-				cfg, err := config.LoadConfig()
-				if err == nil && cfg.ActiveProjectID != "" {
-					projectID = cfg.ActiveProjectID
-				}
-			}
 
 			// If --all flag, don't filter by project
 			if showAll {
@@ -267,7 +253,7 @@ func recallCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:    "project",
 				Aliases: []string{"p"},
-				Usage:   "Filter by project ID (default: search all projects)",
+				Usage:   "Filter by project ID",
 			},
 			&cli.IntFlag{
 				Name:    "limit",
@@ -283,14 +269,6 @@ func recallCmd() *cli.Command {
 			query := c.Args().First()
 			projectID := c.String("project")
 			limit := c.Int("limit")
-
-			// If project not specified, use active project
-			if projectID == "" && !c.IsSet("project") {
-				cfg, err := config.LoadConfig()
-				if err == nil && cfg.ActiveProjectID != "" {
-					projectID = cfg.ActiveProjectID
-				}
-			}
 
 			client := api.NewClient()
 			memories, err := client.ListMemories(projectID, query)

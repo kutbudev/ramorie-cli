@@ -15,8 +15,7 @@ const (
 )
 
 type Config struct {
-	APIKey          string `json:"api_key"`
-	ActiveProjectID string `json:"active_project_id"`
+	APIKey string `json:"api_key"`
 	// Encryption fields (cached from server after login)
 	EncryptionEnabled     bool   `json:"encryption_enabled,omitempty"`
 	EncryptedSymmetricKey string `json:"encrypted_symmetric_key,omitempty"` // base64

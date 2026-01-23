@@ -7,7 +7,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/kutbudev/ramorie-cli/internal/api"
-	"github.com/kutbudev/ramorie-cli/internal/config"
 )
 
 // apiClient holds the API client for tool handlers
@@ -92,14 +91,6 @@ func getContextString() string {
 		return GetSessionContext()
 	}
 
-	// Fallback for non-initialized sessions
-	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
-		return "Personal Workspace (session not initialized)"
-	}
-	if cfg.ActiveProjectID != "" {
-		return "Project: " + cfg.ActiveProjectID[:8] + "... (session not initialized)"
-	}
 	return "Personal Workspace (session not initialized)"
 }
 
@@ -115,13 +106,3 @@ func checkSessionInit(toolName string) error {
 	return nil
 }
 
-// checkProjectRequired checks if tool requires active project and returns error if not set
-func checkProjectRequired(toolName string) error {
-	if !RequiresProject(toolName) {
-		return nil
-	}
-	if !RequiresActiveProject() {
-		return errors.New("⚠️ No active project set. Please specify the 'project' parameter in your tool call to indicate which project to work in. This ensures your tasks and memories are organized correctly.")
-	}
-	return nil
-}

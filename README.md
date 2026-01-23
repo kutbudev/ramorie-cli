@@ -214,7 +214,6 @@ If you prefer, you can set the `GEMINI_API_KEY` environment variable instead of 
 ```bash
 # Project lifecycle
 ramorie project init <name>              # Create new project
-ramorie project use [name]               # Set active project
 ramorie project list                     # List all projects
 ramorie project delete <name>            # Delete project
 
@@ -444,7 +443,7 @@ All data is persisted and synchronized across CLI sessions.
 ## 💡 AI Agent Best Practices
 
 ### **For Task Management:**
-1. **Always check active project**: `ramorie project list` shows which project is active (✅)
+1. **Always specify project**: Use `--project` flag to specify which project to operate on
 2. **Use descriptive task names**: Include what, not how
 3. **Track progress with annotations**: Document blockers, decisions, and progress
 4. **Use task info for context**: Before working on a task, review its full details
@@ -664,7 +663,7 @@ ramorie mcp serve
 
 ```bash
 # Essential Commands
-ramorie project list                     # Check active project
+ramorie project list                     # List all projects
 ramorie kanban                           # Visual task board
 ramorie task create "Description"        # New task
 ramorie task info <id>                   # Task details

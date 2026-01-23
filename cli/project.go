@@ -16,7 +16,6 @@ func NewProjectCommand() *cobra.Command {
 Örnekler:
   ramorie project create "My New Project" --description "Proje açıklaması"
   ramorie project list
-  ramorie project use <project-id>
   ramorie project show <project-id>`,
 	}
 
@@ -24,7 +23,6 @@ func NewProjectCommand() *cobra.Command {
 	cmd.AddCommand(newProjectCreateCommand())
 	cmd.AddCommand(newProjectListCommand())
 	cmd.AddCommand(newProjectShowCommand())
-	cmd.AddCommand(newProjectUseCommand())
 	cmd.AddCommand(newProjectDeleteCommand())
 
 	return cmd
@@ -78,22 +76,6 @@ func newProjectShowCommand() *cobra.Command {
 			projectID := args[0]
 			// TODO: Project service çağrısı
 			fmt.Printf("Showing project: %s\n", projectID)
-			return nil
-		},
-	}
-
-	return cmd
-}
-
-func newProjectUseCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "use <project-id>",
-		Short: "Aktif projeyi değiştir",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			projectID := args[0]
-			// TODO: Project service çağrısı
-			fmt.Printf("Setting active project: %s\n", projectID)
 			return nil
 		},
 	}
