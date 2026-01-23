@@ -52,6 +52,9 @@ func main() {
 			// AI Features
 			commands.NewAICommand(), // NEW
 
+			// Planning
+			commands.NewPlanCommand(), // Multi-agent AI planning
+
 			// Subtasks
 			commands.NewSubtaskCommand(),
 

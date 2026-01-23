@@ -121,7 +121,7 @@ func checkProjectRequired(toolName string) error {
 		return nil
 	}
 	if !RequiresActiveProject() {
-		return errors.New("⚠️ No active project set. Please call 'set_active_project' first to specify which project to work in. This ensures your tasks and memories are organized correctly.")
+		return errors.New("⚠️ No active project set. Please specify the 'project' parameter in your tool call to indicate which project to work in. This ensures your tasks and memories are organized correctly.")
 	}
 	return nil
 }

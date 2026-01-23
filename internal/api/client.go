@@ -1903,3 +1903,326 @@ func (c *Client) CompleteSubtask(subtaskID string) (*models.Subtask, error) {
 		Completed: &completed,
 	})
 }
+
+// ============================================================================
+// Plan API
+// ============================================================================
+
+// Plan represents a plan run
+type Plan struct {
+	ID                  string       `json:"id"`
+	UserID              string       `json:"user_id"`
+	OrganizationID      *string      `json:"organization_id,omitempty"`
+	ProjectID           *string      `json:"project_id,omitempty"`
+	Title               string       `json:"title"`
+	Requirements        string       `json:"requirements"`
+	Type                string       `json:"type"`
+	Status              string       `json:"status"`
+	CurrentPhase        string       `json:"current_phase"`
+	Progress            int          `json:"progress"`
+	MaxBudgetUSD        *float64     `json:"max_budget_usd,omitempty"`
+	SpentBudgetUSD      float64      `json:"spent_budget_usd"`
+	TokensUsed          int64        `json:"tokens_used"`
+	FinalConsensusScore *float64     `json:"final_consensus_score,omitempty"`
+	TaskCount           int          `json:"task_count"`
+	ADRCount            int          `json:"adr_count"`
+	RiskCount           int          `json:"risk_count"`
+	Error               string       `json:"error,omitempty"`
+	CreatedAt           time.Time    `json:"created_at"`
+	StartedAt           *time.Time   `json:"started_at,omitempty"`
+	CompletedAt         *time.Time   `json:"completed_at,omitempty"`
+	Phases              []PlanPhase  `json:"phases,omitempty"`
+}
+
+// PlanPhase represents a phase in a plan run
+type PlanPhase struct {
+	ID              string    `json:"id"`
+	PlanRunID       string    `json:"plan_run_id"`
+	Phase           string    `json:"phase"`
+	Status          string    `json:"status"`
+	Sequence        int       `json:"sequence"`
+	ConsensusScore  *float64  `json:"consensus_score,omitempty"`
+	WinningProposal *string   `json:"winning_proposal,omitempty"`
+	TokensUsed      int64     `json:"tokens_used"`
+	DurationMs      int64     `json:"duration_ms"`
+	CostUSD         float64   `json:"cost_usd"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+}
+
+// PlanArtifact represents an artifact from a plan run
+type PlanArtifact struct {
+	ID        string    `json:"id"`
+	PlanRunID string    `json:"plan_run_id"`
+	Type      string    `json:"type"`
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// PlanRisk represents a risk identified in a plan
+type PlanRisk struct {
+	ID          string    `json:"id"`
+	PlanRunID   string    `json:"plan_run_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Category    string    `json:"category"`
+	Severity    string    `json:"severity"`
+	Likelihood  *float64  `json:"likelihood,omitempty"`
+	Impact      *float64  `json:"impact,omitempty"`
+	Mitigation  string    `json:"mitigation,omitempty"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// PlanConfiguration contains plan configuration options
+type PlanConfiguration struct {
+	ConsensusThreshold float64 `json:"consensus_threshold,omitempty"`
+	ProposalAgentCount int     `json:"proposal_agent_count,omitempty"`
+	PreferredModel     string  `json:"preferred_model,omitempty"`
+	BudgetTokens       int64   `json:"budget_tokens,omitempty"`
+	BudgetUSD          float64 `json:"budget_usd,omitempty"`
+}
+
+// CreatePlanRequest is the request body for creating a plan
+type CreatePlanRequest struct {
+	Title         string             `json:"title"`
+	Requirements  string             `json:"requirements"`
+	ProjectID     string             `json:"project_id,omitempty"`
+	Type          string             `json:"type,omitempty"`
+	Configuration *PlanConfiguration `json:"configuration,omitempty"`
+	ContextBundle map[string]interface{} `json:"context_bundle,omitempty"`
+}
+
+// ListPlansFilter contains filter parameters for listing plans
+type ListPlansFilter struct {
+	Status    string
+	Type      string
+	ProjectID string
+	Limit     int
+	Offset    int
+}
+
+// PlanListResponse represents the paginated response from plans API
+type PlanListResponse struct {
+	Plans  []Plan `json:"plans"`
+	Total  int64  `json:"total"`
+	Limit  int    `json:"limit"`
+	Offset int    `json:"offset"`
+}
+
+// ApplyPlanRequest is the request body for applying plan results
+type ApplyPlanRequest struct {
+	ApplyTasks bool   `json:"apply_tasks"`
+	ApplyADRs  bool   `json:"apply_adrs"`
+	TaskStatus string `json:"task_status,omitempty"`
+	ADRStatus  string `json:"adr_status,omitempty"`
+}
+
+// ApplyPlanResponse is the response from applying plan results
+type ApplyPlanResponse struct {
+	TasksCreated int      `json:"tasks_created"`
+	ADRsCreated  int      `json:"adrs_created"`
+	TaskIDs      []string `json:"task_ids,omitempty"`
+	ADRIDs       []string `json:"adr_ids,omitempty"`
+}
+
+// CreatePlan creates a new plan run
+func (c *Client) CreatePlan(req CreatePlanRequest) (*Plan, error) {
+	respBody, err := c.makeRequest("POST", "/plans", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var plan Plan
+	if err := json.Unmarshal(respBody, &plan); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plan: %w", err)
+	}
+	return &plan, nil
+}
+
+// ListPlans lists plan runs with optional filtering
+func (c *Client) ListPlans(filter ListPlansFilter) ([]Plan, error) {
+	endpoint := "/plans"
+	params := url.Values{}
+
+	if filter.Status != "" {
+		params.Add("status", filter.Status)
+	}
+	if filter.Type != "" {
+		params.Add("type", filter.Type)
+	}
+	if filter.ProjectID != "" {
+		params.Add("project_id", filter.ProjectID)
+	}
+	if filter.Limit > 0 {
+		params.Add("limit", fmt.Sprintf("%d", filter.Limit))
+	}
+	if filter.Offset > 0 {
+		params.Add("offset", fmt.Sprintf("%d", filter.Offset))
+	}
+
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response PlanListResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plans: %w", err)
+	}
+	return response.Plans, nil
+}
+
+// GetPlan gets a specific plan by ID (supports partial ID matching)
+func (c *Client) GetPlan(id string) (*Plan, error) {
+	endpoint := fmt.Sprintf("/plans/%s", id)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var plan Plan
+	if err := json.Unmarshal(respBody, &plan); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plan: %w", err)
+	}
+	return &plan, nil
+}
+
+// StartPlan starts execution of a pending plan
+func (c *Client) StartPlan(id string) (*Plan, error) {
+	endpoint := fmt.Sprintf("/plans/%s/start", id)
+	respBody, err := c.makeRequest("POST", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var plan Plan
+	if err := json.Unmarshal(respBody, &plan); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plan: %w", err)
+	}
+	return &plan, nil
+}
+
+// CancelPlan cancels a running plan
+func (c *Client) CancelPlan(id string) error {
+	endpoint := fmt.Sprintf("/plans/%s/cancel", id)
+	_, err := c.makeRequest("POST", endpoint, nil)
+	return err
+}
+
+// ResumePlan resumes a failed or cancelled plan
+func (c *Client) ResumePlan(id string) (*Plan, error) {
+	endpoint := fmt.Sprintf("/plans/%s/resume", id)
+	respBody, err := c.makeRequest("POST", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var plan Plan
+	if err := json.Unmarshal(respBody, &plan); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plan: %w", err)
+	}
+	return &plan, nil
+}
+
+// ApplyPlan applies plan results (creates tasks and/or ADRs)
+func (c *Client) ApplyPlan(id string, req ApplyPlanRequest) (*ApplyPlanResponse, error) {
+	endpoint := fmt.Sprintf("/plans/%s/apply", id)
+	respBody, err := c.makeRequest("POST", endpoint, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response ApplyPlanResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal apply response: %w", err)
+	}
+	return &response, nil
+}
+
+// UpdatePlan updates a plan's properties
+func (c *Client) UpdatePlan(id string, updates map[string]interface{}) (*Plan, error) {
+	endpoint := fmt.Sprintf("/plans/%s", id)
+	respBody, err := c.makeRequest("PUT", endpoint, updates)
+	if err != nil {
+		return nil, err
+	}
+
+	var plan Plan
+	if err := json.Unmarshal(respBody, &plan); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal plan: %w", err)
+	}
+	return &plan, nil
+}
+
+// DeletePlan deletes a plan
+func (c *Client) DeletePlan(id string) error {
+	endpoint := fmt.Sprintf("/plans/%s", id)
+	_, err := c.makeRequest("DELETE", endpoint, nil)
+	return err
+}
+
+// GetPlanPhases gets all phases for a plan
+func (c *Client) GetPlanPhases(planID string) ([]PlanPhase, error) {
+	endpoint := fmt.Sprintf("/plans/%s/phases", planID)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var phases []PlanPhase
+	if err := json.Unmarshal(respBody, &phases); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal phases: %w", err)
+	}
+	return phases, nil
+}
+
+// ListPlanArtifacts lists all artifacts for a plan
+func (c *Client) ListPlanArtifacts(planID string) ([]PlanArtifact, error) {
+	endpoint := fmt.Sprintf("/plans/%s/artifacts", planID)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var artifacts []PlanArtifact
+	if err := json.Unmarshal(respBody, &artifacts); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal artifacts: %w", err)
+	}
+	return artifacts, nil
+}
+
+// GetPlanArtifact gets a specific artifact by type
+func (c *Client) GetPlanArtifact(planID, artifactType string) (*PlanArtifact, error) {
+	endpoint := fmt.Sprintf("/plans/%s/artifacts/%s", planID, artifactType)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var artifact PlanArtifact
+	if err := json.Unmarshal(respBody, &artifact); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal artifact: %w", err)
+	}
+	return &artifact, nil
+}
+
+// ListPlanRisks lists all risks for a plan
+func (c *Client) ListPlanRisks(planID string) ([]PlanRisk, error) {
+	endpoint := fmt.Sprintf("/plans/%s/risks", planID)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var risks []PlanRisk
+	if err := json.Unmarshal(respBody, &risks); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal risks: %w", err)
+	}
+	return risks, nil
+}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kutbudev/ramorie-cli/internal/api"
 )
 
 // Session represents an MCP agent session with context
@@ -141,14 +142,21 @@ func ResetSession() {
 // AllowedWithoutInit returns true if the tool can be called without initialization
 func AllowedWithoutInit(toolName string) bool {
 	// These tools are allowed without initialization
-	// They are part of the setup workflow: get_ramorie_info -> setup_agent -> list_projects -> set_active_project
+	// They are part of the setup workflow: get_ramorie_info -> setup_agent -> list_projects
 	allowedTools := map[string]bool{
-		"get_ramorie_info":   true, // Info tool, always available
-		"setup_agent":        true, // This is the initialization tool itself
-		"list_projects":      true, // Need to see projects to set active project
-		"set_active_project": true, // Part of setup workflow, sets context
+		"get_ramorie_info": true, // Info tool, always available
+		"setup_agent":      true, // This is the initialization tool itself
+		"list_projects":    true, // Need to see projects before creating tasks/memories
 	}
 	return allowedTools[toolName]
+}
+
+// setAgentInfoFromSession sets agent metadata from the current session onto an API client
+func setAgentInfoFromSession(client *api.Client) {
+	session := GetCurrentSession()
+	if session != nil && session.AgentName != "" {
+		client.SetAgentInfo(session.AgentName, session.AgentModel, session.ID)
+	}
 }
 
 // RequiresProject returns true if the tool requires an active project to be set

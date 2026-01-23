@@ -121,11 +121,6 @@ func registerTools(server *mcp.Server) {
 	}, handleListProjects)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "set_active_project",
-		Description: "⚠️ DEPRECATED | Set the active project. Use explicit 'project' parameter in tools instead.",
-	}, handleSetActiveProject)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_project",
 		Description: "🟢 ADVANCED | Create a new project. ⚠️ Auto-checks for duplicates - returns similar projects if found. Use force=true to bypass.",
 	}, handleCreateProject)
@@ -422,6 +417,34 @@ func registerTools(server *mcp.Server) {
 		Name:        "get_cursor_rules",
 		Description: "🟢 ADVANCED | Get Cursor IDE rules for Ramorie. Returns markdown for .cursorrules file.",
 	}, handleGetCursorRules)
+
+	// ============================================================================
+	// 🟡 COMMON - Planning (Multi-Agent AI Planning)
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_plan",
+		Description: "🟡 COMMON | Create a new multi-agent planning run. REQUIRED: requirements (goal). Returns plan ID for tracking.",
+	}, handleCreatePlan)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_plan_status",
+		Description: "🟡 COMMON | Get current status and progress of a plan. REQUIRED: plan_id.",
+	}, handleGetPlanStatus)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_plans",
+		Description: "🟡 COMMON | List recent plans. Optional: status, type, project filters.",
+	}, handleListPlans)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "apply_plan",
+		Description: "🟡 COMMON | Apply completed plan results - creates tasks and/or ADRs. REQUIRED: plan_id.",
+	}, handleApplyPlan)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cancel_plan",
+		Description: "🟡 COMMON | Cancel a running plan. REQUIRED: plan_id.",
+	}, handleCancelPlan)
 }
 
 // ============================================================================
@@ -494,52 +517,6 @@ func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input Emp
 	}
 	// Wrap array response to fix "expected record, received array" error
 	return nil, formatMCPResponse(projects, getContextString()), nil
-}
-
-type SetActiveProjectInput struct {
-	ProjectName string `json:"projectName"`
-}
-
-func handleSetActiveProject(ctx context.Context, req *mcp.CallToolRequest, input SetActiveProjectInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	// Check session initialization (but allow this tool even without init since it's part of setup workflow)
-	if err := checkSessionInit("set_active_project"); err != nil {
-		return nil, nil, err
-	}
-
-	projectName := strings.TrimSpace(input.ProjectName)
-	if projectName == "" {
-		return nil, nil, errors.New("projectName is required")
-	}
-	projects, err := apiClient.ListProjects()
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, p := range projects {
-		if p.Name == projectName || strings.HasPrefix(p.ID.String(), projectName) {
-			if err := apiClient.SetProjectActive(p.ID.String()); err != nil {
-				return nil, nil, err
-			}
-			cfg, _ := config.LoadConfig()
-			if cfg == nil {
-				cfg = &config.Config{}
-			}
-			cfg.ActiveProjectID = p.ID.String()
-			_ = config.SaveConfig(cfg)
-
-			// Store in session for workflow tracking
-			SetSessionProject(p.ID)
-
-			return nil, map[string]interface{}{
-				"ok":         true,
-				"project_id": p.ID.String(),
-				"name":       p.Name,
-				"_context":   getContextString(),
-				"_message":   "✅ Active project set to: " + p.Name,
-				"_warning":   "⚠️ DEPRECATED: set_active_project is deprecated. Use explicit 'project' parameter in create_task, add_memory, list_tasks, etc. instead. This tool will be removed in a future version.",
-			}, nil
-		}
-	}
-	return nil, nil, errors.New("project not found")
 }
 
 type CreateProjectInput struct {
@@ -1625,7 +1602,7 @@ func handleAddMemoryToPack(ctx context.Context, req *mcp.CallToolRequest, input 
 	}
 
 	updates := map[string]interface{}{
-		"memoryIds": memoryIDs,
+		"memory_ids": memoryIDs,
 	}
 	result, err := apiClient.UpdateContextPack(packID, updates)
 	if err != nil {
@@ -2122,12 +2099,6 @@ func ToolDefinitions() []toolDef {
 			Description: "🔴 ESSENTIAL | List all projects. Check this to see available projects and which one is active.",
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
 		},
-		{
-			Name:        "set_active_project",
-			Description: "⚠️ DEPRECATED | Set the active project. Use explicit 'project' parameter in tools instead.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"projectName": map[string]interface{}{"type": "string", "description": "Project name or ID"}}, "required": []string{"projectName"}},
-		},
-
 		// ============================================================================
 		// 🔴 ESSENTIAL - Task Management (Core)
 		// ============================================================================
@@ -2447,7 +2418,7 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 				return p.ID.String(), nil
 			}
 		}
-		return "", errors.New("no active project - use set_active_project first")
+		return "", errors.New("no active project - specify the 'project' parameter")
 	}
 
 	projects, err := client.ListProjects()
@@ -2509,7 +2480,7 @@ func getRamorieInfo() map[string]interface{} {
 		"description": `Ramorie is a persistent memory and task management system for AI agents.
 It enables context preservation across sessions, task tracking, and knowledge storage.`,
 
-		"tool_count": 28,
+		"tool_count": 27,
 		"tool_priority_guide": map[string]string{
 			"🔴 ESSENTIAL": "Core functionality - use these regularly",
 			"🟡 COMMON":    "Frequently used - call when needed",
@@ -2520,11 +2491,10 @@ It enables context preservation across sessions, task tracking, and knowledge st
 			"1. setup_agent → Get current context and recommendations",
 			"2. get_focus → Check your current active workspace",
 			"3. list_projects → See available projects",
-			"4. set_active_project → Set your working project",
-			"5. get_next_tasks → See prioritized TODO tasks",
-			"6. start_task → Begin working (enables memory auto-link)",
-			"7. add_memory → Store important discoveries",
-			"8. complete_task → Mark work as done",
+			"4. get_next_tasks → See prioritized TODO tasks",
+			"5. start_task → Begin working (enables memory auto-link)",
+			"6. add_memory → Store important discoveries",
+			"7. complete_task → Mark work as done",
 		},
 
 		"core_rules": []string{
@@ -2540,7 +2510,7 @@ It enables context preservation across sessions, task tracking, and knowledge st
 		"tools_by_category": map[string][]string{
 			"🔴 agent":    {"get_ramorie_info", "setup_agent"},
 			"🔴 focus":    {"get_focus", "set_focus", "clear_focus"},
-			"🔴 project":  {"list_projects", "set_active_project"},
+			"🔴 project":  {"list_projects"},
 			"🔴 task":     {"list_tasks", "create_task", "get_task", "start_task", "complete_task", "get_next_tasks"},
 			"🔴 memory":   {"add_memory", "list_memories"},
 			"🟡 task":     {"add_task_note", "update_progress", "search_tasks", "get_active_task"},
@@ -2588,12 +2558,12 @@ func getCursorRules(format string) map[string]interface{} {
 - ❌ Never delete without user approval
 - ❌ Never create duplicate projects
 
-## Available Tools (28 total)
+## Available Tools (27 total)
 
-### 🔴 ESSENTIAL (15)
+### 🔴 ESSENTIAL (14)
 - get_ramorie_info, setup_agent
 - get_focus, set_focus, clear_focus
-- list_projects, set_active_project
+- list_projects
 - list_tasks, create_task, get_task, start_task, complete_task, get_next_tasks
 - add_memory, list_memories
 
@@ -2689,7 +2659,7 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		recommendations = append(recommendations, "💡 Set an active focus: set_focus (for workspace context)")
 	}
 	if result["active_project"] == nil {
-		recommendations = append(recommendations, "⚠️ Set an active project: set_active_project")
+		recommendations = append(recommendations, "💡 Specify 'project' parameter when creating tasks or memories")
 	}
 	if result["active_task"] == nil {
 		recommendations = append(recommendations, "💡 Start a task for memory auto-linking: start_task")
@@ -3134,6 +3104,305 @@ func handleUpdateSubtask(ctx context.Context, req *mcp.CallToolRequest, input Up
 		"priority":    subtask.Priority,
 		"message":     "Subtask updated successfully.",
 		"_context":    getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+// ============================================================================
+// PLAN TOOL HANDLERS
+// ============================================================================
+
+type CreatePlanInput struct {
+	Title        string  `json:"title,omitempty"`
+	Requirements string  `json:"requirements"`
+	Project      string  `json:"project,omitempty"`
+	Type         string  `json:"type,omitempty"`
+	Consensus    float64 `json:"consensus,omitempty"`
+	BudgetUSD    float64 `json:"budget_usd,omitempty"`
+}
+
+func handleCreatePlan(ctx context.Context, req *mcp.CallToolRequest, input CreatePlanInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	if strings.TrimSpace(input.Requirements) == "" {
+		return nil, nil, errors.New("requirements (goal) is required")
+	}
+
+	apiClient := api.NewClient()
+	setAgentInfoFromSession(apiClient)
+
+	// Resolve project if provided
+	var projectID string
+	if input.Project != "" {
+		projects, err := apiClient.ListProjects()
+		if err == nil {
+			for _, p := range projects {
+				if p.ID.String() == input.Project ||
+					strings.HasPrefix(p.ID.String(), input.Project) ||
+					strings.EqualFold(p.Name, input.Project) {
+					projectID = p.ID.String()
+					break
+				}
+			}
+		}
+	}
+
+	// Set defaults
+	title := input.Title
+	if title == "" {
+		title = input.Requirements
+		if len(title) > 50 {
+			title = title[:47] + "..."
+		}
+	}
+
+	planType := input.Type
+	if planType == "" {
+		planType = "feature"
+	}
+
+	consensus := input.Consensus
+	if consensus == 0 {
+		consensus = 0.75
+	}
+
+	budgetUSD := input.BudgetUSD
+	if budgetUSD == 0 {
+		budgetUSD = 5.0
+	}
+
+	plan, err := apiClient.CreatePlan(api.CreatePlanRequest{
+		Title:        title,
+		Requirements: input.Requirements,
+		ProjectID:    projectID,
+		Type:         planType,
+		Configuration: &api.PlanConfiguration{
+			ConsensusThreshold: consensus,
+			BudgetUSD:          budgetUSD,
+		},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create plan: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":            plan.ID,
+		"title":         plan.Title,
+		"type":          plan.Type,
+		"status":        plan.Status,
+		"current_phase": plan.CurrentPhase,
+		"message":       fmt.Sprintf("Plan '%s' created. Use get_plan_status to monitor progress.", plan.Title),
+		"_context":      getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type GetPlanStatusInput struct {
+	PlanID string `json:"plan_id"`
+}
+
+func handleGetPlanStatus(ctx context.Context, req *mcp.CallToolRequest, input GetPlanStatusInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	if strings.TrimSpace(input.PlanID) == "" {
+		return nil, nil, errors.New("plan_id is required")
+	}
+
+	apiClient := api.NewClient()
+	setAgentInfoFromSession(apiClient)
+
+	plan, err := apiClient.GetPlan(input.PlanID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get plan: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":            plan.ID,
+		"title":         plan.Title,
+		"type":          plan.Type,
+		"status":        plan.Status,
+		"current_phase": plan.CurrentPhase,
+		"progress":      plan.Progress,
+		"requirements":  plan.Requirements,
+		"tokens_used":   plan.TokensUsed,
+		"cost_usd":      plan.SpentBudgetUSD,
+		"task_count":    plan.TaskCount,
+		"adr_count":     plan.ADRCount,
+		"risk_count":    plan.RiskCount,
+		"_context":      getContextString(),
+	}
+
+	if plan.Error != "" {
+		result["error"] = plan.Error
+	}
+	if plan.FinalConsensusScore != nil {
+		result["consensus_score"] = *plan.FinalConsensusScore
+	}
+
+	// Add phases info
+	if len(plan.Phases) > 0 {
+		phases := make([]map[string]interface{}, len(plan.Phases))
+		for i, p := range plan.Phases {
+			phase := map[string]interface{}{
+				"phase":    p.Phase,
+				"status":   p.Status,
+				"sequence": p.Sequence,
+			}
+			if p.ConsensusScore != nil {
+				phase["consensus_score"] = *p.ConsensusScore
+			}
+			phases[i] = phase
+		}
+		result["phases"] = phases
+	}
+
+	return nil, result, nil
+}
+
+type ListPlansInput struct {
+	Status  string `json:"status,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Project string `json:"project,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
+func handleListPlans(ctx context.Context, req *mcp.CallToolRequest, input ListPlansInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	apiClient := api.NewClient()
+	setAgentInfoFromSession(apiClient)
+
+	// Resolve project if provided
+	var projectID string
+	if input.Project != "" {
+		projects, err := apiClient.ListProjects()
+		if err == nil {
+			for _, p := range projects {
+				if p.ID.String() == input.Project ||
+					strings.HasPrefix(p.ID.String(), input.Project) ||
+					strings.EqualFold(p.Name, input.Project) {
+					projectID = p.ID.String()
+					break
+				}
+			}
+		}
+	}
+
+	limit := input.Limit
+	if limit == 0 {
+		limit = 10
+	}
+
+	plans, err := apiClient.ListPlans(api.ListPlansFilter{
+		Status:    input.Status,
+		Type:      input.Type,
+		ProjectID: projectID,
+		Limit:     limit,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list plans: %w", err)
+	}
+
+	planList := make([]map[string]interface{}, len(plans))
+	for i, p := range plans {
+		planList[i] = map[string]interface{}{
+			"id":            p.ID,
+			"title":         p.Title,
+			"type":          p.Type,
+			"status":        p.Status,
+			"progress":      p.Progress,
+			"current_phase": p.CurrentPhase,
+		}
+	}
+
+	result := map[string]interface{}{
+		"plans":    planList,
+		"count":    len(plans),
+		"_context": getContextString(),
+	}
+
+	return nil, result, nil
+}
+
+type ApplyPlanInput struct {
+	PlanID     string `json:"plan_id"`
+	ApplyTasks bool   `json:"apply_tasks,omitempty"`
+	ApplyADRs  bool   `json:"apply_adrs,omitempty"`
+	TaskStatus string `json:"task_status,omitempty"`
+	ADRStatus  string `json:"adr_status,omitempty"`
+}
+
+func handleApplyPlan(ctx context.Context, req *mcp.CallToolRequest, input ApplyPlanInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	if strings.TrimSpace(input.PlanID) == "" {
+		return nil, nil, errors.New("plan_id is required")
+	}
+
+	apiClient := api.NewClient()
+	setAgentInfoFromSession(apiClient)
+
+	// Defaults: apply both if not specified
+	applyTasks := input.ApplyTasks
+	applyADRs := input.ApplyADRs
+	if !applyTasks && !applyADRs {
+		applyTasks = true
+		applyADRs = true
+	}
+
+	taskStatus := input.TaskStatus
+	if taskStatus == "" {
+		taskStatus = "TODO"
+	}
+
+	adrStatus := input.ADRStatus
+	if adrStatus == "" {
+		adrStatus = "draft"
+	}
+
+	response, err := apiClient.ApplyPlan(input.PlanID, api.ApplyPlanRequest{
+		ApplyTasks: applyTasks,
+		ApplyADRs:  applyADRs,
+		TaskStatus: taskStatus,
+		ADRStatus:  adrStatus,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to apply plan: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"tasks_created": response.TasksCreated,
+		"adrs_created":  response.ADRsCreated,
+		"message":       fmt.Sprintf("Plan applied: %d tasks and %d ADRs created.", response.TasksCreated, response.ADRsCreated),
+		"_context":      getContextString(),
+	}
+
+	if len(response.TaskIDs) > 0 {
+		result["task_ids"] = response.TaskIDs
+	}
+	if len(response.ADRIDs) > 0 {
+		result["adr_ids"] = response.ADRIDs
+	}
+
+	return nil, result, nil
+}
+
+type CancelPlanInput struct {
+	PlanID string `json:"plan_id"`
+}
+
+func handleCancelPlan(ctx context.Context, req *mcp.CallToolRequest, input CancelPlanInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	if strings.TrimSpace(input.PlanID) == "" {
+		return nil, nil, errors.New("plan_id is required")
+	}
+
+	apiClient := api.NewClient()
+	setAgentInfoFromSession(apiClient)
+
+	err := apiClient.CancelPlan(input.PlanID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to cancel plan: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"plan_id":  input.PlanID,
+		"status":   "cancelled",
+		"message":  "Plan cancelled successfully.",
+		"_context": getContextString(),
 	}
 
 	return nil, result, nil
