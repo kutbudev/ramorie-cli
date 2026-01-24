@@ -240,7 +240,7 @@ type SetupAgentInput struct {
 	AgentModel string `json:"agent_model,omitempty"`
 }
 
-func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input SetupAgentInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input SetupAgentInput) (*mcp.CallToolResult, any, error) {
 	// Initialize session with agent info
 	agentName := strings.TrimSpace(input.AgentName)
 	if agentName == "" {
@@ -282,7 +282,7 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	return mustTextResult(result), nil, nil
 }
 
-func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, any, error) {
 	projects, err := apiClient.ListProjects()
 	if err != nil {
 		return nil, nil, err
@@ -366,7 +366,7 @@ type ListTasksInput struct {
 	Limit        float64 `json:"limit,omitempty"`
 }
 
-func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, any, error) {
 	// REQUIRED: project parameter must be specified
 	if strings.TrimSpace(input.Project) == "" {
 		return nil, nil, errors.New("'project' parameter is REQUIRED. Use list_projects to see available projects.")
@@ -459,7 +459,7 @@ type CreateTaskInput struct {
 	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
 }
 
-func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, any, error) {
 	// Check session initialization
 	if err := checkSessionInit("create_task"); err != nil {
 		return nil, nil, err
@@ -632,7 +632,7 @@ type MoveTaskInput struct {
 	ProjectID string `json:"projectId"`
 }
 
-func handleMoveTask(ctx context.Context, req *mcp.CallToolRequest, input MoveTaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleMoveTask(ctx context.Context, req *mcp.CallToolRequest, input MoveTaskInput) (*mcp.CallToolResult, any, error) {
 	// Check session initialization
 	if err := checkSessionInit("move_task"); err != nil {
 		return nil, nil, err
@@ -723,7 +723,7 @@ type AddMemoryInput struct {
 	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
 }
 
-func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, any, error) {
 	// Check session initialization
 	if err := checkSessionInit("add_memory"); err != nil {
 		return nil, nil, err
@@ -864,7 +864,7 @@ type ListMemoriesInput struct {
 	Limit   float64 `json:"limit,omitempty"`
 }
 
-func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input ListMemoriesInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input ListMemoriesInput) (*mcp.CallToolResult, any, error) {
 	// REQUIRED: project parameter must be specified
 	if strings.TrimSpace(input.Project) == "" {
 		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project to list memories from.\n\nUse list_projects to see available projects.\nExample: list_memories(project=\"my-project\")")
@@ -976,7 +976,7 @@ type RecallInput struct {
 	MinScore         float64 `json:"min_score,omitempty"`
 }
 
-func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, any, error) {
 	term := strings.TrimSpace(input.Term)
 	if term == "" {
 		return nil, nil, errors.New("term is required")
@@ -1146,7 +1146,7 @@ type ListContextPacksInput struct {
 	Limit  float64 `json:"limit,omitempty"`
 }
 
-func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input ListContextPacksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input ListContextPacksInput) (*mcp.CallToolResult, any, error) {
 	limit := int(input.Limit)
 	if limit == 0 {
 		limit = 50
@@ -1188,7 +1188,7 @@ func handleGetContextPack(ctx context.Context, req *mcp.CallToolRequest, input G
 // ORGANIZATION HANDLERS
 // ============================================================================
 
-func handleListOrganizations(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleListOrganizations(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, any, error) {
 	orgs, err := apiClient.ListOrganizations()
 	if err != nil {
 		return nil, nil, err
@@ -1264,7 +1264,7 @@ type ListDecisionsInput struct {
 	Limit  float64 `json:"limit,omitempty"`
 }
 
-func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, any, error) {
 	decisions, err := apiClient.ListDecisions(strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), int(input.Limit))
 	if err != nil {
 		return nil, nil, err
@@ -1612,7 +1612,7 @@ type GetAgentActivityInput struct {
 	Limit     float64 `json:"limit,omitempty"`      // Optional: max results (default 20, max 50)
 }
 
-func handleGetAgentActivity(ctx context.Context, req *mcp.CallToolRequest, input GetAgentActivityInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+func handleGetAgentActivity(ctx context.Context, req *mcp.CallToolRequest, input GetAgentActivityInput) (*mcp.CallToolResult, any, error) {
 	// Build filter
 	filter := api.AgentEventFilter{
 		AgentName: strings.TrimSpace(input.AgentName),
