@@ -84,7 +84,7 @@ func handleManageFocus(ctx context.Context, req *mcp.CallToolRequest, input Mana
 
 type ManageTaskInput struct {
 	TaskID   string  `json:"taskId"`
-	Action   string  `json:"action"`             // start, complete, progress
+	Action   string  `json:"action"`             // start, complete, stop, progress
 	Progress float64 `json:"progress,omitempty"` // 0-100, for action=progress
 }
 
@@ -95,7 +95,7 @@ func handleManageTask(ctx context.Context, req *mcp.CallToolRequest, input Manag
 	}
 	action := strings.TrimSpace(strings.ToLower(input.Action))
 	if action == "" {
-		return nil, nil, errors.New("action is required (start|complete|progress)")
+		return nil, nil, errors.New("action is required (start|complete|stop|progress)")
 	}
 
 	switch action {
@@ -111,6 +111,12 @@ func handleManageTask(ctx context.Context, req *mcp.CallToolRequest, input Manag
 		}
 		return mustTextResult(map[string]interface{}{"ok": true, "message": "Task completed."}), nil, nil
 
+	case "stop":
+		if err := apiClient.StopTask(taskID); err != nil {
+			return nil, nil, err
+		}
+		return mustTextResult(map[string]interface{}{"ok": true, "message": "Task stopped. Active task cleared."}), nil, nil
+
 	case "progress":
 		progress := int(input.Progress)
 		if progress < 0 || progress > 100 {
@@ -120,10 +126,14 @@ func handleManageTask(ctx context.Context, req *mcp.CallToolRequest, input Manag
 		if err != nil {
 			return nil, nil, err
 		}
-		return mustTextResult(result), nil, nil
+		return mustTextResult(map[string]interface{}{
+			"ok":      true,
+			"message": fmt.Sprintf("Task progress updated to %d%%", progress),
+			"task":    result,
+		}), nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: start, complete, or progress", action)
+		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: start, complete, stop, or progress", action)
 	}
 }
 

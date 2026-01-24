@@ -136,7 +136,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_task",
-		Description: "🟡 COMMON | Start, complete, or update task progress. REQUIRED: taskId, action (start|complete|progress). For progress action: also requires progress (0-100).",
+		Description: "🟡 COMMON | Start, complete, stop, or update task progress. REQUIRED: taskId, action (start|complete|stop|progress). For progress action: also requires progress (0-100).",
 	}, handleManageTask)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -1338,7 +1338,7 @@ func ToolDefinitions() []toolDef {
 		// 🟡 COMMON (12 tools)
 		// ============================================================================
 		{Name: "get_task", Description: "🟡 COMMON | Get task details including notes and metadata."},
-		{Name: "manage_task", Description: "🟡 COMMON | Start/complete/update progress on a task. Actions: start, complete, progress."},
+		{Name: "manage_task", Description: "🟡 COMMON | Start/complete/stop/update progress on a task. Actions: start, complete, stop, progress."},
 		{Name: "add_task_note", Description: "🟡 COMMON | Add a note/annotation to a task."},
 		{Name: "list_memories", Description: "🟡 COMMON | List memories with filtering."},
 		{Name: "get_memory", Description: "🟡 COMMON | Get memory details by ID."},

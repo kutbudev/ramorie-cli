@@ -40,7 +40,7 @@ func ServeStdio(client *api.Client) error {
 // This fixes the MCP "expected record, received array" error
 func wrapResultAsObject(result interface{}) map[string]interface{} {
 	if result == nil {
-		return map[string]interface{}{"data": nil}
+		return map[string]interface{}{"items": []interface{}{}, "count": 0, "message": "No results"}
 	}
 
 	switch v := result.(type) {
