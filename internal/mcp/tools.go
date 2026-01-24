@@ -363,6 +363,16 @@ func registerTools(server *mcp.Server) {
 			OpenWorldHint:   boolPtr(false),
 		},
 	}, handleSwitchOrganization)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "consolidate_memories",
+		Description: "🟢 ADVANCED | Trigger memory consolidation for a project. Scores memories by importance/access/recency, promotes high-value and archives stale ones. REQUIRED: project. Optional: stale_days (default 30), promote_threshold (0-1, default 0.8), archive_threshold (0-1, default 0.2).",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Consolidate Memories",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleConsolidateMemories)
 }
 
 // ============================================================================
@@ -1480,6 +1490,49 @@ func handleSwitchOrganization(ctx context.Context, req *mcp.CallToolRequest, inp
 	return mustTextResult(org), nil, nil
 }
 
+type ConsolidateMemoriesInput struct {
+	Project          string  `json:"project"`
+	StaleDays        int     `json:"stale_days,omitempty"`
+	PromoteThreshold float64 `json:"promote_threshold,omitempty"`
+	ArchiveThreshold float64 `json:"archive_threshold,omitempty"`
+}
+
+func handleConsolidateMemories(ctx context.Context, req *mcp.CallToolRequest, input ConsolidateMemoriesInput) (*mcp.CallToolResult, interface{}, error) {
+	project := strings.TrimSpace(input.Project)
+	if project == "" {
+		return nil, nil, errors.New("project is required")
+	}
+
+	projectID, err := resolveProjectID(apiClient, project)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve project: %w", err)
+	}
+
+	payload := map[string]interface{}{
+		"project_id": projectID,
+	}
+	if input.StaleDays > 0 {
+		payload["stale_days"] = input.StaleDays
+	}
+	if input.PromoteThreshold > 0 {
+		payload["promote_threshold"] = input.PromoteThreshold
+	}
+	if input.ArchiveThreshold > 0 {
+		payload["archive_threshold"] = input.ArchiveThreshold
+	}
+
+	// Add org_id if session has one
+	if session := GetCurrentSession(); session != nil && session.ActiveOrgID != nil {
+		payload["org_id"] = session.ActiveOrgID.String()
+	}
+
+	result, err := apiClient.EnqueueJob("memory_consolidate", payload)
+	if err != nil {
+		return nil, nil, fmt.Errorf("enqueue consolidation job: %w", err)
+	}
+
+	return mustTextResult(result), nil, nil
+}
 
 type CreateDecisionInput struct {
 	Title        string `json:"title"`

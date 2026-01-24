@@ -802,6 +802,28 @@ func (c *Client) GetMemory(id string) (*models.Memory, error) {
 	return &memory, nil
 }
 
+// Job API methods
+
+// EnqueueJob enqueues a background job
+func (c *Client) EnqueueJob(jobType string, payload map[string]interface{}) (map[string]interface{}, error) {
+	reqBody := map[string]interface{}{
+		"type":    jobType,
+		"payload": payload,
+	}
+
+	respBody, err := c.makeRequest("POST", "/jobs", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return result, nil
+}
+
 // Context API methods
 func (c *Client) CreateContext(name, description string) (*models.Context, error) {
 	reqBody := map[string]interface{}{
