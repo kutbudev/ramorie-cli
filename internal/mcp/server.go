@@ -49,8 +49,9 @@ func ServeStdio(client *api.Client) error {
 		},
 	)
 
-	// Register all tools
+	// Register all tools and resources
 	registerTools(server)
+	registerResources(server)
 
 	// Run server over stdio
 	return server.Run(context.Background(), &mcp.StdioTransport{})
