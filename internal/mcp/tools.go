@@ -139,7 +139,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (general, decision, bug_fix, preference, pattern, reference, skill - use 'skill' for procedural knowledge: reusable procedures, workflows, and step-by-step patterns), force (bypass similarity check).",
+		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (general, decision, bug_fix, preference, pattern, reference, skill), dedup_mode (auto|off - auto merges >85% similar), force (bypass all checks).",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Add Memory",
 			DestructiveHint: boolPtr(false),
@@ -915,6 +915,7 @@ type AddMemoryInput struct {
 	Project         string `json:"project"`                    // REQUIRED - project name or ID
 	Type            string `json:"type,omitempty"`             // Memory type: general, decision, bug_fix, preference, pattern, reference (auto-detected if not provided)
 	Force           bool   `json:"force,omitempty"`            // Skip similarity check and force creation
+	DedupMode       string `json:"dedup_mode,omitempty"`       // Deduplication mode: "auto" (default) merges if >85% similar, "off" skips dedup
 	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
 }
 
@@ -939,18 +940,46 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 		return nil, nil, err
 	}
 
-	// Check for similar memories unless force=true
-	if !input.Force {
+	// Check for similar memories unless force=true or dedup_mode=off
+	dedupMode := strings.TrimSpace(strings.ToLower(input.DedupMode))
+	if dedupMode == "" {
+		dedupMode = "auto" // default
+	}
+
+	if !input.Force && dedupMode != "off" {
 		// Fetch existing memories for this project
 		existingMemories, err := apiClient.ListMemories(projectID, "")
 		if err == nil && len(existingMemories) > 0 {
 			// Check for similar content
 			similarMemories := CheckSimilarMemories(existingMemories, content, SimilarityThreshold)
 			if len(similarMemories) > 0 {
-				// Return warning with similar memories
+				// Auto-merge if highest similarity > 0.85 and dedup_mode=auto
+				if dedupMode == "auto" && similarMemories[0].Similarity >= AutoMergeThreshold {
+					// Merge: update the most similar memory with combined content
+					targetID := similarMemories[0].MemoryID
+					mergedContent := mergeMemoryContent(similarMemories[0].FullContent, content)
+
+					updatedMemory, err := apiClient.UpdateMemory(targetID, map[string]interface{}{
+						"content": mergedContent,
+					})
+					if err != nil {
+						return nil, nil, fmt.Errorf("auto-merge failed: %w", err)
+					}
+
+					result := formatMCPResponse(updatedMemory, getContextString())
+					result["action_taken"] = "updated"
+					result["dedup_action"] = "merged"
+					result["merged_with"] = targetID
+					result["similarity"] = similarMemories[0].Similarity
+					result["_message"] = fmt.Sprintf("Memory merged with existing (%.0f%% similar). ID: %s", similarMemories[0].Similarity*100, targetID)
+					return mustTextResult(result), nil, nil
+				}
+
+				// Warn: similarity is moderate (0.6-0.85)
 				result := map[string]interface{}{
 					"status":           "similar_exists",
-					"message":          "Similar memories already exist. Use force=true to create anyway.",
+					"action_taken":     "skipped",
+					"message":          "Similar memories already exist. Use force=true to create anyway, or dedup_mode=off to skip checks.",
 					"similar_count":    len(similarMemories),
 					"similar_memories": similarMemories,
 					"threshold":        SimilarityThreshold,
@@ -992,6 +1021,7 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 				}
 
 				result := formatMCPResponse(memory, getContextString())
+				result["action_taken"] = "created"
 				result["_created_in_project"] = projectID
 				result["_encrypted"] = true
 				result["_encryption_scope"] = "organization"
@@ -1020,6 +1050,7 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 				}
 
 				result := formatMCPResponse(memory, getContextString())
+				result["action_taken"] = "created"
 				result["_created_in_project"] = projectID
 				result["_encrypted"] = true
 				result["_encryption_scope"] = "personal"
@@ -1045,6 +1076,7 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 
 	// Return with context info showing where memory was created
 	result := formatMCPResponse(memory, getContextString())
+	result["action_taken"] = "created"
 	result["_created_in_project"] = projectID
 	result["_type"] = memoryType
 	result["_type_auto_detected"] = input.Type == ""
