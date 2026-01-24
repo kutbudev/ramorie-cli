@@ -1456,7 +1456,7 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",
 		"message": "🧠 Ramorie agent session initialized",
-		"version": "3.9.0",
+		"version": "3.18.0",
 	}
 
 	// Get current focus (active workspace)
