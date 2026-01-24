@@ -84,6 +84,11 @@ func decryptTaskFields(t *models.Task) (title, description string) {
 	return title, description
 }
 
+// boolPtr returns a pointer to a bool value (for optional ToolAnnotation fields)
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 // registerTools registers all MCP tools with the server using go-sdk
 // The SDK automatically infers InputSchema from the handler's input struct type
 // v3: Simplified from 61 tools to 26 tools via removal and consolidation
@@ -94,36 +99,73 @@ func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "setup_agent",
 		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, agent_directives, and system info.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Initialize Agent Session",
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleSetupAgent)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_projects",
 		Description: "🔴 ESSENTIAL | List all projects.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Projects",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleListProjects)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tasks",
 		Description: "🔴 ESSENTIAL | List, search, or get prioritized tasks. REQUIRED: project. Optional: status, query (keyword search), next_priority (bool, returns top TODO tasks sorted by priority), limit.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Tasks",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleListTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_task",
 		Description: "🔴 ESSENTIAL | Create a new task. REQUIRED: project, description. Optional: priority (L/M/H).",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Task",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleCreateTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
 		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (general, decision, bug_fix, preference, pattern, reference, skill - use 'skill' for procedural knowledge: reusable procedures, workflows, and step-by-step patterns), force (bypass similarity check).",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Add Memory",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleAddMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "recall",
 		Description: "🔴 ESSENTIAL | Search memories. REQUIRED: term. Supports OR (space-separated) and AND (comma-separated) search. Optional: project, tag, type (filter by type e.g. 'skill' for learned procedures), min_score, limit.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Search Memories",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleRecall)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_focus",
 		Description: "🔴 ESSENTIAL | Get, set, or clear active workspace focus. No params = get current focus. With pack_id = set focus. With clear=true = clear focus.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Manage Focus",
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleManageFocus)
 
 	// ============================================================================
@@ -132,61 +174,122 @@ func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_task",
 		Description: "🟡 COMMON | Get full task details including notes and metadata. REQUIRED: taskId.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Task Details",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleGetTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_task",
 		Description: "🟡 COMMON | Start, complete, stop, or update task progress. REQUIRED: taskId, action (start|complete|stop|progress). For progress action: also requires progress (0-100).",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Manage Task Status",
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleManageTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_task_note",
 		Description: "🟡 COMMON | Add a note to a task. REQUIRED: taskId, note.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Add Task Note",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleAddTaskNote)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_memories",
 		Description: "🟡 COMMON | List memories with filtering. REQUIRED: project. Optional: term, limit.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Memories",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleListMemories)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_memory",
 		Description: "🟡 COMMON | Get memory details by ID. REQUIRED: memoryId.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Memory",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleGetMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_context_packs",
 		Description: "🟡 COMMON | List context packs. Optional: type, status, query, limit.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Context Packs",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleListContextPacks)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_context_pack",
 		Description: "🟡 COMMON | Get context pack details with linked memories, tasks, and contexts. REQUIRED: packId.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Context Pack",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleGetContextPack)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_context_pack",
 		Description: "🟡 COMMON | Create, update, or link items to a context pack. REQUIRED: action (create|update|add_memory|add_task). For create: name, type required. For update: packId required. For add_memory/add_task: packId and memoryId/taskId required.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Manage Context Pack",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleManageContextPack)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
 		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title. Optional: description, status, area, context, consequences.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Decision Record",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleCreateDecision)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_decisions",
 		Description: "🟡 COMMON | List architectural decisions. Optional: status, area, limit.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Decisions",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleListDecisions)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_stats",
 		Description: "🟡 COMMON | Get task statistics and completion rates. REQUIRED: project.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Statistics",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleGetStats)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_agent_activity",
 		Description: "🟡 COMMON | Get recent agent activity timeline. Optional: project, agent_name, event_type, limit.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Agent Activity",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleGetAgentActivity)
 
 	// ============================================================================
@@ -195,37 +298,118 @@ func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_project",
 		Description: "🟢 ADVANCED | Create a new project. REQUIRED: name, description. Optional: force (bypass duplicate check), org_id.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Project",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleCreateProject)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "move_task",
 		Description: "🟢 ADVANCED | Move a task to a different project. REQUIRED: taskId, projectId.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Move Task",
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleMoveTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_subtasks",
 		Description: "🟢 ADVANCED | CRUD for subtasks. REQUIRED: action (create|list|complete|update), task_id. For create: description required. For complete/update: subtask_id required.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Manage Subtasks",
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleManageSubtasks)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_dependencies",
 		Description: "🟢 ADVANCED | Manage task dependencies. REQUIRED: action (add|list|remove), task_id. For add/remove: depends_on_id required. For list: direction (deps|dependents, default: deps).",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Manage Dependencies",
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleManageDependencies)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_plan",
 		Description: "🟢 ADVANCED | Multi-agent planning. REQUIRED: action (create|status|list|apply|cancel). For create: requirements required. For status/apply/cancel: plan_id required.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Manage Plan",
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleManagePlan)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_organizations",
 		Description: "🟢 ADVANCED | List user's organizations.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Organizations",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
 	}, handleListOrganizations)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "switch_organization",
 		Description: "🟢 ADVANCED | Switch active organization. REQUIRED: orgId.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Switch Organization",
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   boolPtr(false),
+		},
 	}, handleSwitchOrganization)
+}
+
+// ============================================================================
+// PAGINATION HELPERS
+// ============================================================================
+
+// decodeCursor decodes a cursor string to an offset. Empty cursor returns 0.
+func decodeCursor(cursor string) int {
+	if cursor == "" {
+		return 0
+	}
+	var offset int
+	if _, err := fmt.Sscanf(cursor, "%d", &offset); err != nil || offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+// paginateSlice applies cursor-based pagination to a slice and returns
+// the paginated items, nextCursor (empty if no more), and total count.
+func paginateSlice[T any](items []T, cursor string, limit int) ([]T, string, int) {
+	total := len(items)
+	offset := decodeCursor(cursor)
+
+	if limit <= 0 {
+		limit = 20
+	}
+
+	if offset >= total {
+		return []T{}, "", total
+	}
+
+	end := offset + limit
+	hasMore := false
+	if end >= total {
+		end = total
+	} else {
+		hasMore = true
+	}
+
+	paginated := items[offset:end]
+	nextCursor := ""
+	if hasMore {
+		nextCursor = fmt.Sprintf("%d", end)
+	}
+
+	return paginated, nextCursor, total
 }
 
 // ============================================================================
@@ -283,7 +467,14 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 }
 
 func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, any, error) {
-	projects, err := apiClient.ListProjects()
+	// Pass active org ID from session to get organization-scoped projects
+	var orgID string
+	session := GetCurrentSession()
+	if session != nil && session.ActiveOrgID != nil {
+		orgID = session.ActiveOrgID.String()
+	}
+
+	projects, err := apiClient.ListProjects(orgID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -364,6 +555,7 @@ type ListTasksInput struct {
 	Query        string  `json:"query,omitempty"`          // Optional keyword search
 	NextPriority bool    `json:"next_priority,omitempty"`  // If true, return top TODO tasks by priority
 	Limit        float64 `json:"limit,omitempty"`
+	Cursor       string  `json:"cursor,omitempty"`         // Pagination cursor from previous response
 }
 
 func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, any, error) {
@@ -417,13 +609,16 @@ func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTa
 	if input.NextPriority && limit <= 0 {
 		limit = 5 // Default limit for priority mode
 	}
-	if limit > 0 && limit < len(tasks) {
-		tasks = tasks[:limit]
+	if limit <= 0 {
+		limit = 20
 	}
+
+	// Apply cursor-based pagination
+	paginatedTasks, nextCursor, total := paginateSlice(tasks, input.Cursor, limit)
 
 	// Decrypt task fields before returning
 	var decryptedTasks []map[string]interface{}
-	for _, t := range tasks {
+	for _, t := range paginatedTasks {
 		decryptedTitle, decryptedDesc := decryptTaskFields(&t)
 		taskMap := map[string]interface{}{
 			"id":           t.ID.String(),
@@ -449,7 +644,7 @@ func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTa
 		decryptedTasks = append(decryptedTasks, taskMap)
 	}
 
-	return mustTextResult(formatMCPResponse(decryptedTasks, getContextString())), nil, nil
+	return mustTextResult(formatPaginatedResponse(decryptedTasks, nextCursor, total, getContextString())), nil, nil
 }
 
 type CreateTaskInput struct {
@@ -862,6 +1057,7 @@ type ListMemoriesInput struct {
 	Project string  `json:"project"` // REQUIRED - project name or ID
 	Term    string  `json:"term,omitempty"`
 	Limit   float64 `json:"limit,omitempty"`
+	Cursor  string  `json:"cursor,omitempty"` // Pagination cursor
 }
 
 func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input ListMemoriesInput) (*mcp.CallToolResult, any, error) {
@@ -894,13 +1090,16 @@ func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input Lis
 	}
 
 	limit := int(input.Limit)
-	if limit > 0 && limit < len(memories) {
-		memories = memories[:limit]
+	if limit <= 0 {
+		limit = 20
 	}
+
+	// Apply cursor-based pagination
+	paginatedMemories, nextCursor, total := paginateSlice(memories, input.Cursor, limit)
 
 	// Decrypt all memory content before returning
 	var decryptedMemories []map[string]interface{}
-	for _, m := range memories {
+	for _, m := range paginatedMemories {
 		decryptedContent := decryptMemoryContent(&m)
 		memMap := map[string]interface{}{
 			"id":           m.ID.String(),
@@ -923,8 +1122,7 @@ func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input Lis
 		decryptedMemories = append(decryptedMemories, memMap)
 	}
 
-	// Wrap array response to fix "expected record, received array" error
-	return mustTextResult(formatMCPResponse(decryptedMemories, getContextString())), nil, nil
+	return mustTextResult(formatPaginatedResponse(decryptedMemories, nextCursor, total, getContextString())), nil, nil
 }
 
 type GetMemoryInput struct {
@@ -974,6 +1172,7 @@ type RecallInput struct {
 	IncludeRelations bool    `json:"include_relations,omitempty"`
 	Limit            float64 `json:"limit,omitempty"`
 	MinScore         float64 `json:"min_score,omitempty"`
+	Cursor           string  `json:"cursor,omitempty"` // Pagination cursor
 }
 
 func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, any, error) {
@@ -1094,10 +1293,14 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		}
 
 		result := map[string]interface{}{
-			"id":         m.ID.String(),
-			"content":    decryptedContent, // Use decrypted content in result
-			"score":      score,
-			"created_at": m.CreatedAt,
+			"id":           m.ID.String(),
+			"content":      decryptedContent, // Use decrypted content in result
+			"score":        score,
+			"access_count": m.AccessCount,
+			"created_at":   m.CreatedAt,
+		}
+		if m.Importance != nil {
+			result["importance"] = *m.Importance
 		}
 
 		if includeRelations {
@@ -1122,21 +1325,26 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		return scored[i].score > scored[j].score
 	})
 
+	// Apply cursor-based pagination to scored results
+	paginatedScored, nextCursor, totalFound := paginateSlice(scored, input.Cursor, limit)
+
 	var results []interface{}
-	for i, s := range scored {
-		if i >= limit {
-			break
-		}
+	for _, s := range paginatedScored {
 		results = append(results, s.memory)
 	}
 
-	return mustTextResult(map[string]interface{}{
+	response := map[string]interface{}{
 		"term":        term,
 		"search_mode": map[bool]string{true: "AND", false: "OR"}[isAndSearch],
 		"count":       len(results),
-		"total_found": len(scored),
+		"total_found": totalFound,
 		"results":     results,
-	}), nil, nil
+	}
+	if nextCursor != "" {
+		response["nextCursor"] = nextCursor
+	}
+
+	return mustTextResult(response), nil, nil
 }
 
 type ListContextPacksInput struct {
@@ -1144,25 +1352,43 @@ type ListContextPacksInput struct {
 	Status string  `json:"status,omitempty"` // draft, published
 	Query  string  `json:"query,omitempty"`
 	Limit  float64 `json:"limit,omitempty"`
+	Cursor string  `json:"cursor,omitempty"` // Pagination cursor
 }
 
 func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input ListContextPacksInput) (*mcp.CallToolResult, any, error) {
 	limit := int(input.Limit)
-	if limit == 0 {
-		limit = 50
+	if limit <= 0 {
+		limit = 20
 	}
+	offset := decodeCursor(input.Cursor)
 	result, err := apiClient.ListContextPacks(
 		strings.TrimSpace(input.Type),
 		strings.TrimSpace(input.Status),
 		strings.TrimSpace(input.Query),
-		limit,
-		0,
+		limit+1, // Fetch one extra to detect if there are more
+		offset,
 	)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Wrap response to fix "expected record, received array" error
-	return mustTextResult(formatMCPResponse(result, getContextString())), nil, nil
+
+	// The backend was asked for limit+1 items to detect if there are more pages
+	packs := result.ContextPacks
+	nextCursor := ""
+	if len(packs) > limit {
+		packs = packs[:limit]
+		nextCursor = fmt.Sprintf("%d", offset+limit)
+	}
+
+	total := int(result.Total)
+	if total == 0 {
+		total = offset + len(packs)
+		if nextCursor != "" {
+			total++
+		}
+	}
+
+	return mustTextResult(formatPaginatedResponse(packs, nextCursor, total, getContextString())), nil, nil
 }
 
 
@@ -1262,15 +1488,24 @@ type ListDecisionsInput struct {
 	Status string  `json:"status,omitempty"`
 	Area   string  `json:"area,omitempty"`
 	Limit  float64 `json:"limit,omitempty"`
+	Cursor string  `json:"cursor,omitempty"` // Pagination cursor
 }
 
 func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, any, error) {
-	decisions, err := apiClient.ListDecisions(strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), int(input.Limit))
+	// Fetch all matching decisions from API
+	decisions, err := apiClient.ListDecisions(strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Wrap array response to fix "expected record, received array" error
-	return mustTextResult(formatMCPResponse(decisions, getContextString())), nil, nil
+
+	// Apply cursor-based pagination
+	limit := int(input.Limit)
+	if limit <= 0 {
+		limit = 20
+	}
+
+	paginated, nextCursor, total := paginateSlice(decisions, input.Cursor, limit)
+	return mustTextResult(formatPaginatedResponse(paginated, nextCursor, total, getContextString())), nil, nil
 }
 
 type GetStatsInput struct {
@@ -1379,13 +1614,20 @@ func priorityRank(p string) int {
 	}
 }
 
+func getActiveOrgIDString() string {
+	if activeOrg := GetSessionActiveOrgID(); activeOrg != nil {
+		return activeOrg.String()
+	}
+	return ""
+}
+
 func resolveProjectID(client *api.Client, projectIdentifier string) (string, error) {
 	projectIdentifier = strings.TrimSpace(projectIdentifier)
 	if projectIdentifier == "" {
 		return "", errors.New("project parameter is required")
 	}
 
-	projects, err := client.ListProjects()
+	projects, err := client.ListProjects(getActiveOrgIDString())
 	if err != nil {
 		return "", err
 	}
@@ -1405,7 +1647,7 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		return "", "", errors.New("project parameter is required")
 	}
 
-	projects, err := client.ListProjects()
+	projects, err := client.ListProjects(getActiveOrgIDString())
 	if err != nil {
 		return "", "", err
 	}
@@ -1471,8 +1713,8 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		}
 	}
 
-	// List projects
-	projects, err := client.ListProjects()
+	// List projects (include org-scoped if active)
+	projects, err := client.ListProjects(getActiveOrgIDString())
 	if err == nil {
 		result["projects_count"] = len(projects)
 	}
@@ -1610,6 +1852,7 @@ type GetAgentActivityInput struct {
 	AgentName string  `json:"agent_name,omitempty"` // Optional: filter by agent name
 	EventType string  `json:"event_type,omitempty"` // Optional: filter by event type (memory_created, task_created, etc.)
 	Limit     float64 `json:"limit,omitempty"`      // Optional: max results (default 20, max 50)
+	Cursor    string  `json:"cursor,omitempty"`     // Pagination cursor (offset)
 }
 
 func handleGetAgentActivity(ctx context.Context, req *mcp.CallToolRequest, input GetAgentActivityInput) (*mcp.CallToolResult, any, error) {
@@ -1666,15 +1909,23 @@ func handleGetAgentActivity(ctx context.Context, req *mcp.CallToolRequest, input
 		events = append(events, e)
 	}
 
+	// Build paginated response
+	nextCursor := ""
+	if response.HasMore {
+		nextCursor = fmt.Sprintf("%d", decodeCursor(input.Cursor)+len(events))
+	}
+
 	result := map[string]interface{}{
 		"events":   events,
 		"count":    len(events),
-		"has_more": response.HasMore,
 		"_context": getContextString(),
 	}
 
 	if response.Total > 0 {
-		result["total_estimate"] = response.Total
+		result["total"] = response.Total
+	}
+	if nextCursor != "" {
+		result["nextCursor"] = nextCursor
 	}
 
 	return mustTextResult(result), nil, nil

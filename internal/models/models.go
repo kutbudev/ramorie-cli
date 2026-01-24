@@ -63,6 +63,9 @@ type Memory struct {
 	Project      *Project    `json:"project,omitempty"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
+	// Importance scoring
+	Importance  *float64 `json:"importance,omitempty"`
+	AccessCount int      `json:"access_count"`
 	// Encryption fields for zero-knowledge encryption
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 	ContentNonce     string `json:"content_nonce,omitempty"`

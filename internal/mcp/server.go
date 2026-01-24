@@ -20,13 +20,33 @@ func ServeStdio(client *api.Client) error {
 	}
 	apiClient = client
 
-	// Create server with implementation info
+	// Create server with implementation info and instructions
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "ramorie",
 			Version: "2.1.0",
 		},
-		nil,
+		&mcp.ServerOptions{
+			Instructions: `Ramorie is an AI-native workspace for persistent memory, task management, and architectural decisions.
+
+## Getting Started
+1. Always call setup_agent first to initialize your session and get current context.
+2. Call list_projects to see available projects.
+3. Always pass the 'project' parameter explicitly when creating tasks or memories.
+
+## Key Workflows
+- **Memory**: Use add_memory to store knowledge, recall to search. Check for duplicates before adding.
+- **Tasks**: Use create_task to track work, manage_task to update status. Start tasks before working on them.
+- **Focus**: Use manage_focus to set your active workspace (context pack).
+- **Decisions**: Use create_decision to record architectural choices.
+
+## Best Practices
+- Recall before creating new memories to avoid duplicates.
+- Start tasks (manage_task action=start) before working on them for accurate tracking.
+- Use the 'type' parameter in add_memory for better categorization (general, decision, bug_fix, preference, pattern, reference, skill).
+- Context packs bundle related memories and tasks into workspaces.
+- All data is scoped to the active organization.`,
+		},
 	)
 
 	// Register all tools
@@ -80,6 +100,22 @@ func formatMCPResponse(data interface{}, contextInfo string) map[string]interfac
 	// Add context metadata to help agents understand where they are
 	if contextInfo != "" {
 		wrapped["_context"] = contextInfo
+	}
+
+	return wrapped
+}
+
+// formatPaginatedResponse wraps data with pagination metadata
+func formatPaginatedResponse(data interface{}, nextCursor string, total int, contextInfo string) map[string]interface{} {
+	wrapped := wrapResultAsObject(data)
+
+	if contextInfo != "" {
+		wrapped["_context"] = contextInfo
+	}
+
+	wrapped["total"] = total
+	if nextCursor != "" {
+		wrapped["nextCursor"] = nextCursor
 	}
 
 	return wrapped

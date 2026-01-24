@@ -190,8 +190,12 @@ func (c *Client) CreateProject(name, description string) (*models.Project, error
 	return &project, nil
 }
 
-func (c *Client) ListProjects() ([]models.Project, error) {
-	respBody, err := c.makeRequest("GET", "/projects", nil)
+func (c *Client) ListProjects(orgID ...string) ([]models.Project, error) {
+	endpoint := "/projects"
+	if len(orgID) > 0 && orgID[0] != "" {
+		endpoint += "?organization_id=" + orgID[0]
+	}
+	respBody, err := c.makeRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}

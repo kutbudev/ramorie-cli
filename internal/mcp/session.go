@@ -105,6 +105,16 @@ func GetSessionContext() string {
 	return context
 }
 
+// GetSessionActiveOrgID returns the active organization ID from the current session
+func GetSessionActiveOrgID() *uuid.UUID {
+	sessionManager.mu.RLock()
+	defer sessionManager.mu.RUnlock()
+	if sessionManager.currentSession != nil {
+		return sessionManager.currentSession.ActiveOrgID
+	}
+	return nil
+}
+
 // ResetSession clears the current session (useful for testing)
 func ResetSession() {
 	sessionManager.mu.Lock()

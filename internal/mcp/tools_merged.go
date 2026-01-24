@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -487,21 +488,25 @@ func handleManagePlan(ctx context.Context, req *mcp.CallToolRequest, input Manag
 
 	switch action {
 	case "create":
+		// Extract progress token before req is shadowed by API request
+		progressToken := req.Params.GetProgressToken()
+		session := req.Session
+
 		requirements := strings.TrimSpace(input.Requirements)
 		if requirements == "" {
 			return nil, nil, errors.New("requirements is required for create action")
 		}
-		req := api.CreatePlanRequest{
+		apiReq := api.CreatePlanRequest{
 			Requirements: requirements,
 		}
 		if t := strings.TrimSpace(input.Title); t != "" {
-			req.Title = t
+			apiReq.Title = t
 		}
 		if t := strings.TrimSpace(input.Type); t != "" {
-			req.Type = t
+			apiReq.Type = t
 		}
 		if p := strings.TrimSpace(input.Project); p != "" {
-			req.ProjectID = p
+			apiReq.ProjectID = p
 		}
 		if input.Consensus > 0 || input.BudgetUSD > 0 {
 			cfg := &api.PlanConfiguration{}
@@ -511,12 +516,20 @@ func handleManagePlan(ctx context.Context, req *mcp.CallToolRequest, input Manag
 			if input.BudgetUSD > 0 {
 				cfg.BudgetUSD = input.BudgetUSD
 			}
-			req.Configuration = cfg
+			apiReq.Configuration = cfg
 		}
-		plan, err := apiClient.CreatePlan(req)
+		plan, err := apiClient.CreatePlan(apiReq)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create plan: %w", err)
 		}
+
+		// If client provided a progress token, watch the plan until completion
+		if progressToken != nil && session != nil {
+			if finalPlan := watchPlanProgress(ctx, session, progressToken, plan.ID); finalPlan != nil {
+				plan = finalPlan
+			}
+		}
+
 		return mustTextResult(map[string]interface{}{
 			"ok":      true,
 			"message": "Plan created",
@@ -592,4 +605,116 @@ func handleManagePlan(ctx context.Context, req *mcp.CallToolRequest, input Manag
 	default:
 		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: create, status, list, apply, or cancel", action)
 	}
+}
+
+// watchPlanProgress polls plan status and sends MCP progress notifications.
+// It blocks until the plan reaches a terminal state or times out.
+// Returns the final plan state.
+func watchPlanProgress(ctx context.Context, session *mcp.ServerSession, token any, planID string) *api.Plan {
+	const (
+		pollInterval = 3 * time.Second
+		timeout      = 5 * time.Minute
+	)
+
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	var lastPlan *api.Plan
+	lastStatus := ""
+
+	// Send initial notification
+	_ = session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+		ProgressToken: token,
+		Progress:      0,
+		Total:         100,
+		Message:       "Plan created, starting execution...",
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return lastPlan
+		case <-deadline:
+			return lastPlan
+		case <-ticker.C:
+			plan, err := apiClient.GetPlan(planID)
+			if err != nil {
+				continue // retry on error
+			}
+			lastPlan = plan
+
+			// Send progress notification if status changed
+			if plan.Status != lastStatus {
+				lastStatus = plan.Status
+
+				msg, progress := planStatusMessage(plan)
+
+				_ = session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+					ProgressToken: token,
+					Progress:      progress,
+					Total:         100,
+					Message:       msg,
+				})
+			}
+
+			// Check for terminal states
+			switch plan.Status {
+			case "completed", "failed", "cancelled":
+				return plan
+			}
+		}
+	}
+}
+
+// planStatusMessage returns a human-readable message and progress value for a plan status.
+func planStatusMessage(plan *api.Plan) (string, float64) {
+	progress := float64(plan.Progress)
+
+	// If the backend provides progress, use it; otherwise estimate from status
+	if progress == 0 {
+		switch plan.Status {
+		case "pending":
+			progress = 0
+		case "routing":
+			progress = 10
+		case "discovery":
+			progress = 30
+		case "defining":
+			progress = 50
+		case "developing":
+			progress = 70
+		case "delivering":
+			progress = 90
+		case "completed":
+			progress = 100
+		}
+	}
+
+	var msg string
+	switch plan.Status {
+	case "routing":
+		msg = "Phase 1/5: Routing - Selecting agents..."
+	case "discovery":
+		msg = "Phase 2/5: Discovery - Analyzing requirements..."
+	case "defining":
+		msg = "Phase 3/5: Defining - Creating proposals..."
+	case "developing":
+		msg = "Phase 4/5: Developing - Building consensus..."
+	case "delivering":
+		msg = "Phase 5/5: Delivering - Generating artifacts..."
+	case "completed":
+		msg = "Plan completed successfully"
+	case "failed":
+		msg = "Plan failed"
+		if plan.Error != "" {
+			msg += ": " + plan.Error
+		}
+	case "cancelled":
+		msg = "Plan cancelled"
+	default:
+		msg = fmt.Sprintf("Status: %s", plan.Status)
+	}
+
+	return msg, progress
 }
