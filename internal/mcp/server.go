@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // apiClient holds the API client for tool handlers
@@ -92,6 +93,43 @@ func getContextString() string {
 	}
 
 	return "Personal Workspace (session not initialized)"
+}
+
+// textResult converts any data to a CallToolResult with JSON TextContent.
+// This ensures data goes into Content (not StructuredContent), which is
+// compatible with both Claude Code and Claude Desktop.
+func textResult(data interface{}) (*mcp.CallToolResult, error) {
+	if data == nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "{}"},
+			},
+		}, nil
+	}
+	jsonBytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal response: %w", err)
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: string(jsonBytes)},
+		},
+	}, nil
+}
+
+// mustTextResult is like textResult but returns an error result instead of failing.
+// Use this in handler return statements for concise one-liner conversions.
+func mustTextResult(data interface{}) *mcp.CallToolResult {
+	res, err := textResult(data)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf(`{"error": "%s"}`, err.Error())},
+			},
+			IsError: true,
+		}
+	}
+	return res
 }
 
 // checkSessionInit checks if session is initialized and returns error if not

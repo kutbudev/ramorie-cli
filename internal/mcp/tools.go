@@ -32,11 +32,11 @@ func decryptMemoryContent(m *models.Memory) string {
 		return m.Content
 	}
 
-	if !crypto.IsVaultUnlocked() {
-		return "[Vault Locked - Unlock to view]"
-	}
-
-	plaintext, err := crypto.DecryptContent(m.EncryptedContent, m.ContentNonce, true)
+	// Use scope-aware decryption
+	plaintext, err := crypto.DecryptContentWithScope(
+		m.EncryptedContent, m.ContentNonce,
+		m.EncryptionScope, m.EncryptionOrgID, true,
+	)
 	if err != nil {
 		return "[Decryption Failed]"
 	}
@@ -51,22 +51,12 @@ func decryptTaskFields(t *models.Task) (title, description string) {
 		return t.Title, t.Description
 	}
 
-	// Check if vault is unlocked
-	if !crypto.IsVaultUnlocked() {
-		title = "[Vault Locked - Unlock to view]"
-		description = "[Vault Locked - Unlock to view]"
-		if t.Title != "" && t.Title != "[Encrypted]" {
-			title = t.Title
-		}
-		if t.Description != "" && t.Description != "[Encrypted]" {
-			description = t.Description
-		}
-		return title, description
-	}
-
-	// Decrypt title
+	// Decrypt title using scope-aware decryption
 	if t.EncryptedTitle != "" {
-		decrypted, err := crypto.DecryptContent(t.EncryptedTitle, t.TitleNonce, true)
+		decrypted, err := crypto.DecryptContentWithScope(
+			t.EncryptedTitle, t.TitleNonce,
+			t.EncryptionScope, t.EncryptionOrgID, true,
+		)
 		if err != nil {
 			title = "[Decryption Failed]"
 		} else {
@@ -76,9 +66,12 @@ func decryptTaskFields(t *models.Task) (title, description string) {
 		title = t.Title
 	}
 
-	// Decrypt description
+	// Decrypt description using scope-aware decryption
 	if t.EncryptedDescription != "" {
-		decrypted, err := crypto.DecryptContent(t.EncryptedDescription, t.DescriptionNonce, true)
+		decrypted, err := crypto.DecryptContentWithScope(
+			t.EncryptedDescription, t.DescriptionNonce,
+			t.EncryptionScope, t.EncryptionOrgID, true,
+		)
 		if err != nil {
 			description = "[Decryption Failed]"
 		} else {
@@ -91,360 +84,148 @@ func decryptTaskFields(t *models.Task) (title, description string) {
 	return title, description
 }
 
-// ToolInput is a generic input struct for tools that use map[string]interface{}
-type ToolInput struct {
-	Args map[string]interface{} `json:"-"`
-}
-
 // registerTools registers all MCP tools with the server using go-sdk
 // The SDK automatically infers InputSchema from the handler's input struct type
+// v3: Simplified from 61 tools to 26 tools via removal and consolidation
 func registerTools(server *mcp.Server) {
 	// ============================================================================
-	// 🔴 ESSENTIAL - Agent Onboarding
+	// 🔴 ESSENTIAL (7 tools)
 	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_ramorie_info",
-		Description: "🔴 ESSENTIAL | 🧠 CALL THIS FIRST! Get comprehensive information about Ramorie - what it is, how to use it, and agent guidelines.",
-	}, handleGetRamorieInfo)
-
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "setup_agent",
-		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
+		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, agent_directives, and system info.",
 	}, handleSetupAgent)
 
-	// ============================================================================
-	// 🔴 ESSENTIAL - Project Management
-	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_projects",
-		Description: "🔴 ESSENTIAL | List all projects. Check this to see available projects and which one is active.",
+		Description: "🔴 ESSENTIAL | List all projects.",
 	}, handleListProjects)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_project",
-		Description: "🟢 ADVANCED | Create a new project. ⚠️ Auto-checks for duplicates - returns similar projects if found. Use force=true to bypass.",
-	}, handleCreateProject)
-
-	// ============================================================================
-	// 🔴 ESSENTIAL - Task Management
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "🔴 ESSENTIAL | List tasks with filtering. REQUIRED: project parameter. 💡 Call before create_task to check for duplicates.",
+		Description: "🔴 ESSENTIAL | List, search, or get prioritized tasks. REQUIRED: project. Optional: status, query (keyword search), next_priority (bool, returns top TODO tasks sorted by priority), limit.",
 	}, handleListTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_task",
-		Description: "🔴 ESSENTIAL | Create a new task. REQUIRED: project, description parameters. ⚠️ Always check list_tasks first to avoid duplicates!",
+		Description: "🔴 ESSENTIAL | Create a new task. REQUIRED: project, description. Optional: priority (L/M/H).",
 	}, handleCreateTask)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_task",
-		Description: "🔴 ESSENTIAL | Get task details including notes and metadata.",
-	}, handleGetTask)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "start_task",
-		Description: "🔴 ESSENTIAL | Start working on a task. Sets status to IN_PROGRESS and enables memory auto-linking.",
-	}, handleStartTask)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "complete_task",
-		Description: "🔴 ESSENTIAL | Mark task as completed. Use when work is finished.",
-	}, handleCompleteTask)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "stop_task",
-		Description: "🟢 ADVANCED | Pause a task. Clears active task, keeps IN_PROGRESS status.",
-	}, handleStopTask)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "move_task",
-		Description: "🟡 COMMON | Move a task to a different project. Use this to fix tasks created in the wrong location.",
-	}, handleMoveTask)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_next_tasks",
-		Description: "🔴 ESSENTIAL | Get prioritized TODO tasks. REQUIRED: project parameter. 💡 Use at session start to see what needs attention.",
-	}, handleGetNextTasks)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "add_task_note",
-		Description: "🟡 COMMON | Add a note/annotation to a task. Use for progress updates or context.",
-	}, handleAddTaskNote)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update_progress",
-		Description: "🟡 COMMON | Update task progress percentage (0-100).",
-	}, handleUpdateProgress)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "search_tasks",
-		Description: "🟡 COMMON | Search tasks by keyword. Use to find specific tasks.",
-	}, handleSearchTasks)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_active_task",
-		Description: "🟡 COMMON | Get the currently active task. Memories auto-link to this task.",
-	}, handleGetActiveTask)
-
-	// ============================================================================
-	// 🔴 ESSENTIAL - Memory Management
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store important information to knowledge base. REQUIRED: project, content parameters. Optional: type (general, decision, bug_fix, preference, pattern, reference - auto-detected if not provided). Auto-checks for similar memories - use force=true to bypass.",
+		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (general, decision, bug_fix, preference, pattern, reference, skill - use 'skill' for procedural knowledge: reusable procedures, workflows, and step-by-step patterns), force (bypass similarity check).",
 	}, handleAddMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "recall",
+		Description: "🔴 ESSENTIAL | Search memories. REQUIRED: term. Supports OR (space-separated) and AND (comma-separated) search. Optional: project, tag, type (filter by type e.g. 'skill' for learned procedures), min_score, limit.",
+	}, handleRecall)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "manage_focus",
+		Description: "🔴 ESSENTIAL | Get, set, or clear active workspace focus. No params = get current focus. With pack_id = set focus. With clear=true = clear focus.",
+	}, handleManageFocus)
+
+	// ============================================================================
+	// 🟡 COMMON (12 tools)
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_task",
+		Description: "🟡 COMMON | Get full task details including notes and metadata. REQUIRED: taskId.",
+	}, handleGetTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "manage_task",
+		Description: "🟡 COMMON | Start, complete, or update task progress. REQUIRED: taskId, action (start|complete|progress). For progress action: also requires progress (0-100).",
+	}, handleManageTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "add_task_note",
+		Description: "🟡 COMMON | Add a note to a task. REQUIRED: taskId, note.",
+	}, handleAddTaskNote)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_memories",
-		Description: "🔴 ESSENTIAL | List memories with filtering. REQUIRED: project parameter.",
+		Description: "🟡 COMMON | List memories with filtering. REQUIRED: project. Optional: term, limit.",
 	}, handleListMemories)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_memory",
-		Description: "🟡 COMMON | Get memory details by ID.",
+		Description: "🟡 COMMON | Get memory details by ID. REQUIRED: memoryId.",
 	}, handleGetMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "recall",
-		Description: "🟡 COMMON | Advanced memory search with multi-word support, filters, and relations. Supports: OR search (space-separated), AND search (comma-separated), project/tag/type filtering.",
-	}, handleRecall)
-
-	// ============================================================================
-	// 🔴 ESSENTIAL - Focus Management
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_focus",
-		Description: "🔴 ESSENTIAL | Get user's current focus (active workspace). Returns the active context pack and its details.",
-	}, handleGetFocus)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "set_focus",
-		Description: "🔴 ESSENTIAL | Set user's active focus (workspace). Switch to a different context pack.",
-	}, handleSetFocus)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "clear_focus",
-		Description: "🔴 ESSENTIAL | Clear user's active focus. Deactivates the current context pack.",
-	}, handleClearFocus)
-
-	// ============================================================================
-	// 🟡 COMMON - Context Pack Management
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_context_packs",
-		Description: "🟡 COMMON | List all context packs with optional filtering by type and status.",
+		Description: "🟡 COMMON | List context packs. Optional: type, status, query, limit.",
 	}, handleListContextPacks)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_context_pack",
-		Description: "🟡 COMMON | Create a new context pack. Use to bundle related contexts, memories, and tasks.",
-	}, handleCreateContextPack)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_context_pack",
-		Description: "🟡 COMMON | Get detailed context pack info including linked memories, tasks, and contexts.",
+		Description: "🟡 COMMON | Get context pack details with linked memories, tasks, and contexts. REQUIRED: packId.",
 	}, handleGetContextPack)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update_context_pack",
-		Description: "🟡 COMMON | Update a context pack's name, description, type, or status.",
-	}, handleUpdateContextPack)
+		Name:        "manage_context_pack",
+		Description: "🟡 COMMON | Create, update, or link items to a context pack. REQUIRED: action (create|update|add_memory|add_task). For create: name, type required. For update: packId required. For add_memory/add_task: packId and memoryId/taskId required.",
+	}, handleManageContextPack)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "delete_context_pack",
-		Description: "🟢 ADVANCED | Delete a context pack. ⚠️ Requires explicit user approval.",
-	}, handleDeleteContextPack)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "add_memory_to_pack",
-		Description: "🟡 COMMON | Add an existing memory to a context pack.",
-	}, handleAddMemoryToPack)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "add_task_to_pack",
-		Description: "🟡 COMMON | Add an existing task to a context pack.",
-	}, handleAddTaskToPack)
-
-	// ============================================================================
-	// 🟡 COMMON - Decisions (ADRs)
-	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
-		Description: "🟡 COMMON | Record an architectural decision (ADR). ⚠️ Agent creates DRAFTS only - user must approve. Use for important technical choices.",
+		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title. Optional: description, status, area, context, consequences.",
 	}, handleCreateDecision)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_decisions",
-		Description: "🟡 COMMON | List architectural decisions. Review past decisions before making new ones.",
+		Description: "🟡 COMMON | List architectural decisions. Optional: status, area, limit.",
 	}, handleListDecisions)
 
-	// ============================================================================
-	// 🟡 COMMON - AI Features
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ai_next_step",
-		Description: "🟡 COMMON | Get AI-suggested next actionable step for a task based on project context.",
-	}, handleAINextStep)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ai_estimate_time",
-		Description: "🟡 COMMON | Get AI-estimated time to complete a task.",
-	}, handleAIEstimateTime)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ai_analyze_risks",
-		Description: "🟡 COMMON | Get AI analysis of potential risks and blockers for a task.",
-	}, handleAIAnalyzeRisks)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ai_find_dependencies",
-		Description: "🟡 COMMON | Get AI-identified dependencies and prerequisites for a task.",
-	}, handleAIFindDependencies)
-
-	// ============================================================================
-	// 🟡 COMMON - Task Dependencies
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "add_task_dependency",
-		Description: "🟡 COMMON | Add a dependency between tasks. The task_id depends on depends_on_id (depends_on_id must be completed first). Prevents circular dependencies.",
-	}, handleAddTaskDependency)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_task_dependencies",
-		Description: "🟡 COMMON | Get all tasks that a task depends on (prerequisites that must be completed first).",
-	}, handleGetTaskDependencies)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_task_dependents",
-		Description: "🟡 COMMON | Get all tasks that depend on a task (tasks blocked by this one).",
-	}, handleGetTaskDependents)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "remove_task_dependency",
-		Description: "🟡 COMMON | Remove a dependency between two tasks.",
-	}, handleRemoveTaskDependency)
-
-	// ============================================================================
-	// 🟡 COMMON - Subtasks
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_subtask",
-		Description: "🟡 COMMON | Create a subtask under a parent task. Break down complex tasks into smaller, manageable steps.",
-	}, handleCreateSubtask)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_subtasks",
-		Description: "🟡 COMMON | Get all subtasks for a task. Shows the breakdown of a task into smaller steps.",
-	}, handleGetSubtasks)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "complete_subtask",
-		Description: "🟡 COMMON | Mark a subtask as completed.",
-	}, handleCompleteSubtask)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update_subtask",
-		Description: "🟡 COMMON | Update a subtask's description, status, or priority.",
-	}, handleUpdateSubtask)
-
-	// ============================================================================
-	// 🟡 COMMON - Agent Activity Timeline
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_agent_activity",
-		Description: "🟡 COMMON | Get recent agent activity timeline. Filter by project, agent_name, or event_type (memory_created, task_created, task_updated, etc.).",
-	}, handleGetAgentActivity)
-
-	// ============================================================================
-	// 🟡 COMMON - Organizations
-	// ============================================================================
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_organizations",
-		Description: "🟡 COMMON | List user's organizations.",
-	}, handleListOrganizations)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_organization",
-		Description: "🟡 COMMON | Get organization details.",
-	}, handleGetOrganization)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_organization",
-		Description: "🟢 ADVANCED | Create new organization.",
-	}, handleCreateOrganization)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update_organization",
-		Description: "🟢 ADVANCED | Update organization.",
-	}, handleUpdateOrganization)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_organization_members",
-		Description: "🟡 COMMON | List organization members.",
-	}, handleGetOrganizationMembers)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "invite_to_organization",
-		Description: "🟢 ADVANCED | Invite member to organization by email.",
-	}, handleInviteToOrganization)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "switch_organization",
-		Description: "🟡 COMMON | Switch active organization context.",
-	}, handleSwitchOrganization)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_active_organization",
-		Description: "🔴 ESSENTIAL | Get current active organization.",
-	}, handleGetActiveOrganization)
-
-	// ============================================================================
-	// 🟡 COMMON - Reports
-	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_stats",
-		Description: "🟡 COMMON | Get task statistics and completion rates. REQUIRED: project parameter.",
+		Description: "🟡 COMMON | Get task statistics and completion rates. REQUIRED: project.",
 	}, handleGetStats)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "export_project",
-		Description: "🟢 ADVANCED | Export project report in markdown format.",
-	}, handleExportProject)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_cursor_rules",
-		Description: "🟢 ADVANCED | Get Cursor IDE rules for Ramorie. Returns markdown for .cursorrules file.",
-	}, handleGetCursorRules)
+		Name:        "get_agent_activity",
+		Description: "🟡 COMMON | Get recent agent activity timeline. Optional: project, agent_name, event_type, limit.",
+	}, handleGetAgentActivity)
 
 	// ============================================================================
-	// 🟡 COMMON - Planning (Multi-Agent AI Planning)
+	// 🟢 ADVANCED (7 tools)
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_plan",
-		Description: "🟡 COMMON | Create a new multi-agent planning run. REQUIRED: requirements (goal). Returns plan ID for tracking.",
-	}, handleCreatePlan)
+		Name:        "create_project",
+		Description: "🟢 ADVANCED | Create a new project. REQUIRED: name, description. Optional: force (bypass duplicate check), org_id.",
+	}, handleCreateProject)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_plan_status",
-		Description: "🟡 COMMON | Get current status and progress of a plan. REQUIRED: plan_id.",
-	}, handleGetPlanStatus)
+		Name:        "move_task",
+		Description: "🟢 ADVANCED | Move a task to a different project. REQUIRED: taskId, projectId.",
+	}, handleMoveTask)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_plans",
-		Description: "🟡 COMMON | List recent plans. Optional: status, type, project filters.",
-	}, handleListPlans)
+		Name:        "manage_subtasks",
+		Description: "🟢 ADVANCED | CRUD for subtasks. REQUIRED: action (create|list|complete|update), task_id. For create: description required. For complete/update: subtask_id required.",
+	}, handleManageSubtasks)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "apply_plan",
-		Description: "🟡 COMMON | Apply completed plan results - creates tasks and/or ADRs. REQUIRED: plan_id.",
-	}, handleApplyPlan)
+		Name:        "manage_dependencies",
+		Description: "🟢 ADVANCED | Manage task dependencies. REQUIRED: action (add|list|remove), task_id. For add/remove: depends_on_id required. For list: direction (deps|dependents, default: deps).",
+	}, handleManageDependencies)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "cancel_plan",
-		Description: "🟡 COMMON | Cancel a running plan. REQUIRED: plan_id.",
-	}, handleCancelPlan)
+		Name:        "manage_plan",
+		Description: "🟢 ADVANCED | Multi-agent planning. REQUIRED: action (create|status|list|apply|cancel). For create: requirements required. For status/apply/cancel: plan_id required.",
+	}, handleManagePlan)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_organizations",
+		Description: "🟢 ADVANCED | List user's organizations.",
+	}, handleListOrganizations)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "switch_organization",
+		Description: "🟢 ADVANCED | Switch active organization. REQUIRED: orgId.",
+	}, handleSwitchOrganization)
 }
 
 // ============================================================================
@@ -452,15 +233,7 @@ func registerTools(server *mcp.Server) {
 // ============================================================================
 
 type EmptyInput struct{}
-type EmptyOutput struct{}
 
-type TextOutput struct {
-	Text string `json:"text"`
-}
-
-func handleGetRamorieInfo(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	return nil, getRamorieInfo(), nil
-}
 
 type SetupAgentInput struct {
 	AgentName  string `json:"agent_name,omitempty"`
@@ -506,7 +279,7 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	// Add agent directives for proactive behavior
 	result["agent_directives"] = GetDirectivesAsMap()
 
-	return nil, result, nil
+	return mustTextResult(result), nil, nil
 }
 
 func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
@@ -515,7 +288,7 @@ func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input Emp
 		return nil, nil, err
 	}
 	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(projects, getContextString()), nil
+	return mustTextResult(formatMCPResponse(projects, getContextString())), nil, nil
 }
 
 type CreateProjectInput struct {
@@ -537,12 +310,12 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 		if err == nil && suggestions != nil {
 			// If exact match exists, don't create duplicate
 			if suggestions.ExactMatch != nil {
-				return nil, map[string]interface{}{
+				return mustTextResult(map[string]interface{}{
 					"status":        "exists",
 					"exact_match":   suggestions.ExactMatch,
 					"_message":      "✅ Project already exists with this name. Use existing project instead of creating a duplicate.",
 					"_action":       "Specify this project name in your create_task/add_memory calls.",
-				}, nil
+				}), nil, nil
 			}
 
 			// If similar projects found (>60% similarity), warn and require confirmation
@@ -561,13 +334,13 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 				}
 
 				if len(similarList) > 0 {
-					return nil, map[string]interface{}{
+					return mustTextResult(map[string]interface{}{
 						"status":           "needs_confirmation",
 						"similar_projects": similarList,
 						"requested_name":   name,
 						"_message":         "⚠️ Similar projects found. To avoid duplicates:\n1. Use an existing project from the list above, OR\n2. Call create_project with force=true to create anyway",
 						"_action":          "Either specify 'project' parameter with an existing project name, or call create_project(name=\"...\", force=true)",
-					}, nil
+					}), nil, nil
 				}
 			}
 		}
@@ -579,33 +352,71 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, map[string]interface{}{
+	return mustTextResult(map[string]interface{}{
 		"project":  project,
 		"_message": "✅ Project created successfully: " + project.Name,
-	}, nil
+	}), nil, nil
 }
 
 type ListTasksInput struct {
-	Status  string  `json:"status,omitempty"`
-	Project string  `json:"project"` // REQUIRED - project name or ID
-	Limit   float64 `json:"limit,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	Project      string  `json:"project"`                 // REQUIRED - project name or ID
+	Query        string  `json:"query,omitempty"`          // Optional keyword search
+	NextPriority bool    `json:"next_priority,omitempty"`  // If true, return top TODO tasks by priority
+	Limit        float64 `json:"limit,omitempty"`
 }
 
 func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
 	// REQUIRED: project parameter must be specified
 	if strings.TrimSpace(input.Project) == "" {
-		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project to list tasks from.\n\nUse list_projects to see available projects.\nExample: list_tasks(project=\"my-project\")")
+		return nil, nil, errors.New("'project' parameter is REQUIRED. Use list_projects to see available projects.")
 	}
 
 	projectID, err := resolveProjectID(apiClient, input.Project)
 	if err != nil {
 		return nil, nil, err
 	}
-	tasks, err := apiClient.ListTasks(projectID, strings.TrimSpace(input.Status))
-	if err != nil {
-		return nil, nil, err
+
+	// Determine which query mode to use
+	query := strings.TrimSpace(input.Query)
+	status := strings.TrimSpace(input.Status)
+
+	var tasks []models.Task
+	if input.NextPriority {
+		// Priority mode: get TODO tasks sorted by priority
+		if status == "" {
+			status = "TODO"
+		}
+		tasks, err = apiClient.ListTasksQuery(projectID, status, query, nil, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		sort.Slice(tasks, func(i, j int) bool {
+			pi := priorityRank(tasks[i].Priority)
+			pj := priorityRank(tasks[j].Priority)
+			if pi != pj {
+				return pi > pj
+			}
+			return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
+		})
+	} else if query != "" {
+		// Search mode: keyword search across tasks
+		tasks, err = apiClient.ListTasksQuery(projectID, status, query, nil, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		// Standard list mode
+		tasks, err = apiClient.ListTasks(projectID, status)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
+
 	limit := int(input.Limit)
+	if input.NextPriority && limit <= 0 {
+		limit = 5 // Default limit for priority mode
+	}
 	if limit > 0 && limit < len(tasks) {
 		tasks = tasks[:limit]
 	}
@@ -638,14 +449,14 @@ func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTa
 		decryptedTasks = append(decryptedTasks, taskMap)
 	}
 
-	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(decryptedTasks, getContextString()), nil
+	return mustTextResult(formatMCPResponse(decryptedTasks, getContextString())), nil, nil
 }
 
 type CreateTaskInput struct {
-	Description string `json:"description"`
-	Priority    string `json:"priority,omitempty"`
-	Project     string `json:"project"` // REQUIRED - project name or ID
+	Description     string `json:"description"`
+	Priority        string `json:"priority,omitempty"`
+	Project         string `json:"project"`                    // REQUIRED - project name or ID
+	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
 }
 
 func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
@@ -665,7 +476,7 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 	}
 
 	priority := normalizePriority(input.Priority)
-	projectID, err := resolveProjectID(apiClient, input.Project)
+	projectID, orgID, err := resolveProjectWithOrg(apiClient, input.Project)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -682,38 +493,78 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 		}
 	}
 
+	// Determine encryption scope
+	scope := strings.TrimSpace(input.EncryptionScope)
+	if scope == "" {
+		// Auto-detect: use org encryption if org vault is unlocked
+		scope = determineEncryptionScope(orgID)
+	}
+
 	// Check if user has encryption enabled and vault is unlocked
 	cfg, _ := config.LoadConfig()
 	if cfg != nil && cfg.EncryptionEnabled {
-		if !crypto.IsVaultUnlocked() {
-			return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
-				"To unlock, the user must run:\n" +
-				"  ramorie setup unlock\n\n" +
-				"This only needs to be done once per session (until computer restarts).\n" +
-				"Please inform the user to unlock their vault.")
-		}
+		if scope == "organization" && orgID != "" {
+			// Organization-scoped encryption
+			if !crypto.IsOrgVaultUnlocked(orgID) {
+				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
+					"To unlock, the user must run:\n" +
+					"  ramorie org unlock " + orgID[:8] + "\n\n" +
+					"This only needs to be done once per session.\n" +
+					"Please inform the user to unlock their org vault.")
+			}
 
-		// Encrypt task description with vault key
-		encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(description)
-		if err != nil {
-			return nil, nil, fmt.Errorf("encryption failed: %w", err)
-		}
-
-		if isEncrypted {
-			// Use encrypted task creation with agent metadata
-			task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, priority, meta)
+			encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContentWithScope(description, "organization", orgID)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("encryption failed: %w", err)
 			}
 
-			result := formatMCPResponse(task, getContextString())
-			result["_created_in_project"] = projectID
-			result["_encrypted"] = true
-			if session != nil {
-				result["_created_by_agent"] = session.AgentName
+			if isEncrypted {
+				task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, priority, meta)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				result := formatMCPResponse(task, getContextString())
+				result["_created_in_project"] = projectID
+				result["_encrypted"] = true
+				result["_encryption_scope"] = "organization"
+				if session != nil {
+					result["_created_by_agent"] = session.AgentName
+				}
+				result["_message"] = "✅ Task created (org-encrypted) in project " + projectID[:8] + "..."
+				return mustTextResult(result), nil, nil
 			}
-			result["_message"] = "✅ Task created (encrypted) in project " + projectID[:8] + "..."
-			return nil, result, nil
+		} else {
+			// Personal-scoped encryption
+			if !crypto.IsVaultUnlocked() {
+				return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
+					"To unlock, the user must run:\n" +
+					"  ramorie setup unlock\n\n" +
+					"This only needs to be done once per session (until computer restarts).\n" +
+					"Please inform the user to unlock their vault.")
+			}
+
+			encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(description)
+			if err != nil {
+				return nil, nil, fmt.Errorf("encryption failed: %w", err)
+			}
+
+			if isEncrypted {
+				task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, priority, meta)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				result := formatMCPResponse(task, getContextString())
+				result["_created_in_project"] = projectID
+				result["_encrypted"] = true
+				result["_encryption_scope"] = "personal"
+				if session != nil {
+					result["_created_by_agent"] = session.AgentName
+				}
+				result["_message"] = "✅ Task created (encrypted) in project " + projectID[:8] + "..."
+				return mustTextResult(result), nil, nil
+			}
 		}
 	}
 
@@ -731,7 +582,7 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 	}
 	result["_message"] = "✅ Task created successfully in project " + projectID[:8] + "..."
 
-	return nil, result, nil
+	return mustTextResult(result), nil, nil
 }
 
 type TaskIDInput struct {
@@ -772,30 +623,9 @@ func handleGetTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDIn
 		result["annotations"] = task.Annotations
 	}
 
-	return nil, result, nil
+	return mustTextResult(result), nil, nil
 }
 
-func handleStartTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	if err := apiClient.StartTask(taskID); err != nil {
-		return nil, nil, err
-	}
-	return nil, map[string]interface{}{"ok": true, "message": "Task started. Memories will now auto-link to this task."}, nil
-}
-
-func handleCompleteTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	if err := apiClient.CompleteTask(taskID); err != nil {
-		return nil, nil, err
-	}
-	return nil, map[string]interface{}{"ok": true}, nil
-}
 
 type MoveTaskInput struct {
 	TaskID    string `json:"taskId"`
@@ -836,58 +666,9 @@ func handleMoveTask(ctx context.Context, req *mcp.CallToolRequest, input MoveTas
 	result["_moved_to_project"] = projectID
 	result["_message"] = "✅ Task moved successfully to project " + projectID[:8] + "..."
 
-	return nil, result, nil
+	return mustTextResult(result), nil, nil
 }
 
-func handleStopTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	if err := apiClient.StopTask(taskID); err != nil {
-		return nil, nil, err
-	}
-	return nil, map[string]interface{}{"ok": true}, nil
-}
-
-type GetNextTasksInput struct {
-	Count   float64 `json:"count,omitempty"`
-	Project string  `json:"project"` // REQUIRED - project name or ID
-}
-
-func handleGetNextTasks(ctx context.Context, req *mcp.CallToolRequest, input GetNextTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	// REQUIRED: project parameter must be specified
-	if strings.TrimSpace(input.Project) == "" {
-		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project to get next tasks from.\n\nUse list_projects to see available projects.\nExample: get_next_tasks(project=\"my-project\")")
-	}
-
-	count := int(input.Count)
-	if count <= 0 {
-		count = 5
-	}
-
-	projectID, err := resolveProjectID(apiClient, input.Project)
-	if err != nil {
-		return nil, nil, err
-	}
-	tasks, err := apiClient.ListTasksQuery(projectID, "TODO", "", nil, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	sort.Slice(tasks, func(i, j int) bool {
-		pi := priorityRank(tasks[i].Priority)
-		pj := priorityRank(tasks[j].Priority)
-		if pi != pj {
-			return pi > pj
-		}
-		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
-	})
-	if count < len(tasks) {
-		tasks = tasks[:count]
-	}
-	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(tasks, getContextString()), nil
-}
 
 type AddTaskNoteInput struct {
 	TaskID string `json:"taskId"`
@@ -923,7 +704,7 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 			if err != nil {
 				return nil, nil, err
 			}
-			return nil, annotation, nil
+			return mustTextResult(annotation), nil, nil
 		}
 	}
 
@@ -931,75 +712,15 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, annotation, nil
-}
-
-type UpdateProgressInput struct {
-	TaskID   string  `json:"taskId"`
-	Progress float64 `json:"progress"`
-}
-
-func handleUpdateProgress(ctx context.Context, req *mcp.CallToolRequest, input UpdateProgressInput) (*mcp.CallToolResult, interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	progress := int(input.Progress)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	if progress < 0 || progress > 100 {
-		return nil, nil, errors.New("progress must be between 0 and 100")
-	}
-	result, err := apiClient.UpdateTask(taskID, map[string]interface{}{"progress": progress})
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
-
-type SearchTasksInput struct {
-	Query   string  `json:"query"`
-	Status  string  `json:"status,omitempty"`
-	Project string  `json:"project,omitempty"`
-	Limit   float64 `json:"limit,omitempty"`
-}
-
-func handleSearchTasks(ctx context.Context, req *mcp.CallToolRequest, input SearchTasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	query := strings.TrimSpace(input.Query)
-	if query == "" {
-		return nil, nil, errors.New("query is required")
-	}
-	projectID := ""
-	if strings.TrimSpace(input.Project) != "" {
-		pid, err := resolveProjectID(apiClient, input.Project)
-		if err != nil {
-			return nil, nil, err
-		}
-		projectID = pid
-	}
-	tasks, err := apiClient.ListTasksQuery(projectID, strings.TrimSpace(input.Status), query, nil, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	limit := int(input.Limit)
-	if limit > 0 && limit < len(tasks) {
-		tasks = tasks[:limit]
-	}
-	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(tasks, getContextString()), nil
-}
-
-func handleGetActiveTask(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
-	task, err := apiClient.GetActiveTask()
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, task, nil
+	return mustTextResult(annotation), nil, nil
 }
 
 type AddMemoryInput struct {
-	Content string `json:"content"`
-	Project string `json:"project"`         // REQUIRED - project name or ID
-	Type    string `json:"type,omitempty"`  // Memory type: general, decision, bug_fix, preference, pattern, reference (auto-detected if not provided)
-	Force   bool   `json:"force,omitempty"` // Skip similarity check and force creation
+	Content         string `json:"content"`
+	Project         string `json:"project"`                    // REQUIRED - project name or ID
+	Type            string `json:"type,omitempty"`             // Memory type: general, decision, bug_fix, preference, pattern, reference (auto-detected if not provided)
+	Force           bool   `json:"force,omitempty"`            // Skip similarity check and force creation
+	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
 }
 
 func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, map[string]interface{}, error) {
@@ -1018,7 +739,7 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this memory belongs to.\n\nUse list_projects to see available projects.\nExample: add_memory(content=\"...\", project=\"my-project\")")
 	}
 
-	projectID, err := resolveProjectID(apiClient, input.Project)
+	projectID, orgID, err := resolveProjectWithOrg(apiClient, input.Project)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1040,40 +761,76 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 					"threshold":        SimilarityThreshold,
 					"_context":         getContextString(),
 				}
-				return nil, result, nil
+				return mustTextResult(result), nil, nil
 			}
 		}
+	}
+
+	// Determine encryption scope
+	scope := strings.TrimSpace(input.EncryptionScope)
+	if scope == "" {
+		scope = determineEncryptionScope(orgID)
 	}
 
 	// Check if user has encryption enabled and vault is unlocked
 	cfg, _ := config.LoadConfig()
 	if cfg != nil && cfg.EncryptionEnabled {
-		if !crypto.IsVaultUnlocked() {
-			return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
-				"To unlock, the user must run:\n" +
-				"  ramorie setup unlock\n\n" +
-				"This only needs to be done once per session (until computer restarts).\n" +
-				"Please inform the user to unlock their vault.")
-		}
-
-		// Encrypt memory content with vault key
-		encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
-		if err != nil {
-			return nil, nil, fmt.Errorf("encryption failed: %w", err)
-		}
-
-		if isEncrypted {
-			// Use encrypted memory creation
-			memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
-			if err != nil {
-				return nil, nil, err
+		if scope == "organization" && orgID != "" {
+			// Organization-scoped encryption
+			if !crypto.IsOrgVaultUnlocked(orgID) {
+				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
+					"To unlock, the user must run:\n" +
+					"  ramorie org unlock " + orgID[:8] + "\n\n" +
+					"This only needs to be done once per session.\n" +
+					"Please inform the user to unlock their org vault.")
 			}
 
-			result := formatMCPResponse(memory, getContextString())
-			result["_created_in_project"] = projectID
-			result["_encrypted"] = true
-			result["_message"] = "✅ Memory created (encrypted) in project " + projectID[:8] + "..."
-			return nil, result, nil
+			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContentWithScope(content, "organization", orgID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("encryption failed: %w", err)
+			}
+
+			if isEncrypted {
+				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				result := formatMCPResponse(memory, getContextString())
+				result["_created_in_project"] = projectID
+				result["_encrypted"] = true
+				result["_encryption_scope"] = "organization"
+				result["_message"] = "✅ Memory created (org-encrypted) in project " + projectID[:8] + "..."
+				return mustTextResult(result), nil, nil
+			}
+		} else {
+			// Personal-scoped encryption
+			if !crypto.IsVaultUnlocked() {
+				return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
+					"To unlock, the user must run:\n" +
+					"  ramorie setup unlock\n\n" +
+					"This only needs to be done once per session (until computer restarts).\n" +
+					"Please inform the user to unlock their vault.")
+			}
+
+			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
+			if err != nil {
+				return nil, nil, fmt.Errorf("encryption failed: %w", err)
+			}
+
+			if isEncrypted {
+				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				result := formatMCPResponse(memory, getContextString())
+				result["_created_in_project"] = projectID
+				result["_encrypted"] = true
+				result["_encryption_scope"] = "personal"
+				result["_message"] = "✅ Memory created (encrypted) in project " + projectID[:8] + "..."
+				return mustTextResult(result), nil, nil
+			}
 		}
 	}
 
@@ -1098,7 +855,7 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 	result["_type_auto_detected"] = input.Type == ""
 	result["_message"] = "✅ Memory created successfully in project " + projectID[:8] + "..."
 
-	return nil, result, nil
+	return mustTextResult(result), nil, nil
 }
 
 type ListMemoriesInput struct {
@@ -1167,7 +924,7 @@ func handleListMemories(ctx context.Context, req *mcp.CallToolRequest, input Lis
 	}
 
 	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(decryptedMemories, getContextString()), nil
+	return mustTextResult(formatMCPResponse(decryptedMemories, getContextString())), nil, nil
 }
 
 type GetMemoryInput struct {
@@ -1205,7 +962,7 @@ func handleGetMemory(ctx context.Context, req *mcp.CallToolRequest, input GetMem
 		}
 	}
 
-	return nil, result, nil
+	return mustTextResult(result), nil, nil
 }
 
 type RecallInput struct {
@@ -1373,80 +1130,13 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		results = append(results, s.memory)
 	}
 
-	return nil, map[string]interface{}{
+	return mustTextResult(map[string]interface{}{
 		"term":        term,
 		"search_mode": map[bool]string{true: "AND", false: "OR"}[isAndSearch],
 		"count":       len(results),
 		"total_found": len(scored),
 		"results":     results,
-	}, nil
-}
-
-func handleGetFocus(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	focus, err := apiClient.GetFocus()
-	if err != nil {
-		return nil, nil, err
-	}
-	if focus.ActivePack == nil {
-		return nil, map[string]interface{}{
-			"active_context_pack_id": nil,
-			"active_pack":            nil,
-			"message":                "No active focus set. Use set_focus to activate a context pack.",
-		}, nil
-	}
-	return nil, map[string]interface{}{
-		"active_context_pack_id": focus.ActiveContextPackID,
-		"active_pack": map[string]interface{}{
-			"id":             focus.ActivePack.ID,
-			"name":           focus.ActivePack.Name,
-			"description":    focus.ActivePack.Description,
-			"type":           focus.ActivePack.Type,
-			"status":         focus.ActivePack.Status,
-			"contexts_count": focus.ActivePack.ContextsCount,
-			"memories_count": focus.ActivePack.MemoriesCount,
-			"tasks_count":    focus.ActivePack.TasksCount,
-			"contexts":       focus.ActivePack.Contexts,
-		},
-	}, nil
-}
-
-type SetFocusInput struct {
-	PackID string `json:"packId"`
-}
-
-func handleSetFocus(ctx context.Context, req *mcp.CallToolRequest, input SetFocusInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	packID := strings.TrimSpace(input.PackID)
-	if packID == "" {
-		return nil, nil, errors.New("packId is required")
-	}
-	focus, err := apiClient.SetFocus(packID)
-	if err != nil {
-		return nil, nil, err
-	}
-	result := map[string]interface{}{
-		"ok":      true,
-		"message": "Focus updated successfully",
-	}
-	if focus.ActivePack != nil {
-		result["active_pack"] = map[string]interface{}{
-			"id":             focus.ActivePack.ID,
-			"name":           focus.ActivePack.Name,
-			"contexts_count": focus.ActivePack.ContextsCount,
-			"memories_count": focus.ActivePack.MemoriesCount,
-			"tasks_count":    focus.ActivePack.TasksCount,
-		}
-	}
-	return nil, result, nil
-}
-
-func handleClearFocus(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	if err := apiClient.ClearFocus(); err != nil {
-		return nil, nil, err
-	}
-	return nil, map[string]interface{}{
-		"ok":      true,
-		"message": "Focus cleared",
-	}, nil
+	}), nil, nil
 }
 
 type ListContextPacksInput struct {
@@ -1472,37 +1162,9 @@ func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input
 		return nil, nil, err
 	}
 	// Wrap response to fix "expected record, received array" error
-	return nil, formatMCPResponse(result, getContextString()), nil
+	return mustTextResult(formatMCPResponse(result, getContextString())), nil, nil
 }
 
-type CreateContextPackInput struct {
-	Name        string   `json:"name"`
-	Type        string   `json:"type"` // project, integration, decision, custom
-	Description string   `json:"description,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-}
-
-func handleCreateContextPack(ctx context.Context, req *mcp.CallToolRequest, input CreateContextPackInput) (*mcp.CallToolResult, interface{}, error) {
-	name := strings.TrimSpace(input.Name)
-	packType := strings.TrimSpace(input.Type)
-	if name == "" {
-		return nil, nil, errors.New("name is required")
-	}
-	if packType == "" {
-		return nil, nil, errors.New("type is required (project, integration, decision, custom)")
-	}
-	pack, err := apiClient.CreateContextPack(
-		name,
-		packType,
-		strings.TrimSpace(input.Description),
-		"draft", // Always create as draft
-		input.Tags,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, pack, nil
-}
 
 type GetContextPackInput struct {
 	PackID string `json:"packId"`
@@ -1517,194 +1179,10 @@ func handleGetContextPack(ctx context.Context, req *mcp.CallToolRequest, input G
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, pack, nil
+	return mustTextResult(pack), nil, nil
 }
 
-type UpdateContextPackInput struct {
-	PackID      string `json:"packId"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Status      string `json:"status,omitempty"`
-}
 
-func handleUpdateContextPack(ctx context.Context, req *mcp.CallToolRequest, input UpdateContextPackInput) (*mcp.CallToolResult, interface{}, error) {
-	packID := strings.TrimSpace(input.PackID)
-	if packID == "" {
-		return nil, nil, errors.New("packId is required")
-	}
-	updates := make(map[string]interface{})
-	if name := strings.TrimSpace(input.Name); name != "" {
-		updates["name"] = name
-	}
-	if desc := strings.TrimSpace(input.Description); desc != "" {
-		updates["description"] = desc
-	}
-	if status := strings.TrimSpace(input.Status); status != "" {
-		updates["status"] = status
-	}
-	if len(updates) == 0 {
-		return nil, nil, errors.New("at least one field to update is required")
-	}
-	pack, err := apiClient.UpdateContextPack(packID, updates)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, pack, nil
-}
-
-type DeleteContextPackInput struct {
-	PackID string `json:"packId"`
-}
-
-func handleDeleteContextPack(ctx context.Context, req *mcp.CallToolRequest, input DeleteContextPackInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	packID := strings.TrimSpace(input.PackID)
-	if packID == "" {
-		return nil, nil, errors.New("packId is required")
-	}
-	if err := apiClient.DeleteContextPack(packID); err != nil {
-		return nil, nil, err
-	}
-	return nil, map[string]interface{}{
-		"ok":      true,
-		"message": "Context pack deleted",
-	}, nil
-}
-
-type AddMemoryToPackInput struct {
-	PackID   string `json:"packId"`
-	MemoryID string `json:"memoryId"`
-}
-
-func handleAddMemoryToPack(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryToPackInput) (*mcp.CallToolResult, interface{}, error) {
-	packID := strings.TrimSpace(input.PackID)
-	memoryID := strings.TrimSpace(input.MemoryID)
-	if packID == "" || memoryID == "" {
-		return nil, nil, errors.New("packId and memoryId are required")
-	}
-
-	// Get current pack to retrieve existing memory IDs
-	pack, err := apiClient.GetContextPack(packID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Build memory IDs array
-	memoryIDs := []string{memoryID}
-	if pack.MemoryIDs != nil {
-		if ids, ok := pack.MemoryIDs.([]interface{}); ok {
-			for _, id := range ids {
-				if idStr, ok := id.(string); ok && idStr != memoryID {
-					memoryIDs = append(memoryIDs, idStr)
-				}
-			}
-		}
-	}
-
-	updates := map[string]interface{}{
-		"memory_ids": memoryIDs,
-	}
-	result, err := apiClient.UpdateContextPack(packID, updates)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
-
-type AddTaskToPackInput struct {
-	PackID string `json:"packId"`
-	TaskID string `json:"taskId"`
-}
-
-func handleAddTaskToPack(ctx context.Context, req *mcp.CallToolRequest, input AddTaskToPackInput) (*mcp.CallToolResult, interface{}, error) {
-	packID := strings.TrimSpace(input.PackID)
-	taskID := strings.TrimSpace(input.TaskID)
-	if packID == "" || taskID == "" {
-		return nil, nil, errors.New("packId and taskId are required")
-	}
-
-	// Get current pack to retrieve existing task IDs
-	pack, err := apiClient.GetContextPack(packID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Build task IDs array
-	taskIDs := []string{taskID}
-	if pack.TaskIDs != nil {
-		if ids, ok := pack.TaskIDs.([]interface{}); ok {
-			for _, id := range ids {
-				if idStr, ok := id.(string); ok && idStr != taskID {
-					taskIDs = append(taskIDs, idStr)
-				}
-			}
-		}
-	}
-
-	updates := map[string]interface{}{
-		"taskIds": taskIDs,
-	}
-	result, err := apiClient.UpdateContextPack(packID, updates)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
-
-// ============================================================================
-// AI FEATURES HANDLERS
-// ============================================================================
-
-type AITaskInput struct {
-	TaskID string `json:"taskId"`
-}
-
-func handleAINextStep(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	result, err := apiClient.AINextStep(taskID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
-
-func handleAIEstimateTime(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	result, err := apiClient.AIEstimateTime(taskID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
-
-func handleAIAnalyzeRisks(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	result, err := apiClient.AIRisks(taskID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
-
-func handleAIFindDependencies(ctx context.Context, req *mcp.CallToolRequest, input AITaskInput) (*mcp.CallToolResult, interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("taskId is required")
-	}
-	result, err := apiClient.AIDependencies(taskID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
 
 // ============================================================================
 // ORGANIZATION HANDLERS
@@ -1716,109 +1194,7 @@ func handleListOrganizations(ctx context.Context, req *mcp.CallToolRequest, inpu
 		return nil, nil, err
 	}
 	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(orgs, getContextString()), nil
-}
-
-type GetOrganizationInput struct {
-	OrgID string `json:"orgId"`
-}
-
-func handleGetOrganization(ctx context.Context, req *mcp.CallToolRequest, input GetOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
-	orgID := strings.TrimSpace(input.OrgID)
-	if orgID == "" {
-		return nil, nil, errors.New("orgId is required")
-	}
-	org, err := apiClient.GetOrganization(orgID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, org, nil
-}
-
-type CreateOrganizationInput struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-func handleCreateOrganization(ctx context.Context, req *mcp.CallToolRequest, input CreateOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
-		return nil, nil, errors.New("name is required")
-	}
-	org, err := apiClient.CreateOrganization(name, strings.TrimSpace(input.Description))
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, org, nil
-}
-
-type UpdateOrganizationInput struct {
-	OrgID       string `json:"orgId"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-func handleUpdateOrganization(ctx context.Context, req *mcp.CallToolRequest, input UpdateOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
-	orgID := strings.TrimSpace(input.OrgID)
-	if orgID == "" {
-		return nil, nil, errors.New("orgId is required")
-	}
-
-	updates := make(map[string]interface{})
-	if input.Name != "" {
-		updates["name"] = input.Name
-	}
-	if input.Description != "" {
-		updates["description"] = input.Description
-	}
-
-	if len(updates) == 0 {
-		return nil, nil, errors.New("at least one field (name or description) must be provided")
-	}
-
-	org, err := apiClient.UpdateOrganization(orgID, updates)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, org, nil
-}
-
-func handleGetOrganizationMembers(ctx context.Context, req *mcp.CallToolRequest, input GetOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
-	orgID := strings.TrimSpace(input.OrgID)
-	if orgID == "" {
-		return nil, nil, errors.New("orgId is required")
-	}
-
-	members, err := apiClient.GetOrganizationMembers(orgID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, formatMCPResponse(members, getContextString()), nil
-}
-
-type InviteToOrganizationInput struct {
-	OrgID string `json:"orgId"`
-	Email string `json:"email"`
-	Role  string `json:"role,omitempty"`
-}
-
-func handleInviteToOrganization(ctx context.Context, req *mcp.CallToolRequest, input InviteToOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
-	orgID := strings.TrimSpace(input.OrgID)
-	email := strings.TrimSpace(input.Email)
-	if orgID == "" || email == "" {
-		return nil, nil, errors.New("orgId and email are required")
-	}
-
-	role := strings.TrimSpace(input.Role)
-	if role == "" {
-		role = "member"
-	}
-
-	result, err := apiClient.InviteToOrganization(orgID, email, role)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
+	return mustTextResult(formatMCPResponse(orgs, getContextString())), nil, nil
 }
 
 type SwitchOrganizationInput struct {
@@ -1843,42 +1219,9 @@ func handleSwitchOrganization(ctx context.Context, req *mcp.CallToolRequest, inp
 		SetSessionOrganization(orgUUID)
 	}
 
-	return nil, org, nil
+	return mustTextResult(org), nil, nil
 }
 
-func handleGetActiveOrganization(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, interface{}, error) {
-	session := GetCurrentSession()
-
-	// If session has an active organization, get its details
-	if session.ActiveOrgID != nil {
-		org, err := apiClient.GetOrganization(session.ActiveOrgID.String())
-		if err != nil {
-			return nil, nil, err
-		}
-		return nil, org, nil
-	}
-
-	// Otherwise, list organizations and return info
-	orgs, err := apiClient.ListOrganizations()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if len(orgs) == 0 {
-		return nil, nil, errors.New("no organizations found")
-	}
-
-	// If only one organization, return it as the default
-	if len(orgs) == 1 {
-		return nil, &orgs[0], nil
-	}
-
-	// Multiple organizations - inform user to select one
-	return nil, map[string]interface{}{
-		"message":       "Multiple organizations found. Use switch_organization to select one.",
-		"organizations": orgs,
-	}, nil
-}
 
 type CreateDecisionInput struct {
 	Title        string `json:"title"`
@@ -1912,7 +1255,7 @@ func handleCreateDecision(ctx context.Context, req *mcp.CallToolRequest, input C
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, decision, nil
+	return mustTextResult(decision), nil, nil
 }
 
 type ListDecisionsInput struct {
@@ -1927,7 +1270,7 @@ func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input Li
 		return nil, nil, err
 	}
 	// Wrap array response to fix "expected record, received array" error
-	return nil, formatMCPResponse(decisions, getContextString()), nil
+	return mustTextResult(formatMCPResponse(decisions, getContextString())), nil, nil
 }
 
 type GetStatsInput struct {
@@ -1954,109 +1297,10 @@ func handleGetStats(ctx context.Context, req *mcp.CallToolRequest, input GetStat
 	if err := json.Unmarshal(b, &out); err != nil {
 		return nil, nil, errors.New("invalid stats response")
 	}
-	return nil, out, nil
+	return mustTextResult(out), nil, nil
 }
 
-type ExportProjectInput struct {
-	Project string `json:"project"`
-	Format  string `json:"format,omitempty"`
-}
 
-func handleExportProject(ctx context.Context, req *mcp.CallToolRequest, input ExportProjectInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	format := input.Format
-	if format == "" {
-		format = "markdown"
-	}
-
-	projectID, err := resolveProjectID(apiClient, input.Project)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	projects, err := apiClient.ListProjects()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var project *struct {
-		Name        string
-		Description string
-	}
-	for _, p := range projects {
-		if p.ID.String() == projectID {
-			project = &struct {
-				Name        string
-				Description string
-			}{p.Name, p.Description}
-			break
-		}
-	}
-
-	if project == nil {
-		return nil, nil, errors.New("project not found")
-	}
-
-	tasks, err := apiClient.ListTasks(projectID, "")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# %s\n\n", project.Name))
-	if project.Description != "" {
-		sb.WriteString(fmt.Sprintf("%s\n\n", project.Description))
-	}
-
-	total := len(tasks)
-	completed := 0
-	inProgress := 0
-	pending := 0
-	for _, t := range tasks {
-		switch t.Status {
-		case "COMPLETED":
-			completed++
-		case "IN_PROGRESS":
-			inProgress++
-		default:
-			pending++
-		}
-	}
-
-	sb.WriteString("## Statistics\n\n")
-	sb.WriteString(fmt.Sprintf("- **Total:** %d\n", total))
-	sb.WriteString(fmt.Sprintf("- **Completed:** %d\n", completed))
-	sb.WriteString(fmt.Sprintf("- **In Progress:** %d\n", inProgress))
-	sb.WriteString(fmt.Sprintf("- **Pending:** %d\n\n", pending))
-
-	sb.WriteString("## Tasks\n\n")
-	for _, t := range tasks {
-		status := "⏳"
-		if t.Status == "COMPLETED" {
-			status = "✅"
-		} else if t.Status == "IN_PROGRESS" {
-			status = "🔄"
-		}
-		sb.WriteString(fmt.Sprintf("- %s **%s** [%s]\n", status, t.Title, t.Priority))
-	}
-
-	return nil, map[string]interface{}{
-		"project":  project.Name,
-		"format":   format,
-		"markdown": sb.String(),
-	}, nil
-}
-
-type GetCursorRulesInput struct {
-	Format string `json:"format"`
-}
-
-func handleGetCursorRules(ctx context.Context, req *mcp.CallToolRequest, input GetCursorRulesInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	format := input.Format
-	if format == "" {
-		format = "markdown"
-	}
-	return nil, getCursorRules(format), nil
-}
 
 // ============================================================================
 // LEGACY SUPPORT - ToolDefinitions for CLI tools command
@@ -2071,16 +1315,11 @@ type toolDef struct {
 func ToolDefinitions() []toolDef {
 	return []toolDef{
 		// ============================================================================
-		// 🔴 ESSENTIAL - Agent Onboarding (CALL THESE FIRST!)
+		// 🔴 ESSENTIAL (7 tools)
 		// ============================================================================
 		{
-			Name:        "get_ramorie_info",
-			Description: "🔴 ESSENTIAL | 🧠 CALL THIS FIRST! Get comprehensive information about Ramorie - what it is, how to use it, and agent guidelines.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
-		},
-		{
 			Name:        "setup_agent",
-			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, and agent_directives for proactive memory/task behavior.",
+			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -2089,298 +1328,37 @@ func ToolDefinitions() []toolDef {
 				},
 			},
 		},
-
+		{Name: "list_projects", Description: "🔴 ESSENTIAL | List all projects."},
+		{Name: "list_tasks", Description: "🔴 ESSENTIAL | List/search/prioritize tasks. Supports query, next_priority params."},
+		{Name: "create_task", Description: "🔴 ESSENTIAL | Create a new task."},
+		{Name: "add_memory", Description: "🔴 ESSENTIAL | Store knowledge (use type='skill' for procedural memory)."},
+		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
+		{Name: "manage_focus", Description: "🔴 ESSENTIAL | Get/set/clear active workspace focus."},
 		// ============================================================================
-		// 🔴 ESSENTIAL - Project Management
+		// 🟡 COMMON (12 tools)
 		// ============================================================================
-		{
-			Name:        "list_projects",
-			Description: "🔴 ESSENTIAL | List all projects. Check this to see available projects and which one is active.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
-		},
+		{Name: "get_task", Description: "🟡 COMMON | Get task details including notes and metadata."},
+		{Name: "manage_task", Description: "🟡 COMMON | Start/complete/update progress on a task. Actions: start, complete, progress."},
+		{Name: "add_task_note", Description: "🟡 COMMON | Add a note/annotation to a task."},
+		{Name: "list_memories", Description: "🟡 COMMON | List memories with filtering."},
+		{Name: "get_memory", Description: "🟡 COMMON | Get memory details by ID."},
+		{Name: "list_context_packs", Description: "🟡 COMMON | List all context packs."},
+		{Name: "get_context_pack", Description: "🟡 COMMON | Get detailed context pack info."},
+		{Name: "manage_context_pack", Description: "🟡 COMMON | Create/update/add_memory/add_task to context packs."},
+		{Name: "create_decision", Description: "🟡 COMMON | Record an architectural decision (ADR)."},
+		{Name: "list_decisions", Description: "🟡 COMMON | List architectural decisions."},
+		{Name: "get_stats", Description: "🟡 COMMON | Get task statistics and completion rates."},
+		{Name: "get_agent_activity", Description: "🟡 COMMON | Get recent agent activity timeline."},
 		// ============================================================================
-		// 🔴 ESSENTIAL - Task Management (Core)
+		// 🟢 ADVANCED (7 tools)
 		// ============================================================================
-		{
-			Name:        "list_tasks",
-			Description: "🔴 ESSENTIAL | List tasks with filtering. REQUIRED: project parameter. 💡 Call before create_task to check for duplicates.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"status": map[string]interface{}{"type": "string", "description": "Filter: TODO, IN_PROGRESS, COMPLETED"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}, "limit": map[string]interface{}{"type": "number", "description": "Max results"}}, "required": []string{"project"}},
-		},
-		{
-			Name:        "create_task",
-			Description: "🔴 ESSENTIAL | Create a new task. REQUIRED: project, description parameters. ⚠️ Always check list_tasks first to avoid duplicates!",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"description": map[string]interface{}{"type": "string", "description": "Task description - clear and actionable"}, "priority": map[string]interface{}{"type": "string", "description": "Priority: H=High, M=Medium, L=Low"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"description", "project"}},
-		},
-		{
-			Name:        "get_task",
-			Description: "🔴 ESSENTIAL | Get task details including notes and metadata.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
-		},
-		{
-			Name:        "start_task",
-			Description: "🔴 ESSENTIAL | Start working on a task. Sets status to IN_PROGRESS and enables memory auto-linking.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
-		},
-		{
-			Name:        "complete_task",
-			Description: "🔴 ESSENTIAL | Mark task as completed. Use when work is finished.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
-		},
-		{
-			Name:        "get_next_tasks",
-			Description: "🔴 ESSENTIAL | Get prioritized TODO tasks. REQUIRED: project parameter. 💡 Use at session start to see what needs attention.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"count": map[string]interface{}{"type": "number", "description": "Number of tasks (default: 5)"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"project"}},
-		},
-
-		// ============================================================================
-		// 🔴 ESSENTIAL - Memory Management (Core)
-		// ============================================================================
-		{
-			Name:        "add_memory",
-			Description: "🔴 ESSENTIAL | Store important information to knowledge base. REQUIRED: project, content parameters. 💡 If it matters later, add it here!",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"content": map[string]interface{}{"type": "string", "description": "Memory content - be descriptive"}, "project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"content", "project"}},
-		},
-		{
-			Name:        "list_memories",
-			Description: "🔴 ESSENTIAL | List memories with filtering. REQUIRED: project parameter.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}, "term": map[string]interface{}{"type": "string", "description": "Filter by keyword"}, "limit": map[string]interface{}{"type": "number"}}, "required": []string{"project"}},
-		},
-
-		// ============================================================================
-		// 🔴 ESSENTIAL - Focus Management (SINGLE SOURCE OF TRUTH for active workspace)
-		// ============================================================================
-		{
-			Name:        "get_focus",
-			Description: "🔴 ESSENTIAL | Get user's current focus (active workspace). Returns the active context pack and its details.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
-		},
-		{
-			Name:        "set_focus",
-			Description: "🔴 ESSENTIAL | Set user's active focus (workspace). Switch to a different context pack.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"packId": map[string]interface{}{"type": "string", "description": "Context pack ID to activate"}}, "required": []string{"packId"}},
-		},
-		{
-			Name:        "clear_focus",
-			Description: "🔴 ESSENTIAL | Clear user's active focus. Deactivates the current context pack.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
-		},
-
-		// ============================================================================
-		// 🟡 COMMON - Context Pack Management
-		// ============================================================================
-		{
-			Name:        "list_context_packs",
-			Description: "🟡 COMMON | List all context packs with optional filtering by type and status.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"type":   map[string]interface{}{"type": "string", "description": "Filter by type: project, integration, decision, custom"},
-					"status": map[string]interface{}{"type": "string", "description": "Filter by status: draft, published"},
-					"query":  map[string]interface{}{"type": "string", "description": "Search query"},
-					"limit":  map[string]interface{}{"type": "number", "description": "Max results (default: 50)"},
-				},
-			},
-		},
-		{
-			Name:        "create_context_pack",
-			Description: "🟡 COMMON | Create a new context pack. Use to bundle related contexts, memories, and tasks.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"name":        map[string]interface{}{"type": "string", "description": "Pack name"},
-					"type":        map[string]interface{}{"type": "string", "description": "Pack type: project, integration, decision, custom"},
-					"description": map[string]interface{}{"type": "string", "description": "Pack description"},
-					"tags":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Tags"},
-				},
-				"required": []string{"name", "type"},
-			},
-		},
-		{
-			Name:        "get_context_pack",
-			Description: "🟡 COMMON | Get detailed context pack info including linked memories, tasks, and contexts.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{"packId": map[string]interface{}{"type": "string", "description": "Context pack ID"}},
-				"required":   []string{"packId"},
-			},
-		},
-		{
-			Name:        "update_context_pack",
-			Description: "🟡 COMMON | Update a context pack's name, description, type, or status.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"packId":      map[string]interface{}{"type": "string", "description": "Context pack ID"},
-					"name":        map[string]interface{}{"type": "string", "description": "New name"},
-					"description": map[string]interface{}{"type": "string", "description": "New description"},
-					"status":      map[string]interface{}{"type": "string", "description": "New status: draft, published"},
-				},
-				"required": []string{"packId"},
-			},
-		},
-		{
-			Name:        "delete_context_pack",
-			Description: "🟢 ADVANCED | Delete a context pack. ⚠️ Requires explicit user approval.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{"packId": map[string]interface{}{"type": "string", "description": "Context pack ID"}},
-				"required":   []string{"packId"},
-			},
-		},
-		{
-			Name:        "add_memory_to_pack",
-			Description: "🟡 COMMON | Add an existing memory to a context pack.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"packId":   map[string]interface{}{"type": "string", "description": "Context pack ID"},
-					"memoryId": map[string]interface{}{"type": "string", "description": "Memory ID"},
-				},
-				"required": []string{"packId", "memoryId"},
-			},
-		},
-		{
-			Name:        "add_task_to_pack",
-			Description: "🟡 COMMON | Add an existing task to a context pack.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"packId": map[string]interface{}{"type": "string", "description": "Context pack ID"},
-					"taskId": map[string]interface{}{"type": "string", "description": "Task ID"},
-				},
-				"required": []string{"packId", "taskId"},
-			},
-		},
-
-		// ============================================================================
-		// 🟡 COMMON - Task Management (Extended)
-		// ============================================================================
-		{
-			Name:        "add_task_note",
-			Description: "🟡 COMMON | Add a note/annotation to a task. Use for progress updates or context.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}, "note": map[string]interface{}{"type": "string"}}, "required": []string{"taskId", "note"}},
-		},
-		{
-			Name:        "update_progress",
-			Description: "🟡 COMMON | Update task progress percentage (0-100).",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}, "progress": map[string]interface{}{"type": "number"}}, "required": []string{"taskId", "progress"}},
-		},
-		{
-			Name:        "search_tasks",
-			Description: "🟡 COMMON | Search tasks by keyword. Use to find specific tasks.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string", "description": "Search query"}, "status": map[string]interface{}{"type": "string"}, "project": map[string]interface{}{"type": "string"}, "limit": map[string]interface{}{"type": "number"}}, "required": []string{"query"}},
-		},
-		{
-			Name:        "get_active_task",
-			Description: "🟡 COMMON | Get the currently active task. Memories auto-link to this task.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
-		},
-
-		// ============================================================================
-		// 🟡 COMMON - Memory Management (Extended)
-		// ============================================================================
-		{
-			Name:        "get_memory",
-			Description: "🟡 COMMON | Get memory details by ID.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"memoryId": map[string]interface{}{"type": "string"}}, "required": []string{"memoryId"}},
-		},
-		{
-			Name:        "recall",
-			Description: "🟡 COMMON | Advanced memory search with multi-word support, filters, and relations. Supports: OR search (space-separated), AND search (comma-separated), project/tag filtering.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"term": map[string]interface{}{
-						"type":        "string",
-						"description": "Search terms. Space = OR (any match), comma = AND (all must match). Example: 'traefik docker' finds either, 'traefik,docker' finds both.",
-					},
-					"project": map[string]interface{}{
-						"type":        "string",
-						"description": "Filter by project name or ID",
-					},
-					"tag": map[string]interface{}{
-						"type":        "string",
-						"description": "Filter by tag name",
-					},
-					"linked_task": map[string]interface{}{
-						"type":        "boolean",
-						"description": "If true, only return memories linked to a task",
-					},
-					"include_relations": map[string]interface{}{
-						"type":        "boolean",
-						"description": "If true, include full project and task details (default: true)",
-					},
-					"limit": map[string]interface{}{
-						"type":        "number",
-						"description": "Max results (default: 20)",
-					},
-					"min_score": map[string]interface{}{
-						"type":        "number",
-						"description": "Minimum relevance score 0-100 (default: 0)",
-					},
-				},
-				"required": []string{"term"},
-			},
-		},
-
-		// ============================================================================
-		// 🟡 COMMON - Decisions (ADRs)
-		// ============================================================================
-		{
-			Name:        "create_decision",
-			Description: "🟡 COMMON | Record an architectural decision (ADR). ⚠️ Agent creates DRAFTS only - user must approve. Use for important technical choices.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"title": map[string]interface{}{"type": "string", "description": "Decision title"}, "description": map[string]interface{}{"type": "string"}, "area": map[string]interface{}{"type": "string", "description": "Frontend, Backend, Architecture, etc."}, "context": map[string]interface{}{"type": "string", "description": "Why this decision?"}, "consequences": map[string]interface{}{"type": "string", "description": "What are the impacts?"}}, "required": []string{"title"}},
-		},
-		{
-			Name:        "list_decisions",
-			Description: "🟡 COMMON | List architectural decisions. Review past decisions before making new ones.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"status": map[string]interface{}{"type": "string", "description": "draft, proposed, approved, deprecated"}, "area": map[string]interface{}{"type": "string"}, "limit": map[string]interface{}{"type": "number"}}},
-		},
-
-		// ============================================================================
-		// 🟡 COMMON - Reports
-		// ============================================================================
-		{
-			Name:        "get_stats",
-			Description: "🔴 ESSENTIAL | Get task statistics and completion rates. REQUIRED: project parameter.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string", "description": "Project name or ID (REQUIRED)"}}, "required": []string{"project"}},
-		},
-
-		// ============================================================================
-		// 🟢 ADVANCED - Less frequently used
-		// ============================================================================
-		{
-			Name:        "create_project",
-			Description: "🟢 ADVANCED | Create a new project. ⚠️ Auto-checks for duplicates - returns similar projects if found. Use force=true to bypass.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"name": map[string]interface{}{"type": "string", "description": "Project name - auto-checked for duplicates"}, "description": map[string]interface{}{"type": "string"}, "force": map[string]interface{}{"type": "boolean", "description": "Set true to bypass duplicate check and force creation"}, "org_id": map[string]interface{}{"type": "string", "description": "Organization ID to scope project to"}}, "required": []string{"name"}},
-		},
-		{
-			Name:        "get_cursor_rules",
-			Description: "🟢 ADVANCED | Get Cursor IDE rules for Ramorie. Returns markdown for .cursorrules file.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"format": map[string]interface{}{"type": "string", "description": "markdown (default) or json"}}},
-		},
-		{
-			Name:        "export_project",
-			Description: "🟢 ADVANCED | Export project report in markdown format.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"project": map[string]interface{}{"type": "string"}, "format": map[string]interface{}{"type": "string"}}, "required": []string{"project"}},
-		},
-		{
-			Name:        "stop_task",
-			Description: "🟢 ADVANCED | Pause a task. Clears active task, keeps IN_PROGRESS status.",
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"taskId": map[string]interface{}{"type": "string"}}, "required": []string{"taskId"}},
-		},
-		{
-			Name:        "move_task",
-			Description: "🟡 COMMON | Move a task to a different project. Use this to fix tasks created in the wrong location.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"taskId":    map[string]interface{}{"type": "string", "description": "ID of the task to move"},
-					"projectId": map[string]interface{}{"type": "string", "description": "Target project ID or name"},
-				},
-				"required": []string{"taskId", "projectId"},
-			},
-		},
+		{Name: "create_project", Description: "🟢 ADVANCED | Create a new project."},
+		{Name: "move_task", Description: "🟢 ADVANCED | Move a task to a different project."},
+		{Name: "manage_subtasks", Description: "🟢 ADVANCED | Create/list/complete/update subtasks."},
+		{Name: "manage_dependencies", Description: "🟢 ADVANCED | Add/list/remove task dependencies."},
+		{Name: "manage_plan", Description: "🟢 ADVANCED | Create/status/list/apply/cancel multi-agent plans."},
+		{Name: "list_organizations", Description: "🟢 ADVANCED | List user's organizations."},
+		{Name: "switch_organization", Description: "🟢 ADVANCED | Switch active organization context."},
 	}
 }
 
@@ -2420,6 +1398,41 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 	return "", errors.New("project not found")
 }
 
+// resolveProjectWithOrg resolves project ID and returns the org ID if the project belongs to an org
+func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projectID string, orgID string, err error) {
+	projectIdentifier = strings.TrimSpace(projectIdentifier)
+	if projectIdentifier == "" {
+		return "", "", errors.New("project parameter is required")
+	}
+
+	projects, err := client.ListProjects()
+	if err != nil {
+		return "", "", err
+	}
+	for _, p := range projects {
+		if p.Name == projectIdentifier || strings.HasPrefix(p.ID.String(), projectIdentifier) {
+			pid := p.ID.String()
+			oid := ""
+			if p.OrganizationID != nil {
+				oid = p.OrganizationID.String()
+			}
+			return pid, oid, nil
+		}
+	}
+
+	return "", "", errors.New("project not found")
+}
+
+// determineEncryptionScope decides the encryption scope for a project.
+// Returns "organization" if the project belongs to an org with encryption enabled and the org vault is unlocked.
+// Otherwise returns "personal".
+func determineEncryptionScope(orgID string) string {
+	if orgID != "" && crypto.IsOrgVaultUnlocked(orgID) {
+		return "organization"
+	}
+	return "personal"
+}
+
 func normalizePriority(s string) string {
 	s = strings.TrimSpace(strings.ToUpper(s))
 	if s == "" {
@@ -2437,140 +1450,7 @@ func normalizePriority(s string) string {
 	}
 }
 
-func toInt(v interface{}) int {
-	switch t := v.(type) {
-	case float64:
-		return int(t)
-	case int:
-		return t
-	case int64:
-		return int(t)
-	case string:
-		var x int
-		_, _ = fmt.Sscanf(t, "%d", &x)
-		return x
-	default:
-		return 0
-	}
-}
 
-// ============================================================================
-// AGENT ONBOARDING & SELF-DOCUMENTATION
-// ============================================================================
-
-func getRamorieInfo() map[string]interface{} {
-	return map[string]interface{}{
-		"name":    "Ramorie",
-		"version": "2.1.0",
-		"tagline": "AI Agent Memory & Task Management System",
-		"description": `Ramorie is a persistent memory and task management system for AI agents.
-It enables context preservation across sessions, task tracking, and knowledge storage.`,
-
-		"tool_count": 27,
-		"tool_priority_guide": map[string]string{
-			"🔴 ESSENTIAL": "Core functionality - use these regularly",
-			"🟡 COMMON":    "Frequently used - call when needed",
-			"🟢 ADVANCED":  "Specialized - only for specific scenarios",
-		},
-
-		"quickstart": []string{
-			"1. setup_agent → Get current context and recommendations",
-			"2. get_focus → Check your current active workspace",
-			"3. list_projects → See available projects",
-			"4. get_next_tasks → See prioritized TODO tasks",
-			"5. start_task → Begin working (enables memory auto-link)",
-			"6. add_memory → Store important discoveries",
-			"7. complete_task → Mark work as done",
-		},
-
-		"core_rules": []string{
-			"✅ Always check list_tasks before creating new tasks",
-			"✅ Use add_memory to persist important information",
-			"✅ Start a task before adding memories for auto-linking",
-			"✅ Use get_focus to check current workspace context",
-			"✅ Record architectural decisions with create_decision",
-			"❌ Never delete without explicit user approval",
-			"❌ Never create duplicate projects",
-		},
-
-		"tools_by_category": map[string][]string{
-			"🔴 agent":    {"get_ramorie_info", "setup_agent"},
-			"🔴 focus":    {"get_focus", "set_focus", "clear_focus"},
-			"🔴 project":  {"list_projects"},
-			"🔴 task":     {"list_tasks", "create_task", "get_task", "start_task", "complete_task", "get_next_tasks"},
-			"🔴 memory":   {"add_memory", "list_memories"},
-			"🟡 task":     {"add_task_note", "update_progress", "search_tasks", "get_active_task"},
-			"🟡 memory":   {"get_memory", "recall"},
-			"🟡 decision": {"create_decision", "list_decisions"},
-			"🟡 reports":  {"get_stats"},
-			"🟢 project":  {"create_project"},
-			"🟢 agent":    {"get_cursor_rules"},
-			"🟢 reports":  {"export_project"},
-			"🟢 task":     {"stop_task"},
-		},
-	}
-}
-
-func getCursorRules(format string) map[string]interface{} {
-	rules := `# 🧠 Ramorie MCP Usage Rules
-
-## Core Principle
-**"If it matters later, it belongs in Ramorie."**
-
-## Tool Priority
-- 🔴 ESSENTIAL: Core functionality, use regularly
-- 🟡 COMMON: Frequently used, call when needed
-- 🟢 ADVANCED: Specialized scenarios only
-
-## Session Workflow
-
-### Start of Session
-1. ` + "`setup_agent`" + ` - Get current context
-2. ` + "`get_focus`" + ` - Check active workspace
-3. ` + "`list_projects`" + ` - Check available projects
-4. ` + "`get_next_tasks`" + ` - See what needs attention
-
-### During Work
-1. ` + "`start_task`" + ` - Begin working (enables memory auto-link)
-2. ` + "`add_memory`" + ` - Store important discoveries
-3. ` + "`add_task_note`" + ` - Add progress notes
-4. ` + "`complete_task`" + ` - Mark as done
-
-### Key Rules
-- ✅ Check ` + "`list_tasks`" + ` before creating new tasks
-- ✅ Use ` + "`add_memory`" + ` for important information
-- ✅ Use ` + "`get_focus`" + ` to check current workspace
-- ✅ Record decisions with ` + "`create_decision`" + `
-- ❌ Never delete without user approval
-- ❌ Never create duplicate projects
-
-## Available Tools (27 total)
-
-### 🔴 ESSENTIAL (14)
-- get_ramorie_info, setup_agent
-- get_focus, set_focus, clear_focus
-- list_projects
-- list_tasks, create_task, get_task, start_task, complete_task, get_next_tasks
-- add_memory, list_memories
-
-### 🟡 COMMON (9)
-- add_task_note, update_progress, search_tasks, get_active_task
-- get_memory, recall
-- create_decision, list_decisions
-- get_stats
-
-### 🟢 ADVANCED (4)
-- create_project, get_cursor_rules, export_project, stop_task
-`
-
-	result := map[string]interface{}{
-		"format": format,
-		"rules":  rules,
-		"usage":  "Add this to your .cursorrules file",
-	}
-
-	return result
-}
 
 func setupAgent(client *api.Client) (map[string]interface{}, error) {
 	result := map[string]interface{}{
@@ -2616,16 +1496,105 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		}
 	}
 
+	// Context injection: provide recent memories, in-progress tasks, and last session events
+	contextInjection := map[string]interface{}{}
+
+	// Recent memories (max 5, truncated to 200 chars)
+	if memories, err := client.ListMemories("", ""); err == nil && len(memories) > 0 {
+		limit := 5
+		if len(memories) < limit {
+			limit = len(memories)
+		}
+		truncated := make([]map[string]interface{}, 0, limit)
+		for i := 0; i < limit; i++ {
+			m := memories[i]
+			content := m.Content
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			entry := map[string]interface{}{
+				"id":         m.ID.String(),
+				"content":    content,
+				"created_at": m.CreatedAt.Format("2006-01-02 15:04"),
+			}
+			if m.Project != nil {
+				entry["project"] = m.Project.Name
+			}
+			truncated = append(truncated, entry)
+		}
+		contextInjection["recent_memories"] = truncated
+	}
+
+	// In-progress tasks (max 3, title + description truncated)
+	if tasks, err := client.ListTasks("", "IN_PROGRESS"); err == nil && len(tasks) > 0 {
+		limit := 3
+		if len(tasks) < limit {
+			limit = len(tasks)
+		}
+		truncated := make([]map[string]interface{}, 0, limit)
+		for i := 0; i < limit; i++ {
+			t := tasks[i]
+			desc := t.Description
+			if len(desc) > 150 {
+				desc = desc[:150] + "..."
+			}
+			entry := map[string]interface{}{
+				"id":     t.ID.String(),
+				"title":  t.Title,
+				"status": t.Status,
+			}
+			if desc != "" {
+				entry["description"] = desc
+			}
+			if t.Project != nil {
+				entry["project"] = t.Project.Name
+			}
+			truncated = append(truncated, entry)
+		}
+		contextInjection["in_progress_tasks"] = truncated
+	}
+
+	// Last session events (max 5)
+	if events, err := client.GetAgentEvents(api.AgentEventFilter{Limit: 5}); err == nil && len(events.Events) > 0 {
+		sessionEvents := make([]map[string]interface{}, 0, len(events.Events))
+		for _, e := range events.Events {
+			entry := map[string]interface{}{
+				"event_type":  e.EventType,
+				"entity_type": e.EntityType,
+				"created_at":  e.CreatedAt,
+			}
+			if e.EntityTitle != nil {
+				entry["title"] = *e.EntityTitle
+			}
+			if e.EntityPreview != nil {
+				preview := *e.EntityPreview
+				if len(preview) > 100 {
+					preview = preview[:100] + "..."
+				}
+				entry["preview"] = preview
+			}
+			if e.AgentName != "" {
+				entry["agent"] = e.AgentName
+			}
+			sessionEvents = append(sessionEvents, entry)
+		}
+		contextInjection["last_session"] = sessionEvents
+	}
+
+	if len(contextInjection) > 0 {
+		result["context_injection"] = contextInjection
+	}
+
 	// Recommendations
 	recommendations := []string{}
 	if result["active_focus"] == nil {
-		recommendations = append(recommendations, "💡 Set an active focus: set_focus (for workspace context)")
+		recommendations = append(recommendations, "💡 Set an active focus: manage_focus with pack_id (for workspace context)")
 	}
 	if result["active_task"] == nil {
-		recommendations = append(recommendations, "💡 Start a task for memory auto-linking: start_task")
+		recommendations = append(recommendations, "💡 Start a task for memory auto-linking: manage_task with action=start")
 	}
 	if len(recommendations) == 0 {
-		recommendations = append(recommendations, "✅ Ready to work! Use get_next_tasks to see priorities")
+		recommendations = append(recommendations, "✅ Ready to work! Use list_tasks with next_priority=true to see priorities")
 	}
 	result["next_steps"] = recommendations
 
@@ -2708,664 +1677,6 @@ func handleGetAgentActivity(ctx context.Context, req *mcp.CallToolRequest, input
 		result["total_estimate"] = response.Total
 	}
 
-	return nil, result, nil
+	return mustTextResult(result), nil, nil
 }
 
-// ============================================================================
-// Task Dependency Handlers
-// ============================================================================
-
-type AddTaskDependencyInput struct {
-	TaskID      string `json:"task_id"`       // The task that has a dependency
-	DependsOnID string `json:"depends_on_id"` // The prerequisite task
-}
-
-func handleAddTaskDependency(ctx context.Context, req *mcp.CallToolRequest, input AddTaskDependencyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("task_id is required")
-	}
-	dependsOnID := strings.TrimSpace(input.DependsOnID)
-	if dependsOnID == "" {
-		return nil, nil, errors.New("depends_on_id is required")
-	}
-
-	// Validate UUIDs
-	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
-	}
-	if _, err := uuid.Parse(dependsOnID); err != nil {
-		return nil, nil, errors.New("invalid depends_on_id format - must be a valid UUID")
-	}
-
-	dep, err := apiClient.AddTaskDependency(taskID, dependsOnID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to add task dependency: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"id":            dep.ID,
-		"task_id":       dep.TaskID,
-		"depends_on_id": dep.DependsOnID,
-		"created_at":    dep.CreatedAt,
-		"message":       "Dependency created successfully. Task cannot be started until the prerequisite task is completed.",
-		"_context":      getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type GetTaskDependenciesInput struct {
-	TaskID string `json:"task_id"`
-}
-
-func handleGetTaskDependencies(ctx context.Context, req *mcp.CallToolRequest, input GetTaskDependenciesInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("task_id is required")
-	}
-
-	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
-	}
-
-	deps, err := apiClient.GetTaskDependencies(taskID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get task dependencies: %w", err)
-	}
-
-	// Format dependencies for agent-friendly output
-	formattedDeps := make([]map[string]interface{}, 0, len(deps))
-	for _, dep := range deps {
-		d := map[string]interface{}{
-			"id":                dep.ID,
-			"depends_on_id":     dep.DependsOnID,
-			"depends_on_title":  dep.DependsOnTitle,
-			"depends_on_status": dep.DependsOnStatus,
-			"created_at":        dep.CreatedAt,
-		}
-		formattedDeps = append(formattedDeps, d)
-	}
-
-	result := map[string]interface{}{
-		"task_id":      taskID,
-		"dependencies": formattedDeps,
-		"count":        len(formattedDeps),
-		"message":      "These are the tasks that must be completed before this task can be started.",
-		"_context":     getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type GetTaskDependentsInput struct {
-	TaskID string `json:"task_id"`
-}
-
-func handleGetTaskDependents(ctx context.Context, req *mcp.CallToolRequest, input GetTaskDependentsInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("task_id is required")
-	}
-
-	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
-	}
-
-	deps, err := apiClient.GetTaskDependents(taskID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get task dependents: %w", err)
-	}
-
-	// Format dependents for agent-friendly output
-	formattedDeps := make([]map[string]interface{}, 0, len(deps))
-	for _, dep := range deps {
-		d := map[string]interface{}{
-			"id":          dep.ID,
-			"task_id":     dep.TaskID,
-			"task_title":  dep.TaskTitle,
-			"task_status": dep.TaskStatus,
-			"created_at":  dep.CreatedAt,
-		}
-		formattedDeps = append(formattedDeps, d)
-	}
-
-	result := map[string]interface{}{
-		"prerequisite_task_id": taskID,
-		"dependents":           formattedDeps,
-		"count":                len(formattedDeps),
-		"message":              "These are the tasks that are waiting for this task to be completed.",
-		"_context":             getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type RemoveTaskDependencyInput struct {
-	TaskID      string `json:"task_id"`
-	DependsOnID string `json:"depends_on_id"`
-}
-
-func handleRemoveTaskDependency(ctx context.Context, req *mcp.CallToolRequest, input RemoveTaskDependencyInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("task_id is required")
-	}
-	dependsOnID := strings.TrimSpace(input.DependsOnID)
-	if dependsOnID == "" {
-		return nil, nil, errors.New("depends_on_id is required")
-	}
-
-	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
-	}
-	if _, err := uuid.Parse(dependsOnID); err != nil {
-		return nil, nil, errors.New("invalid depends_on_id format - must be a valid UUID")
-	}
-
-	err := apiClient.RemoveTaskDependency(taskID, dependsOnID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to remove task dependency: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"task_id":       taskID,
-		"depends_on_id": dependsOnID,
-		"status":        "removed",
-		"message":       "Dependency removed successfully. The task can now be started independently.",
-		"_context":      getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-// ============================================================================
-// Subtask Handlers
-// ============================================================================
-
-type CreateSubtaskInput struct {
-	TaskID      string `json:"task_id"`      // Parent task ID
-	Description string `json:"description"`  // Subtask description
-}
-
-func handleCreateSubtask(ctx context.Context, req *mcp.CallToolRequest, input CreateSubtaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("task_id is required")
-	}
-	description := strings.TrimSpace(input.Description)
-	if description == "" {
-		return nil, nil, errors.New("description is required")
-	}
-
-	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
-	}
-
-	subtask, err := apiClient.CreateSubtask(taskID, description)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create subtask: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"id":          subtask.ID.String(),
-		"task_id":     subtask.TaskID.String(),
-		"description": subtask.Description,
-		"completed":   subtask.Completed,
-		"status":      subtask.Status,
-		"created_at":  subtask.CreatedAt,
-		"message":     "Subtask created successfully.",
-		"_context":    getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type GetSubtasksInput struct {
-	TaskID string `json:"task_id"`
-}
-
-func handleGetSubtasks(ctx context.Context, req *mcp.CallToolRequest, input GetSubtasksInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	taskID := strings.TrimSpace(input.TaskID)
-	if taskID == "" {
-		return nil, nil, errors.New("task_id is required")
-	}
-
-	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, nil, errors.New("invalid task_id format - must be a valid UUID")
-	}
-
-	subtasks, err := apiClient.ListSubtasks(taskID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get subtasks: %w", err)
-	}
-
-	// Format subtasks for agent-friendly output
-	formattedSubtasks := make([]map[string]interface{}, 0, len(subtasks))
-	completedCount := 0
-	for _, st := range subtasks {
-		s := map[string]interface{}{
-			"id":          st.ID.String(),
-			"description": st.Description,
-			"completed":   st.Completed,
-			"status":      st.Status,
-			"priority":    st.Priority,
-			"created_at":  st.CreatedAt,
-		}
-		if st.Completed == 1 {
-			completedCount++
-		}
-		formattedSubtasks = append(formattedSubtasks, s)
-	}
-
-	result := map[string]interface{}{
-		"task_id":         taskID,
-		"subtasks":        formattedSubtasks,
-		"total_count":     len(formattedSubtasks),
-		"completed_count": completedCount,
-		"pending_count":   len(formattedSubtasks) - completedCount,
-		"_context":        getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type CompleteSubtaskInput struct {
-	SubtaskID string `json:"subtask_id"`
-}
-
-func handleCompleteSubtask(ctx context.Context, req *mcp.CallToolRequest, input CompleteSubtaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	subtaskID := strings.TrimSpace(input.SubtaskID)
-	if subtaskID == "" {
-		return nil, nil, errors.New("subtask_id is required")
-	}
-
-	if _, err := uuid.Parse(subtaskID); err != nil {
-		return nil, nil, errors.New("invalid subtask_id format - must be a valid UUID")
-	}
-
-	subtask, err := apiClient.CompleteSubtask(subtaskID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to complete subtask: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"id":          subtask.ID.String(),
-		"description": subtask.Description,
-		"completed":   subtask.Completed,
-		"status":      subtask.Status,
-		"message":     "Subtask marked as completed.",
-		"_context":    getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type UpdateSubtaskInput struct {
-	SubtaskID   string  `json:"subtask_id"`
-	Description *string `json:"description,omitempty"`
-	Status      *string `json:"status,omitempty"`      // TODO, IN_PROGRESS, COMPLETED
-	Priority    *string `json:"priority,omitempty"`    // L, M, H
-}
-
-func handleUpdateSubtask(ctx context.Context, req *mcp.CallToolRequest, input UpdateSubtaskInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	subtaskID := strings.TrimSpace(input.SubtaskID)
-	if subtaskID == "" {
-		return nil, nil, errors.New("subtask_id is required")
-	}
-
-	if _, err := uuid.Parse(subtaskID); err != nil {
-		return nil, nil, errors.New("invalid subtask_id format - must be a valid UUID")
-	}
-
-	// Build update request
-	updateReq := api.UpdateSubtaskRequest{}
-	if input.Description != nil {
-		desc := strings.TrimSpace(*input.Description)
-		if desc != "" {
-			updateReq.Description = &desc
-		}
-	}
-	if input.Status != nil {
-		status := strings.TrimSpace(*input.Status)
-		if status != "" {
-			// Validate status
-			validStatuses := map[string]bool{"TODO": true, "IN_PROGRESS": true, "COMPLETED": true}
-			if !validStatuses[strings.ToUpper(status)] {
-				return nil, nil, errors.New("invalid status - must be TODO, IN_PROGRESS, or COMPLETED")
-			}
-			upperStatus := strings.ToUpper(status)
-			updateReq.Status = &upperStatus
-		}
-	}
-	if input.Priority != nil {
-		priority := strings.TrimSpace(*input.Priority)
-		if priority != "" {
-			// Validate priority
-			validPriorities := map[string]bool{"L": true, "M": true, "H": true}
-			if !validPriorities[strings.ToUpper(priority)] {
-				return nil, nil, errors.New("invalid priority - must be L (Low), M (Medium), or H (High)")
-			}
-			upperPriority := strings.ToUpper(priority)
-			updateReq.Priority = &upperPriority
-		}
-	}
-
-	subtask, err := apiClient.UpdateSubtask(subtaskID, updateReq)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to update subtask: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"id":          subtask.ID.String(),
-		"description": subtask.Description,
-		"completed":   subtask.Completed,
-		"status":      subtask.Status,
-		"priority":    subtask.Priority,
-		"message":     "Subtask updated successfully.",
-		"_context":    getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-// ============================================================================
-// PLAN TOOL HANDLERS
-// ============================================================================
-
-type CreatePlanInput struct {
-	Title        string  `json:"title,omitempty"`
-	Requirements string  `json:"requirements"`
-	Project      string  `json:"project,omitempty"`
-	Type         string  `json:"type,omitempty"`
-	Consensus    float64 `json:"consensus,omitempty"`
-	BudgetUSD    float64 `json:"budget_usd,omitempty"`
-}
-
-func handleCreatePlan(ctx context.Context, req *mcp.CallToolRequest, input CreatePlanInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	if strings.TrimSpace(input.Requirements) == "" {
-		return nil, nil, errors.New("requirements (goal) is required")
-	}
-
-	apiClient := api.NewClient()
-	setAgentInfoFromSession(apiClient)
-
-	// Resolve project if provided
-	var projectID string
-	if input.Project != "" {
-		projects, err := apiClient.ListProjects()
-		if err == nil {
-			for _, p := range projects {
-				if p.ID.String() == input.Project ||
-					strings.HasPrefix(p.ID.String(), input.Project) ||
-					strings.EqualFold(p.Name, input.Project) {
-					projectID = p.ID.String()
-					break
-				}
-			}
-		}
-	}
-
-	// Set defaults
-	title := input.Title
-	if title == "" {
-		title = input.Requirements
-		if len(title) > 50 {
-			title = title[:47] + "..."
-		}
-	}
-
-	planType := input.Type
-	if planType == "" {
-		planType = "feature"
-	}
-
-	consensus := input.Consensus
-	if consensus == 0 {
-		consensus = 0.75
-	}
-
-	budgetUSD := input.BudgetUSD
-	if budgetUSD == 0 {
-		budgetUSD = 5.0
-	}
-
-	plan, err := apiClient.CreatePlan(api.CreatePlanRequest{
-		Title:        title,
-		Requirements: input.Requirements,
-		ProjectID:    projectID,
-		Type:         planType,
-		Configuration: &api.PlanConfiguration{
-			ConsensusThreshold: consensus,
-			BudgetUSD:          budgetUSD,
-		},
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create plan: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"id":            plan.ID,
-		"title":         plan.Title,
-		"type":          plan.Type,
-		"status":        plan.Status,
-		"current_phase": plan.CurrentPhase,
-		"message":       fmt.Sprintf("Plan '%s' created. Use get_plan_status to monitor progress.", plan.Title),
-		"_context":      getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type GetPlanStatusInput struct {
-	PlanID string `json:"plan_id"`
-}
-
-func handleGetPlanStatus(ctx context.Context, req *mcp.CallToolRequest, input GetPlanStatusInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	if strings.TrimSpace(input.PlanID) == "" {
-		return nil, nil, errors.New("plan_id is required")
-	}
-
-	apiClient := api.NewClient()
-	setAgentInfoFromSession(apiClient)
-
-	plan, err := apiClient.GetPlan(input.PlanID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get plan: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"id":            plan.ID,
-		"title":         plan.Title,
-		"type":          plan.Type,
-		"status":        plan.Status,
-		"current_phase": plan.CurrentPhase,
-		"progress":      plan.Progress,
-		"requirements":  plan.Requirements,
-		"tokens_used":   plan.TokensUsed,
-		"cost_usd":      plan.SpentBudgetUSD,
-		"task_count":    plan.TaskCount,
-		"adr_count":     plan.ADRCount,
-		"risk_count":    plan.RiskCount,
-		"_context":      getContextString(),
-	}
-
-	if plan.Error != "" {
-		result["error"] = plan.Error
-	}
-	if plan.FinalConsensusScore != nil {
-		result["consensus_score"] = *plan.FinalConsensusScore
-	}
-
-	// Add phases info
-	if len(plan.Phases) > 0 {
-		phases := make([]map[string]interface{}, len(plan.Phases))
-		for i, p := range plan.Phases {
-			phase := map[string]interface{}{
-				"phase":    p.Phase,
-				"status":   p.Status,
-				"sequence": p.Sequence,
-			}
-			if p.ConsensusScore != nil {
-				phase["consensus_score"] = *p.ConsensusScore
-			}
-			phases[i] = phase
-		}
-		result["phases"] = phases
-	}
-
-	return nil, result, nil
-}
-
-type ListPlansInput struct {
-	Status  string `json:"status,omitempty"`
-	Type    string `json:"type,omitempty"`
-	Project string `json:"project,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
-}
-
-func handleListPlans(ctx context.Context, req *mcp.CallToolRequest, input ListPlansInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	apiClient := api.NewClient()
-	setAgentInfoFromSession(apiClient)
-
-	// Resolve project if provided
-	var projectID string
-	if input.Project != "" {
-		projects, err := apiClient.ListProjects()
-		if err == nil {
-			for _, p := range projects {
-				if p.ID.String() == input.Project ||
-					strings.HasPrefix(p.ID.String(), input.Project) ||
-					strings.EqualFold(p.Name, input.Project) {
-					projectID = p.ID.String()
-					break
-				}
-			}
-		}
-	}
-
-	limit := input.Limit
-	if limit == 0 {
-		limit = 10
-	}
-
-	plans, err := apiClient.ListPlans(api.ListPlansFilter{
-		Status:    input.Status,
-		Type:      input.Type,
-		ProjectID: projectID,
-		Limit:     limit,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list plans: %w", err)
-	}
-
-	planList := make([]map[string]interface{}, len(plans))
-	for i, p := range plans {
-		planList[i] = map[string]interface{}{
-			"id":            p.ID,
-			"title":         p.Title,
-			"type":          p.Type,
-			"status":        p.Status,
-			"progress":      p.Progress,
-			"current_phase": p.CurrentPhase,
-		}
-	}
-
-	result := map[string]interface{}{
-		"plans":    planList,
-		"count":    len(plans),
-		"_context": getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-type ApplyPlanInput struct {
-	PlanID     string `json:"plan_id"`
-	ApplyTasks bool   `json:"apply_tasks,omitempty"`
-	ApplyADRs  bool   `json:"apply_adrs,omitempty"`
-	TaskStatus string `json:"task_status,omitempty"`
-	ADRStatus  string `json:"adr_status,omitempty"`
-}
-
-func handleApplyPlan(ctx context.Context, req *mcp.CallToolRequest, input ApplyPlanInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	if strings.TrimSpace(input.PlanID) == "" {
-		return nil, nil, errors.New("plan_id is required")
-	}
-
-	apiClient := api.NewClient()
-	setAgentInfoFromSession(apiClient)
-
-	// Defaults: apply both if not specified
-	applyTasks := input.ApplyTasks
-	applyADRs := input.ApplyADRs
-	if !applyTasks && !applyADRs {
-		applyTasks = true
-		applyADRs = true
-	}
-
-	taskStatus := input.TaskStatus
-	if taskStatus == "" {
-		taskStatus = "TODO"
-	}
-
-	adrStatus := input.ADRStatus
-	if adrStatus == "" {
-		adrStatus = "draft"
-	}
-
-	response, err := apiClient.ApplyPlan(input.PlanID, api.ApplyPlanRequest{
-		ApplyTasks: applyTasks,
-		ApplyADRs:  applyADRs,
-		TaskStatus: taskStatus,
-		ADRStatus:  adrStatus,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to apply plan: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"tasks_created": response.TasksCreated,
-		"adrs_created":  response.ADRsCreated,
-		"message":       fmt.Sprintf("Plan applied: %d tasks and %d ADRs created.", response.TasksCreated, response.ADRsCreated),
-		"_context":      getContextString(),
-	}
-
-	if len(response.TaskIDs) > 0 {
-		result["task_ids"] = response.TaskIDs
-	}
-	if len(response.ADRIDs) > 0 {
-		result["adr_ids"] = response.ADRIDs
-	}
-
-	return nil, result, nil
-}
-
-type CancelPlanInput struct {
-	PlanID string `json:"plan_id"`
-}
-
-func handleCancelPlan(ctx context.Context, req *mcp.CallToolRequest, input CancelPlanInput) (*mcp.CallToolResult, map[string]interface{}, error) {
-	if strings.TrimSpace(input.PlanID) == "" {
-		return nil, nil, errors.New("plan_id is required")
-	}
-
-	apiClient := api.NewClient()
-	setAgentInfoFromSession(apiClient)
-
-	err := apiClient.CancelPlan(input.PlanID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to cancel plan: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"plan_id":  input.PlanID,
-		"status":   "cancelled",
-		"message":  "Plan cancelled successfully.",
-		"_context": getContextString(),
-	}
-
-	return nil, result, nil
-}
-
-// ============================================================================

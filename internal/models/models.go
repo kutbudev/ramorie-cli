@@ -47,6 +47,10 @@ type Task struct {
 	EncryptedDescription string `json:"encrypted_description,omitempty"`
 	DescriptionNonce     string `json:"description_nonce,omitempty"`
 	IsEncrypted          bool   `json:"is_encrypted"`
+	// Encryption scope (personal vs organization)
+	EncryptionScope string `json:"encryption_scope,omitempty"`
+	EncryptionOrgID string `json:"encryption_org_id,omitempty"`
+	KeyVersion      int    `json:"key_version,omitempty"`
 }
 
 // Memory represents a memory/knowledge item
@@ -63,6 +67,10 @@ type Memory struct {
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 	ContentNonce     string `json:"content_nonce,omitempty"`
 	IsEncrypted      bool   `json:"is_encrypted"`
+	// Encryption scope (personal vs organization)
+	EncryptionScope string `json:"encryption_scope,omitempty"`
+	EncryptionOrgID string `json:"encryption_org_id,omitempty"`
+	KeyVersion      int    `json:"key_version,omitempty"`
 }
 
 type Tag struct {

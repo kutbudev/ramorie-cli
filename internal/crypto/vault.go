@@ -14,6 +14,17 @@ type VaultState struct {
 	SymmetricKey []byte
 	Salt         []byte
 	Iterations   int
+	// Organization encryption keys (orgId -> derived org key bytes)
+	OrgKeys map[string][]byte
+}
+
+// OrgVaultConfig stores organization encryption configuration
+type OrgVaultConfig struct {
+	OrgID         string `json:"org_id"`
+	Salt          string `json:"salt"`           // base64
+	KDFIterations int    `json:"kdf_iterations"`
+	KDFAlgorithm  string `json:"kdf_algorithm"`
+	IsEnabled     bool   `json:"is_enabled"`
 }
 
 // VaultConfig stores encryption configuration (persisted to disk)
@@ -320,4 +331,175 @@ func DecryptContent(encryptedContent, nonce string, isEncrypted bool) (string, e
 	}
 
 	return plaintext, nil
+}
+
+// --- Organization Encryption ---
+
+// IsOrgVaultUnlocked returns whether a specific org vault is unlocked
+func IsOrgVaultUnlocked(orgID string) bool {
+	vaultMutex.RLock()
+	defer vaultMutex.RUnlock()
+
+	if currentVault == nil || currentVault.OrgKeys == nil {
+		return false
+	}
+	_, ok := currentVault.OrgKeys[orgID]
+	return ok
+}
+
+// UnlockOrgVault derives the org key from passphrase and stores it in memory
+func UnlockOrgVault(orgID, passphrase string, config *OrgVaultConfig) error {
+	if !config.IsEnabled {
+		return fmt.Errorf("org encryption is not enabled for org %s", orgID)
+	}
+
+	salt, err := Base64ToBytes(config.Salt)
+	if err != nil {
+		return fmt.Errorf("invalid org salt: %w", err)
+	}
+
+	iterations := config.KDFIterations
+	if iterations == 0 {
+		iterations = PBKDF2Iterations
+	}
+
+	// Derive org key from passphrase using PBKDF2
+	orgKey := DeriveKey(passphrase, salt, iterations)
+
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
+
+	if currentVault == nil {
+		currentVault = &VaultState{}
+	}
+	if currentVault.OrgKeys == nil {
+		currentVault.OrgKeys = make(map[string][]byte)
+	}
+	currentVault.OrgKeys[orgID] = orgKey
+
+	// Store org key in keyring for cross-process access
+	if err := StoreOrgKey(orgID, orgKey); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not store org key in keyring: %v\n", err)
+	}
+
+	return nil
+}
+
+// LockOrgVault clears a specific org key from memory and keyring
+func LockOrgVault(orgID string) {
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
+
+	if currentVault != nil && currentVault.OrgKeys != nil {
+		if key, ok := currentVault.OrgKeys[orgID]; ok {
+			// Securely zero out the key
+			for i := range key {
+				key[i] = 0
+			}
+			delete(currentVault.OrgKeys, orgID)
+		}
+	}
+
+	// Remove from keyring
+	_ = DeleteOrgKey(orgID)
+}
+
+// GetOrgSymmetricKey returns the org encryption key for a specific org
+func GetOrgSymmetricKey(orgID string) ([]byte, error) {
+	vaultMutex.RLock()
+	if currentVault != nil && currentVault.OrgKeys != nil {
+		if key, ok := currentVault.OrgKeys[orgID]; ok {
+			keyCopy := make([]byte, len(key))
+			copy(keyCopy, key)
+			vaultMutex.RUnlock()
+			return keyCopy, nil
+		}
+	}
+	vaultMutex.RUnlock()
+
+	// Try to restore from keyring
+	orgKey, err := RetrieveOrgKey(orgID)
+	if err == nil && orgKey != nil {
+		vaultMutex.Lock()
+		if currentVault == nil {
+			currentVault = &VaultState{}
+		}
+		if currentVault.OrgKeys == nil {
+			currentVault.OrgKeys = make(map[string][]byte)
+		}
+		currentVault.OrgKeys[orgID] = orgKey
+		vaultMutex.Unlock()
+
+		keyCopy := make([]byte, len(orgKey))
+		copy(keyCopy, orgKey)
+		return keyCopy, nil
+	}
+
+	return nil, fmt.Errorf("org vault is locked for org %s - run 'ramorie org unlock' first", orgID)
+}
+
+// GetKeyForScope returns the appropriate encryption key based on scope
+func GetKeyForScope(scope, orgID string) ([]byte, error) {
+	if scope == "organization" && orgID != "" {
+		return GetOrgSymmetricKey(orgID)
+	}
+	return GetSymmetricKey()
+}
+
+// EncryptContentWithScope encrypts content using the appropriate key for the scope
+func EncryptContentWithScope(content, scope, orgID string) (encrypted, nonce string, isEncrypted bool, err error) {
+	key, err := GetKeyForScope(scope, orgID)
+	if err != nil {
+		// Key not available - return unencrypted
+		return content, "", false, nil
+	}
+
+	encrypted, nonce, err = EncryptToBase64(content, key)
+	if err != nil {
+		return "", "", false, fmt.Errorf("encryption failed: %w", err)
+	}
+
+	return encrypted, nonce, true, nil
+}
+
+// DecryptContentWithScope decrypts content using the appropriate key for the scope
+func DecryptContentWithScope(encryptedContent, nonce, scope, orgID string, isEncrypted bool) (string, error) {
+	if !isEncrypted {
+		return encryptedContent, nil
+	}
+
+	key, err := GetKeyForScope(scope, orgID)
+	if err != nil {
+		if scope == "organization" {
+			return "[Org Encrypted - Unlock org vault to view]", nil
+		}
+		return "[Encrypted - Unlock vault to view]", nil
+	}
+
+	plaintext, err := DecryptFromBase64(encryptedContent, nonce, key)
+	if err != nil {
+		return "[Decryption failed]", nil
+	}
+
+	return plaintext, nil
+}
+
+// CreateOrgPassphraseHash creates the verification hash for org passphrase
+func CreateOrgPassphraseHash(passphrase string, salt []byte, iterations int) (string, error) {
+	hash := CreatePasswordHash(passphrase, salt, iterations)
+	return hash, nil
+}
+
+// RestoreOrgKeyFromKeyring restores an org key from keyring into the vault state
+func RestoreOrgKeyFromKeyring(orgID string, orgKey []byte) {
+	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
+
+	if currentVault == nil {
+		currentVault = &VaultState{}
+	}
+	if currentVault.OrgKeys == nil {
+		currentVault.OrgKeys = make(map[string][]byte)
+	}
+	currentVault.OrgKeys[orgID] = orgKey
 }

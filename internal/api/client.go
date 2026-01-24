@@ -2221,3 +2221,130 @@ func (c *Client) ListPlanRisks(planID string) ([]PlanRisk, error) {
 	}
 	return risks, nil
 }
+
+// --- Organization Encryption API ---
+
+// OrgEncryptionConfig represents the org encryption configuration from server
+type OrgEncryptionConfig struct {
+	OrganizationID    string `json:"organization_id"`
+	Salt              string `json:"salt"`
+	KDFAlgorithm      string `json:"kdf_algorithm"`
+	KDFIterations     int    `json:"kdf_iterations"`
+	EncryptionVersion int    `json:"encryption_version"`
+	IsEnabled         bool   `json:"is_enabled"`
+}
+
+// OrgEncryptionStatus represents the encryption status with member info
+type OrgEncryptionStatus struct {
+	IsEnabled         bool   `json:"is_enabled"`
+	EncryptionVersion int    `json:"encryption_version"`
+	SetupBy           string `json:"setup_by,omitempty"`
+	SetupAt           string `json:"setup_at,omitempty"`
+}
+
+// OrgWrappedKey represents the wrapped org key for auto-unlock
+type OrgWrappedKey struct {
+	WrappedOrgKey string `json:"wrapped_org_key"`
+	KeyNonce      string `json:"key_nonce"`
+	KeyVersion    int    `json:"key_version"`
+}
+
+// GetOrgEncryptionConfig fetches the org encryption configuration (salt, KDF params)
+func (c *Client) GetOrgEncryptionConfig(orgID string) (*OrgEncryptionConfig, error) {
+	endpoint := fmt.Sprintf("/organizations/%s/encryption/config", orgID)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var config OrgEncryptionConfig
+	if err := json.Unmarshal(respBody, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal org encryption config: %w", err)
+	}
+	return &config, nil
+}
+
+// GetOrgEncryptionStatus gets the encryption status for an org
+func (c *Client) GetOrgEncryptionStatus(orgID string) (*OrgEncryptionStatus, error) {
+	endpoint := fmt.Sprintf("/organizations/%s/encryption/status", orgID)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var status OrgEncryptionStatus
+	if err := json.Unmarshal(respBody, &status); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal org encryption status: %w", err)
+	}
+	return &status, nil
+}
+
+// SetupOrgEncryption initializes encryption for an organization
+func (c *Client) SetupOrgEncryption(orgID, salt, passphraseHash string, kdfIterations int) error {
+	endpoint := fmt.Sprintf("/organizations/%s/encryption/setup", orgID)
+	body := map[string]interface{}{
+		"salt":            salt,
+		"passphrase_hash": passphraseHash,
+		"kdf_iterations":  kdfIterations,
+	}
+	_, err := c.makeRequest("POST", endpoint, body)
+	return err
+}
+
+// VerifyOrgPassphrase verifies the passphrase hash with the server
+func (c *Client) VerifyOrgPassphrase(orgID, passphraseHash string) (bool, error) {
+	endpoint := fmt.Sprintf("/organizations/%s/encryption/verify", orgID)
+	body := map[string]interface{}{
+		"passphrase_hash": passphraseHash,
+	}
+	respBody, err := c.makeRequest("POST", endpoint, body)
+	if err != nil {
+		return false, err
+	}
+
+	var result struct {
+		Verified bool `json:"verified"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return false, fmt.Errorf("failed to unmarshal verify response: %w", err)
+	}
+	return result.Verified, nil
+}
+
+// StoreOrgWrappedKey stores the wrapped org key for auto-unlock
+func (c *Client) StoreOrgWrappedKey(orgID, wrappedKey, keyNonce string) error {
+	endpoint := fmt.Sprintf("/organizations/%s/encryption/store-key", orgID)
+	body := map[string]interface{}{
+		"wrapped_org_key": wrappedKey,
+		"key_nonce":       keyNonce,
+	}
+	_, err := c.makeRequest("POST", endpoint, body)
+	return err
+}
+
+// GetOrgWrappedKey fetches the user's wrapped org key for auto-unlock
+func (c *Client) GetOrgWrappedKey(orgID string) (*OrgWrappedKey, error) {
+	endpoint := fmt.Sprintf("/organizations/%s/encryption/wrapped-key", orgID)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped OrgWrappedKey
+	if err := json.Unmarshal(respBody, &wrapped); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal wrapped key: %w", err)
+	}
+	return &wrapped, nil
+}
+
+// RotateOrgEncryption rotates the org encryption key (new salt + hash, bumps version)
+func (c *Client) RotateOrgEncryption(orgID, newSalt, newPassphraseHash string, newKDFIterations int) error {
+	endpoint := fmt.Sprintf("/organizations/%s/encryption/rotate", orgID)
+	body := map[string]interface{}{
+		"salt":            newSalt,
+		"passphrase_hash": newPassphraseHash,
+		"kdf_iterations":  newKDFIterations,
+	}
+	_, err := c.makeRequest("POST", endpoint, body)
+	return err
+}
