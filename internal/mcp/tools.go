@@ -139,7 +139,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (including 'skill' for procedural memory), dedup_mode, force, ttl, valid_from/valid_until. For type='skill': trigger (when to use), steps (array of steps), validation (how to verify).",
+		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type ('skill' for procedural memory), ttl, valid_from/valid_until, visibility (private/project/organization/public), readers, writers. For type='skill': trigger, steps, validation.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Add Memory",
 			DestructiveHint: boolPtr(false),
@@ -959,6 +959,11 @@ type AddMemoryInput struct {
 	Trigger    string   `json:"trigger,omitempty"`    // Conditions when this skill should be activated
 	Steps      []string `json:"steps,omitempty"`      // Array of steps to follow
 	Validation string   `json:"validation,omitempty"` // How to verify the skill was applied
+
+	// Access control fields
+	Visibility string   `json:"visibility,omitempty"` // private (creator only), project (project members), organization (default), public
+	Readers    []string `json:"readers,omitempty"`    // User IDs with explicit read access (overrides visibility)
+	Writers    []string `json:"writers,omitempty"`    // User IDs with explicit write access (overrides visibility)
 }
 
 func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, any, error) {
@@ -1141,6 +1146,9 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 		Trigger:    input.Trigger,
 		Steps:      input.Steps,
 		Validation: input.Validation,
+		Visibility: input.Visibility,
+		Readers:    input.Readers,
+		Writers:    input.Writers,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1505,11 +1513,7 @@ func handleSurfaceSkills(ctx context.Context, req *mcp.CallToolRequest, input Su
 
 	for _, m := range memories {
 		// Only consider skill-type memories
-		memType := ""
-		if m.Type != nil {
-			memType = *m.Type
-		}
-		if memType != "skill" {
+		if m.Type != "skill" {
 			continue
 		}
 

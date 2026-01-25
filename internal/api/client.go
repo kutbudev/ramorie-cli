@@ -723,6 +723,11 @@ type CreateMemoryOptions struct {
 	Trigger    string   // Optional: conditions when this skill should be activated
 	Steps      []string // Optional: array of steps to follow
 	Validation string   // Optional: how to verify the skill was applied
+
+	// Access control fields
+	Visibility string   // Optional: private, project, organization (default), public
+	Readers    []string // Optional: user IDs with explicit read access
+	Writers    []string // Optional: user IDs with explicit write access
 }
 
 // CreateMemoryWithOptions creates a memory with full options including TTL, temporal, and procedural fields
@@ -764,6 +769,17 @@ func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memo
 	}
 	if opts.Validation != "" {
 		reqBody["validation"] = opts.Validation
+	}
+
+	// Add access control fields if provided
+	if opts.Visibility != "" {
+		reqBody["visibility"] = opts.Visibility
+	}
+	if len(opts.Readers) > 0 {
+		reqBody["readers"] = opts.Readers
+	}
+	if len(opts.Writers) > 0 {
+		reqBody["writers"] = opts.Writers
 	}
 
 	respBody, err := c.makeRequest("POST", "/memories", reqBody)

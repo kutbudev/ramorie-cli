@@ -63,9 +63,19 @@ type Memory struct {
 	Project      *Project    `json:"project,omitempty"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
+	// Memory categorization
+	Type string `json:"type"` // general, decision, bug_fix, preference, pattern, reference, skill
 	// Importance scoring
 	Importance  *float64 `json:"importance,omitempty"`
 	AccessCount int      `json:"access_count"`
+	// Procedural memory fields (for type='skill')
+	Trigger    *string  `json:"trigger,omitempty"`    // Conditions when this skill should be activated
+	Steps      []string `json:"steps,omitempty"`      // Array of steps to follow
+	Validation *string  `json:"validation,omitempty"` // How to verify the skill was applied
+	// Access control fields
+	Visibility string   `json:"visibility,omitempty"` // private, project, organization, public
+	Readers    []string `json:"readers,omitempty"`    // User IDs with read access
+	Writers    []string `json:"writers,omitempty"`    // User IDs with write access
 	// Encryption fields for zero-knowledge encryption
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 	ContentNonce     string `json:"content_nonce,omitempty"`
