@@ -263,6 +263,26 @@ func registerTools(server *mcp.Server) {
 	}, handleManageContextPack)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "export_context_pack",
+		Description: "🟢 ADVANCED | Export a context pack as a portable JSON bundle with all linked memories, tasks, and contexts. REQUIRED: pack_id. Returns downloadable bundle for migration or backup.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Export Context Pack",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleExportContextPack)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "import_context_pack",
+		Description: "🟢 ADVANCED | Import a previously exported context pack bundle. REQUIRED: bundle (JSON), project (target project). Optional: conflict_mode (skip|overwrite|rename). Recreates context pack with all linked items.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Import Context Pack",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleImportContextPack)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
 		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title. Optional: description, status, area, context, consequences.",
 		Annotations: &mcp.ToolAnnotations{
@@ -303,7 +323,7 @@ func registerTools(server *mcp.Server) {
 	}, handleGetAgentActivity)
 
 	// ============================================================================
-	// 🟢 ADVANCED (7 tools)
+	// 🟢 ADVANCED (9 tools)
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_project",
@@ -1668,7 +1688,92 @@ func handleGetContextPack(ctx context.Context, req *mcp.CallToolRequest, input G
 	return mustTextResult(pack), nil, nil
 }
 
+// ============================================================================
+// CONTEXT PACK EXPORT/IMPORT HANDLERS
+// ============================================================================
 
+type ExportContextPackInput struct {
+	PackID string `json:"pack_id"` // REQUIRED
+}
+
+func handleExportContextPack(ctx context.Context, req *mcp.CallToolRequest, input ExportContextPackInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("export_context_pack"); err != nil {
+		return nil, nil, err
+	}
+
+	packID := strings.TrimSpace(input.PackID)
+	if packID == "" {
+		return nil, nil, errors.New("pack_id is required")
+	}
+
+	// Call export endpoint
+	respBody, err := apiClient.Request("GET", "/context-packs/"+packID+"/export", nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("export failed: %w", err)
+	}
+
+	var bundle map[string]interface{}
+	if err := json.Unmarshal(respBody, &bundle); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse export bundle: %w", err)
+	}
+
+	result := formatMCPResponse(bundle, getContextString())
+	result["_message"] = "✅ Context pack exported successfully. Use import_context_pack to import this bundle elsewhere."
+	result["_format"] = "json"
+	result["_version"] = bundle["version"]
+
+	return mustTextResult(result), nil, nil
+}
+
+type ImportContextPackInput struct {
+	Bundle       map[string]interface{} `json:"bundle"`        // REQUIRED: The export bundle (JSON object)
+	Project      string                 `json:"project"`       // REQUIRED: Target project name or ID
+	ConflictMode string                 `json:"conflict_mode"` // Optional: skip, overwrite, rename (default)
+}
+
+func handleImportContextPack(ctx context.Context, req *mcp.CallToolRequest, input ImportContextPackInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("import_context_pack"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.Bundle == nil {
+		return nil, nil, errors.New("bundle is required")
+	}
+	project := strings.TrimSpace(input.Project)
+	if project == "" {
+		return nil, nil, errors.New("project is required")
+	}
+
+	projectID, err := resolveProjectID(apiClient, project)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve project: %w", err)
+	}
+
+	// Build import request
+	importReq := map[string]interface{}{
+		"bundle":     input.Bundle,
+		"project_id": projectID,
+	}
+	if input.ConflictMode != "" {
+		importReq["conflict_mode"] = input.ConflictMode
+	}
+
+	// Call import endpoint
+	respBody, err := apiClient.Request("POST", "/context-packs/import", importReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("import failed: %w", err)
+	}
+
+	var importResult map[string]interface{}
+	if err := json.Unmarshal(respBody, &importResult); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse import result: %w", err)
+	}
+
+	result := formatMCPResponse(importResult, getContextString())
+	result["_message"] = "✅ Context pack imported successfully."
+
+	return mustTextResult(result), nil, nil
+}
 
 // ============================================================================
 // ORGANIZATION HANDLERS
@@ -1927,7 +2032,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "get_stats", Description: "🟡 COMMON | Get task statistics and completion rates."},
 		{Name: "get_agent_activity", Description: "🟡 COMMON | Get recent agent activity timeline."},
 		// ============================================================================
-		// 🟢 ADVANCED (7 tools)
+		// 🟢 ADVANCED (9 tools)
 		// ============================================================================
 		{Name: "create_project", Description: "🟢 ADVANCED | Create a new project."},
 		{Name: "move_task", Description: "🟢 ADVANCED | Move a task to a different project."},
@@ -1938,6 +2043,8 @@ func ToolDefinitions() []toolDef {
 		{Name: "switch_organization", Description: "🟢 ADVANCED | Switch active organization context."},
 		{Name: "consolidate_memories", Description: "🟢 ADVANCED | Trigger memory consolidation (scores, promotes, archives)."},
 		{Name: "cleanup_memories", Description: "🟢 ADVANCED | Clean up TTL-expired memories."},
+		{Name: "export_context_pack", Description: "🟢 ADVANCED | Export context pack as portable JSON bundle."},
+		{Name: "import_context_pack", Description: "🟢 ADVANCED | Import context pack bundle with all linked items."},
 	}
 }
 
