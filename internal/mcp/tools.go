@@ -139,7 +139,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (general, decision, bug_fix, preference, pattern, reference, skill), dedup_mode (auto|off), force, ttl (seconds until expiration), valid_from/valid_until (RFC3339 timestamps for temporal validity).",
+		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (including 'skill' for procedural memory), dedup_mode, force, ttl, valid_from/valid_until. For type='skill': trigger (when to use), steps (array of steps), validation (how to verify).",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Add Memory",
 			DestructiveHint: boolPtr(false),
@@ -156,6 +156,16 @@ func registerTools(server *mcp.Server) {
 			OpenWorldHint: boolPtr(false),
 		},
 	}, handleRecall)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "surface_skills",
+		Description: "🟡 COMMON | Find relevant procedural skills based on context. REQUIRED: context (describe current task/situation). Returns skills with matching triggers, steps, and validation. Use before starting new tasks to check if learned procedures apply.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Surface Relevant Skills",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleSurfaceSkills)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_focus",
@@ -933,7 +943,7 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 type AddMemoryInput struct {
 	Content         string `json:"content"`
 	Project         string `json:"project"`                    // REQUIRED - project name or ID
-	Type            string `json:"type,omitempty"`             // Memory type: general, decision, bug_fix, preference, pattern, reference (auto-detected if not provided)
+	Type            string `json:"type,omitempty"`             // Memory type: general, decision, bug_fix, preference, pattern, reference, skill
 	Force           bool   `json:"force,omitempty"`            // Skip similarity check and force creation
 	DedupMode       string `json:"dedup_mode,omitempty"`       // Deduplication mode: "auto" (default) merges if >85% similar, "off" skips dedup
 	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
@@ -944,6 +954,11 @@ type AddMemoryInput struct {
 	// Temporal validity
 	ValidFrom  string `json:"valid_from,omitempty"`  // RFC3339 timestamp when fact became valid
 	ValidUntil string `json:"valid_until,omitempty"` // RFC3339 timestamp when fact was superseded
+
+	// Procedural memory fields (for type='skill')
+	Trigger    string   `json:"trigger,omitempty"`    // Conditions when this skill should be activated
+	Steps      []string `json:"steps,omitempty"`      // Array of steps to follow
+	Validation string   `json:"validation,omitempty"` // How to verify the skill was applied
 }
 
 func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, any, error) {
@@ -1123,6 +1138,9 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 		TTL:        input.TTL,
 		ValidFrom:  input.ValidFrom,
 		ValidUntil: input.ValidUntil,
+		Trigger:    input.Trigger,
+		Steps:      input.Steps,
+		Validation: input.Validation,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1443,6 +1461,148 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	return mustTextResult(response), nil, nil
 }
 
+// SurfaceSkillsInput for proactive skill surfacing
+type SurfaceSkillsInput struct {
+	Context string `json:"context"`          // Current task/situation description
+	Project string `json:"project,omitempty"` // Optional: limit to specific project
+	Limit   int    `json:"limit,omitempty"`   // Max skills to return (default 5)
+}
+
+// handleSurfaceSkills finds relevant procedural skills based on the given context
+func handleSurfaceSkills(ctx context.Context, req *mcp.CallToolRequest, input SurfaceSkillsInput) (*mcp.CallToolResult, any, error) {
+	context := strings.TrimSpace(input.Context)
+	if context == "" {
+		return nil, nil, errors.New("context is required - describe the current task or situation")
+	}
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err == nil {
+			projectID = pid
+		}
+	}
+
+	// Fetch all memories and filter for skills
+	memories, err := apiClient.ListMemories(projectID, "")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	contextLower := strings.ToLower(context)
+	contextWords := strings.Fields(contextLower)
+
+	type scoredSkill struct {
+		skill interface{}
+		score int
+	}
+	var scored []scoredSkill
+
+	for _, m := range memories {
+		// Only consider skill-type memories
+		memType := ""
+		if m.Type != nil {
+			memType = *m.Type
+		}
+		if memType != "skill" {
+			continue
+		}
+
+		// Decrypt content for matching
+		decryptedContent := decryptMemoryContent(&m)
+
+		// Score based on trigger field matching (if available)
+		score := 0
+		triggerMatches := 0
+
+		// Check trigger field for matches
+		triggerStr := ""
+		if m.Trigger != nil {
+			triggerStr = strings.ToLower(*m.Trigger)
+		}
+
+		// Match context words against trigger
+		for _, word := range contextWords {
+			if len(word) < 3 {
+				continue // Skip short words
+			}
+			if triggerStr != "" && strings.Contains(triggerStr, word) {
+				triggerMatches++
+				score += 30 // High weight for trigger matches
+			}
+			// Also match against content
+			if strings.Contains(strings.ToLower(decryptedContent), word) {
+				score += 10
+			}
+		}
+
+		// Require at least some relevance
+		if score < 10 {
+			continue
+		}
+
+		// Build skill result
+		result := map[string]interface{}{
+			"id":      m.ID.String(),
+			"content": decryptedContent,
+			"score":   score,
+		}
+		if m.Trigger != nil && *m.Trigger != "" {
+			result["trigger"] = *m.Trigger
+		}
+		if m.Steps != nil {
+			result["steps"] = m.Steps
+		}
+		if m.Validation != nil && *m.Validation != "" {
+			result["validation"] = *m.Validation
+		}
+		if m.Importance != nil {
+			result["importance"] = *m.Importance
+		}
+		if m.Project != nil {
+			result["project"] = map[string]interface{}{
+				"id":   m.Project.ID.String(),
+				"name": m.Project.Name,
+			}
+		}
+
+		scored = append(scored, scoredSkill{skill: result, score: score})
+	}
+
+	// Sort by score descending
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	// Limit results
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+
+	var results []interface{}
+	for _, s := range scored {
+		results = append(results, s.skill)
+	}
+
+	response := map[string]interface{}{
+		"context":       context,
+		"skills_found":  len(results),
+		"skills":        results,
+		"_message":      fmt.Sprintf("Found %d relevant skills for the given context", len(results)),
+	}
+
+	if len(results) == 0 {
+		response["_hint"] = "No matching skills found. Consider creating a skill memory with add_memory(type='skill', trigger='...', steps=[...], validation='...') when you learn a new procedure."
+	}
+
+	return mustTextResult(response), nil, nil
+}
+
 type ListContextPacksInput struct {
 	Type   string  `json:"type,omitempty"`   // project, integration, decision, custom
 	Status string  `json:"status,omitempty"` // draft, published
@@ -1745,6 +1905,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "create_task", Description: "🔴 ESSENTIAL | Create a new task."},
 		{Name: "add_memory", Description: "🔴 ESSENTIAL | Store knowledge (use type='skill' for procedural memory)."},
 		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
+		{Name: "surface_skills", Description: "🟡 COMMON | Find relevant procedural skills based on context."},
 		{Name: "manage_focus", Description: "🔴 ESSENTIAL | Get/set/clear active workspace focus."},
 		// ============================================================================
 		// 🟡 COMMON (12 tools)

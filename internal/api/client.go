@@ -718,9 +718,14 @@ type CreateMemoryOptions struct {
 	TTL        int      // Optional: time-to-live in seconds (0 = no expiration)
 	ValidFrom  string   // Optional: RFC3339 timestamp when fact became valid
 	ValidUntil string   // Optional: RFC3339 timestamp when fact was superseded
+
+	// Procedural memory fields (for type='skill')
+	Trigger    string   // Optional: conditions when this skill should be activated
+	Steps      []string // Optional: array of steps to follow
+	Validation string   // Optional: how to verify the skill was applied
 }
 
-// CreateMemoryWithOptions creates a memory with full options including TTL and temporal fields
+// CreateMemoryWithOptions creates a memory with full options including TTL, temporal, and procedural fields
 func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memory, error) {
 	reqBody := map[string]interface{}{
 		"project_id": opts.ProjectID,
@@ -748,6 +753,17 @@ func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memo
 	}
 	if opts.ValidUntil != "" {
 		reqBody["valid_until"] = opts.ValidUntil
+	}
+
+	// Add procedural memory fields if provided (for skill type)
+	if opts.Trigger != "" {
+		reqBody["trigger"] = opts.Trigger
+	}
+	if len(opts.Steps) > 0 {
+		reqBody["steps"] = opts.Steps
+	}
+	if opts.Validation != "" {
+		reqBody["validation"] = opts.Validation
 	}
 
 	respBody, err := c.makeRequest("POST", "/memories", reqBody)
