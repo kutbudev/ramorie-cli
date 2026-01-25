@@ -709,6 +709,111 @@ func (c *Client) CreateMemoryWithType(projectID, content, memoryType string, tag
 	return &memory, nil
 }
 
+// CreateMemoryOptions contains options for creating a memory with temporal and decay support
+type CreateMemoryOptions struct {
+	ProjectID  string   // Required
+	Content    string   // Required
+	Type       string   // Optional: memory type
+	Tags       []string // Optional: tags
+	TTL        int      // Optional: time-to-live in seconds (0 = no expiration)
+	ValidFrom  string   // Optional: RFC3339 timestamp when fact became valid
+	ValidUntil string   // Optional: RFC3339 timestamp when fact was superseded
+}
+
+// CreateMemoryWithOptions creates a memory with full options including TTL and temporal fields
+func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memory, error) {
+	reqBody := map[string]interface{}{
+		"project_id": opts.ProjectID,
+		"content":    opts.Content,
+	}
+
+	// Add type if provided
+	if opts.Type != "" {
+		reqBody["type"] = opts.Type
+	}
+
+	// Add tags if provided
+	if len(opts.Tags) > 0 {
+		reqBody["tags"] = opts.Tags
+	}
+
+	// Add TTL if provided (for memory decay)
+	if opts.TTL > 0 {
+		reqBody["ttl"] = opts.TTL
+	}
+
+	// Add temporal validity if provided
+	if opts.ValidFrom != "" {
+		reqBody["valid_from"] = opts.ValidFrom
+	}
+	if opts.ValidUntil != "" {
+		reqBody["valid_until"] = opts.ValidUntil
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var memory models.Memory
+	if err := json.Unmarshal(respBody, &memory); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &memory, nil
+}
+
+// CreateEncryptedMemoryOptions contains options for creating an encrypted memory
+type CreateEncryptedMemoryOptions struct {
+	ProjectID        string   // Required
+	EncryptedContent string   // Required: base64 ciphertext
+	ContentNonce     string   // Required: base64 nonce
+	Tags             []string // Optional
+	TTL              int      // Optional: time-to-live in seconds
+	ValidFrom        string   // Optional: RFC3339 timestamp
+	ValidUntil       string   // Optional: RFC3339 timestamp
+}
+
+// CreateEncryptedMemoryWithOptions creates an encrypted memory with TTL and temporal support
+func (c *Client) CreateEncryptedMemoryWithOptions(opts CreateEncryptedMemoryOptions) (*models.Memory, error) {
+	reqBody := map[string]interface{}{
+		"project_id":        opts.ProjectID,
+		"encrypted_content": opts.EncryptedContent,
+		"content_nonce":     opts.ContentNonce,
+		"is_encrypted":      true,
+	}
+
+	// Add tags if provided
+	if len(opts.Tags) > 0 {
+		reqBody["tags"] = opts.Tags
+	}
+
+	// Add TTL if provided
+	if opts.TTL > 0 {
+		reqBody["ttl"] = opts.TTL
+	}
+
+	// Add temporal validity if provided
+	if opts.ValidFrom != "" {
+		reqBody["valid_from"] = opts.ValidFrom
+	}
+	if opts.ValidUntil != "" {
+		reqBody["valid_until"] = opts.ValidUntil
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var memory models.Memory
+	if err := json.Unmarshal(respBody, &memory); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &memory, nil
+}
+
 // CreateEncryptedMemory creates a memory with encrypted content (zero-knowledge encryption)
 func (c *Client) CreateEncryptedMemory(projectID, encryptedContent, contentNonce string, tags ...string) (*models.Memory, error) {
 	reqBody := map[string]interface{}{

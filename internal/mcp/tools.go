@@ -139,7 +139,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (general, decision, bug_fix, preference, pattern, reference, skill), dedup_mode (auto|off - auto merges >85% similar), force (bypass all checks).",
+		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type (general, decision, bug_fix, preference, pattern, reference, skill), dedup_mode (auto|off), force, ttl (seconds until expiration), valid_from/valid_until (RFC3339 timestamps for temporal validity).",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Add Memory",
 			DestructiveHint: boolPtr(false),
@@ -149,7 +149,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "recall",
-		Description: "🔴 ESSENTIAL | Search memories. REQUIRED: term. Supports OR (space-separated) and AND (comma-separated) search. Optional: project, tag, type (filter by type e.g. 'skill' for learned procedures), min_score, limit.",
+		Description: "🔴 ESSENTIAL | Search memories. REQUIRED: term. Supports OR (space-separated) and AND (comma-separated) search. Optional: project, tag, type, min_score, limit, valid_at (RFC3339 timestamp to query memories valid at that time), include_expired (include TTL-expired memories).",
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Search Memories",
 			ReadOnlyHint:  true,
@@ -373,6 +373,16 @@ func registerTools(server *mcp.Server) {
 			OpenWorldHint:   boolPtr(false),
 		},
 	}, handleConsolidateMemories)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cleanup_memories",
+		Description: "🟢 ADVANCED | Clean up expired memories (TTL-based). Removes memories past their TTL expiration. Optional: project (scope to project), dry_run (preview without deleting), batch_size (default 100).",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Cleanup Expired Memories",
+			DestructiveHint: boolPtr(true),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleCleanupMemories)
 }
 
 // ============================================================================
@@ -927,6 +937,13 @@ type AddMemoryInput struct {
 	Force           bool   `json:"force,omitempty"`            // Skip similarity check and force creation
 	DedupMode       string `json:"dedup_mode,omitempty"`       // Deduplication mode: "auto" (default) merges if >85% similar, "off" skips dedup
 	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
+
+	// Memory decay: TTL-based expiration
+	TTL int `json:"ttl,omitempty"` // Time-to-live in seconds (0 = no expiration)
+
+	// Temporal validity
+	ValidFrom  string `json:"valid_from,omitempty"`  // RFC3339 timestamp when fact became valid
+	ValidUntil string `json:"valid_until,omitempty"` // RFC3339 timestamp when fact was superseded
 }
 
 func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, any, error) {
@@ -1025,7 +1042,14 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 			}
 
 			if isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				memory, err := apiClient.CreateEncryptedMemoryWithOptions(api.CreateEncryptedMemoryOptions{
+					ProjectID:        projectID,
+					EncryptedContent: encryptedContent,
+					ContentNonce:     nonce,
+					TTL:              input.TTL,
+					ValidFrom:        input.ValidFrom,
+					ValidUntil:       input.ValidUntil,
+				})
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1035,6 +1059,9 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 				result["_created_in_project"] = projectID
 				result["_encrypted"] = true
 				result["_encryption_scope"] = "organization"
+				if input.TTL > 0 {
+					result["_ttl_seconds"] = input.TTL
+				}
 				result["_message"] = "✅ Memory created (org-encrypted) in project " + projectID[:8] + "..."
 				return mustTextResult(result), nil, nil
 			}
@@ -1054,7 +1081,14 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 			}
 
 			if isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				memory, err := apiClient.CreateEncryptedMemoryWithOptions(api.CreateEncryptedMemoryOptions{
+					ProjectID:        projectID,
+					EncryptedContent: encryptedContent,
+					ContentNonce:     nonce,
+					TTL:              input.TTL,
+					ValidFrom:        input.ValidFrom,
+					ValidUntil:       input.ValidUntil,
+				})
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1064,6 +1098,9 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 				result["_created_in_project"] = projectID
 				result["_encrypted"] = true
 				result["_encryption_scope"] = "personal"
+				if input.TTL > 0 {
+					result["_ttl_seconds"] = input.TTL
+				}
 				result["_message"] = "✅ Memory created (encrypted) in project " + projectID[:8] + "..."
 				return mustTextResult(result), nil, nil
 			}
@@ -1079,7 +1116,14 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 	}
 
 	// Non-encrypted memory creation (user doesn't have encryption enabled)
-	memory, err := apiClient.CreateMemoryWithType(projectID, content, memoryType)
+	memory, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
+		ProjectID:  projectID,
+		Content:    content,
+		Type:       memoryType,
+		TTL:        input.TTL,
+		ValidFrom:  input.ValidFrom,
+		ValidUntil: input.ValidUntil,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1090,6 +1134,12 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 	result["_created_in_project"] = projectID
 	result["_type"] = memoryType
 	result["_type_auto_detected"] = input.Type == ""
+	if input.TTL > 0 {
+		result["_ttl_seconds"] = input.TTL
+	}
+	if input.ValidFrom != "" || input.ValidUntil != "" {
+		result["_temporal"] = true
+	}
 	result["_message"] = "✅ Memory created successfully in project " + projectID[:8] + "..."
 
 	return mustTextResult(result), nil, nil
@@ -1215,6 +1265,10 @@ type RecallInput struct {
 	Limit            float64 `json:"limit,omitempty"`
 	MinScore         float64 `json:"min_score,omitempty"`
 	Cursor           string  `json:"cursor,omitempty"` // Pagination cursor
+
+	// Temporal query support
+	ValidAt        string `json:"valid_at,omitempty"`        // RFC3339 timestamp - query memories valid at this time (default: now)
+	IncludeExpired bool   `json:"include_expired,omitempty"` // Include TTL-expired memories (default: false)
 }
 
 func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, any, error) {
@@ -1534,6 +1588,44 @@ func handleConsolidateMemories(ctx context.Context, req *mcp.CallToolRequest, in
 	return mustTextResult(result), nil, nil
 }
 
+type CleanupMemoriesInput struct {
+	Project   string `json:"project,omitempty"`   // Optional: scope to specific project
+	DryRun    bool   `json:"dry_run,omitempty"`   // Preview without deleting
+	BatchSize int    `json:"batch_size,omitempty"` // Batch size for deletion (default 100)
+}
+
+func handleCleanupMemories(ctx context.Context, req *mcp.CallToolRequest, input CleanupMemoriesInput) (*mcp.CallToolResult, interface{}, error) {
+	payload := map[string]interface{}{}
+
+	// Resolve project if provided
+	if project := strings.TrimSpace(input.Project); project != "" {
+		projectID, err := resolveProjectID(apiClient, project)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve project: %w", err)
+		}
+		payload["project_id"] = projectID
+	}
+
+	if input.DryRun {
+		payload["dry_run"] = true
+	}
+	if input.BatchSize > 0 {
+		payload["batch_size"] = input.BatchSize
+	}
+
+	// Add org_id if session has one
+	if session := GetCurrentSession(); session != nil && session.ActiveOrgID != nil {
+		payload["org_id"] = session.ActiveOrgID.String()
+	}
+
+	result, err := apiClient.EnqueueJob("memory_cleanup", payload)
+	if err != nil {
+		return nil, nil, fmt.Errorf("enqueue cleanup job: %w", err)
+	}
+
+	return mustTextResult(result), nil, nil
+}
+
 type CreateDecisionInput struct {
 	Title        string `json:"title"`
 	Description  string `json:"description,omitempty"`
@@ -1679,6 +1771,8 @@ func ToolDefinitions() []toolDef {
 		{Name: "manage_plan", Description: "🟢 ADVANCED | Create/status/list/apply/cancel multi-agent plans."},
 		{Name: "list_organizations", Description: "🟢 ADVANCED | List user's organizations."},
 		{Name: "switch_organization", Description: "🟢 ADVANCED | Switch active organization context."},
+		{Name: "consolidate_memories", Description: "🟢 ADVANCED | Trigger memory consolidation (scores, promotes, archives)."},
+		{Name: "cleanup_memories", Description: "🟢 ADVANCED | Clean up TTL-expired memories."},
 	}
 }
 
