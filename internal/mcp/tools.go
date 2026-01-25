@@ -89,6 +89,15 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
+// emptyObjectSchema returns an explicit JSON schema for tools with no input parameters
+// This fixes the "expected record, received array" error when the SDK infers an empty schema
+func emptyObjectSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}
+}
+
 // registerTools registers all MCP tools with the server using go-sdk
 // The SDK automatically infers InputSchema from the handler's input struct type
 // v3: Simplified from 61 tools to 26 tools via removal and consolidation
@@ -110,6 +119,7 @@ func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_projects",
 		Description: "🔴 ESSENTIAL | List all projects.",
+		InputSchema: emptyObjectSchema(),
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "List Projects",
 			ReadOnlyHint:  true,
@@ -376,6 +386,7 @@ func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_organizations",
 		Description: "🟢 ADVANCED | List user's organizations.",
+		InputSchema: emptyObjectSchema(),
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "List Organizations",
 			ReadOnlyHint:  true,
