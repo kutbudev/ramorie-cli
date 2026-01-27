@@ -48,11 +48,11 @@ Before answering ANY question or starting ANY task:
 → recall(term: "relevant_keywords") to check existing knowledge
 
 ### AUTO-SAVE These Situations (No User Permission Needed)
-- User states a preference → add_memory immediately
-- Bug is solved → add_memory with problem + solution
-- Decision is made → add_memory with rationale
-- Pattern is discovered → add_memory for future reference
-- Important context learned → add_memory to persist it
+- User states a preference → remember immediately
+- Bug is solved → remember with problem + solution
+- Decision is made → remember with rationale
+- Pattern is discovered → remember for future reference
+- Important context learned → remember to persist it
 
 ### AUTO-CREATE Tasks
 - User says "do X later" → create_task
@@ -62,10 +62,10 @@ Before answering ANY question or starting ANY task:
 ## Getting Started
 1. Call setup_agent first to initialize your session
 2. Call list_projects to see ALL your accessible projects (personal + org)
-3. Pass 'project' parameter in create_task/add_memory calls
+3. Pass 'project' parameter in create_task/remember calls
 
 ## Quick Reference
-- SAVE: add_memory(project: "name", content: "...", type: "decision")
+- SAVE: remember(project: "name", content: "...", type: "decision")
 - FIND: recall(term: "keywords")
 - TASK: create_task(project: "name", description: "...")
 - LIST: list_projects() shows ALL accessible projects across orgs
@@ -78,7 +78,7 @@ Other AI agents can see your memories instantly. Always:
 
 ## Best Practices
 - Start tasks (manage_task action=start) before working on them
-- Use 'type' parameter in add_memory: general, decision, bug_fix, preference, pattern, reference, skill
+- Use 'type' parameter in remember: general, decision, bug_fix, preference, pattern, reference, skill
 - Context packs bundle related memories and tasks into workspaces
 
 ⚠️ DO NOT ask user "should I save this?" - just save it.

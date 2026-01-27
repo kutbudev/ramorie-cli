@@ -37,7 +37,7 @@ func GetAgentDirectives() AgentDirectives {
 			Memory: []TriggerRule{
 				{
 					Condition: "User states a preference or configuration choice",
-					Action:    "add_memory(project, content) immediately",
+					Action:    "remember(content) immediately",
 					Examples: []string{
 						"User: 'I prefer TypeScript over JavaScript' → save as memory",
 						"User: 'Use dark mode for all UI components' → save as memory",
@@ -46,7 +46,7 @@ func GetAgentDirectives() AgentDirectives {
 				},
 				{
 					Condition: "Bug is solved with a specific solution",
-					Action:    "add_memory(project, problem + solution)",
+					Action:    "remember(problem + solution)",
 					Examples: []string{
 						"Fixed CORS issue by adding proxy config → save problem AND solution",
 						"Resolved 'module not found' with yarn install → save for future reference",
@@ -55,7 +55,7 @@ func GetAgentDirectives() AgentDirectives {
 				},
 				{
 					Condition: "Architectural or technical decision is made",
-					Action:    "add_memory(project, decision + rationale)",
+					Action:    "remember(decision + rationale)",
 					Examples: []string{
 						"User: 'Use Redis instead of PostgreSQL for sessions' → save decision",
 						"Decided to use WebSocket instead of polling → save with reasoning",
@@ -64,7 +64,7 @@ func GetAgentDirectives() AgentDirectives {
 				},
 				{
 					Condition: "New pattern or best practice is discovered",
-					Action:    "add_memory(project, pattern description)",
+					Action:    "remember(pattern description)",
 					Examples: []string{
 						"Found effective error handling pattern → save for reuse",
 						"Learned optimal database indexing strategy → save as memory",
@@ -191,7 +191,7 @@ You are ONE of potentially MULTIPLE agents working simultaneously.
 ┌─────────────────────────────────────────────────┐
 │ RAMORIE QUICK REFERENCE                         │
 ├─────────────────────────────────────────────────┤
-│ SAVE: add_memory(project, content)              │
+│ SAVE: remember(content)              │
 │ FIND: recall(term, project?)                    │
 │ TASK: create_task(project, description)         │
 │ LIST: list_memories(project) / list_tasks(...)  │

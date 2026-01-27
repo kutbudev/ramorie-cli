@@ -161,27 +161,6 @@ Example: create_task(project: "my-project", description: "Implement login featur
 	}, handleCreateTask)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "add_memory",
-		Description: `🔴 ESSENTIAL | Store knowledge.
-
-REQUIRED: project (name or ID), content
-OPTIONAL: type (general|decision|bug_fix|preference|pattern|reference|skill), force (bypass similarity check)
-
-IMPORTANT:
-- Call 'setup_agent' first if you get session errors
-- Use 'list_projects' to see available project names
-- Project names work across all your organizations - no switch required
-- Project names are case-insensitive
-
-Example: add_memory(project: "my-project", content: "API uses JWT auth", type: "decision")`,
-		Annotations: &mcp.ToolAnnotations{
-			Title:           "Add Memory",
-			DestructiveHint: boolPtr(false),
-			OpenWorldHint:   boolPtr(false),
-		},
-	}, handleAddMemory)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name: "remember",
 		Description: `🔴 ESSENTIAL | Ultra-simple memory storage.
 
@@ -311,7 +290,7 @@ Example: remember(content: "API uses JWT authentication")`,
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_context_pack",
-		Description: "🟡 COMMON | Create, update, or link items to a context pack. REQUIRED: action (create|update|add_memory|add_task). For create: name, type required. For update: packId required. For add_memory/add_task: packId and memoryId/taskId required.",
+		Description: "🟡 COMMON | Create, update, or link items to a context pack. REQUIRED: action (create|update|link_memory|link_task). For create: name, type required. For update: packId required. For link_memory/link_task: packId and memoryId/taskId required.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Manage Context Pack",
 			DestructiveHint: boolPtr(false),
@@ -574,7 +553,7 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	result["workflow_guide"] = map[string]interface{}{
 		"step_1": "✅ setup_agent called - session initialized",
 		"step_2": "📋 Call list_projects to see available projects",
-		"step_3": "📝 Specify 'project' parameter in create_task/add_memory calls",
+		"step_3": "📝 Use remember(content) or create_task(project, description)",
 		"note":   "Always pass the 'project' parameter explicitly when creating tasks or memories",
 	}
 
@@ -617,7 +596,7 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 					"status":        "exists",
 					"exact_match":   suggestions.ExactMatch,
 					"_message":      "✅ Project already exists with this name. Use existing project instead of creating a duplicate.",
-					"_action":       "Specify this project name in your create_task/add_memory calls.",
+					"_action":       "Use remember(content) for memories or create_task(project, description) for tasks.",
 				}), nil, nil
 			}
 
@@ -1022,239 +1001,8 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 	return mustTextResult(annotation), nil, nil
 }
 
-type AddMemoryInput struct {
-	Content         string `json:"content"`
-	Project         string `json:"project"`                    // REQUIRED - project name or ID
-	Type            string `json:"type,omitempty"`             // Memory type: general, decision, bug_fix, preference, pattern, reference, skill
-	Force           bool   `json:"force,omitempty"`            // Skip similarity check and force creation
-	DedupMode       string `json:"dedup_mode,omitempty"`       // Deduplication mode: "auto" (default) merges if >85% similar, "off" skips dedup
-	EncryptionScope string `json:"encryption_scope,omitempty"` // "personal" or "organization" (auto-detected if not provided)
-
-	// Memory decay: TTL-based expiration
-	TTL int `json:"ttl,omitempty"` // Time-to-live in seconds (0 = no expiration)
-
-	// Temporal validity
-	ValidFrom  string `json:"valid_from,omitempty"`  // RFC3339 timestamp when fact became valid
-	ValidUntil string `json:"valid_until,omitempty"` // RFC3339 timestamp when fact was superseded
-
-	// Procedural memory fields (for type='skill')
-	Trigger    string   `json:"trigger,omitempty"`    // Conditions when this skill should be activated
-	Steps      []string `json:"steps,omitempty"`      // Array of steps to follow
-	Validation string   `json:"validation,omitempty"` // How to verify the skill was applied
-
-	// Access control fields
-	Visibility string   `json:"visibility,omitempty"` // private (creator only), project (project members), organization (default), public
-	Readers    []string `json:"readers,omitempty"`    // User IDs with explicit read access (overrides visibility)
-	Writers    []string `json:"writers,omitempty"`    // User IDs with explicit write access (overrides visibility)
-}
-
-func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryInput) (*mcp.CallToolResult, any, error) {
-	// Check session initialization
-	if err := checkSessionInit("add_memory"); err != nil {
-		return nil, nil, err
-	}
-
-	content := strings.TrimSpace(input.Content)
-	if content == "" {
-		return nil, nil, errors.New("content is required")
-	}
-
-	// REQUIRED: project parameter must be specified
-	if strings.TrimSpace(input.Project) == "" {
-		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this memory belongs to.\n\nUse list_projects to see available projects.\nExample: add_memory(content=\"...\", project=\"my-project\")")
-	}
-
-	projectID, orgID, err := resolveProjectWithOrg(apiClient, input.Project)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Check for similar memories unless force=true or dedup_mode=off
-	dedupMode := strings.TrimSpace(strings.ToLower(input.DedupMode))
-	if dedupMode == "" {
-		dedupMode = "auto" // default
-	}
-
-	if !input.Force && dedupMode != "off" {
-		// Fetch existing memories for this project
-		existingMemories, err := apiClient.ListMemories(projectID, "")
-		if err == nil && len(existingMemories) > 0 {
-			// Check for similar content
-			similarMemories := CheckSimilarMemories(existingMemories, content, SimilarityThreshold)
-			if len(similarMemories) > 0 {
-				// Auto-merge if highest similarity > 0.85 and dedup_mode=auto
-				if dedupMode == "auto" && similarMemories[0].Similarity >= AutoMergeThreshold {
-					// Merge: update the most similar memory with combined content
-					targetID := similarMemories[0].MemoryID
-					mergedContent := mergeMemoryContent(similarMemories[0].FullContent, content)
-
-					updatedMemory, err := apiClient.UpdateMemory(targetID, map[string]interface{}{
-						"content": mergedContent,
-					})
-					if err != nil {
-						return nil, nil, fmt.Errorf("auto-merge failed: %w", err)
-					}
-
-					result := formatMCPResponse(updatedMemory, getContextString())
-					result["action_taken"] = "updated"
-					result["dedup_action"] = "merged"
-					result["merged_with"] = targetID
-					result["similarity"] = similarMemories[0].Similarity
-					result["_message"] = fmt.Sprintf("Memory merged with existing (%.0f%% similar). ID: %s", similarMemories[0].Similarity*100, targetID)
-					return mustTextResult(result), nil, nil
-				}
-
-				// Warn: similarity is moderate (0.6-0.85)
-				result := map[string]interface{}{
-					"status":           "similar_exists",
-					"action_taken":     "skipped",
-					"message":          "Similar memories already exist. Use force=true to create anyway, or dedup_mode=off to skip checks.",
-					"similar_count":    len(similarMemories),
-					"similar_memories": similarMemories,
-					"threshold":        SimilarityThreshold,
-					"_context":         getContextString(),
-				}
-				return mustTextResult(result), nil, nil
-			}
-		}
-	}
-
-	// Determine encryption scope
-	scope := strings.TrimSpace(input.EncryptionScope)
-	if scope == "" {
-		scope = determineEncryptionScope(orgID)
-	}
-
-	// Check if user has encryption enabled and vault is unlocked
-	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.EncryptionEnabled {
-		if scope == "organization" && orgID != "" {
-			// Organization-scoped encryption
-			if !crypto.IsOrgVaultUnlocked(orgID) {
-				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
-					"To unlock, the user must run:\n" +
-					"  ramorie org unlock " + orgID[:8] + "\n\n" +
-					"This only needs to be done once per session.\n" +
-					"Please inform the user to unlock their org vault.")
-			}
-
-			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContentWithScope(content, "organization", orgID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("encryption failed: %w", err)
-			}
-
-			if isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemoryWithOptions(api.CreateEncryptedMemoryOptions{
-					ProjectID:        projectID,
-					EncryptedContent: encryptedContent,
-					ContentNonce:     nonce,
-					TTL:              input.TTL,
-					ValidFrom:        input.ValidFrom,
-					ValidUntil:       input.ValidUntil,
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-
-				result := formatMCPResponse(memory, getContextString())
-				result["action_taken"] = "created"
-				result["_created_in_project"] = projectID
-				result["_encrypted"] = true
-				result["_encryption_scope"] = "organization"
-				if input.TTL > 0 {
-					result["_ttl_seconds"] = input.TTL
-				}
-				result["_message"] = "✅ Memory created (org-encrypted) in project " + projectID[:8] + "..."
-				return mustTextResult(result), nil, nil
-			}
-		} else {
-			// Personal-scoped encryption
-			if !crypto.IsVaultUnlocked() {
-				return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
-					"To unlock, the user must run:\n" +
-					"  ramorie setup unlock\n\n" +
-					"This only needs to be done once per session (until computer restarts).\n" +
-					"Please inform the user to unlock their vault.")
-			}
-
-			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
-			if err != nil {
-				return nil, nil, fmt.Errorf("encryption failed: %w", err)
-			}
-
-			if isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemoryWithOptions(api.CreateEncryptedMemoryOptions{
-					ProjectID:        projectID,
-					EncryptedContent: encryptedContent,
-					ContentNonce:     nonce,
-					TTL:              input.TTL,
-					ValidFrom:        input.ValidFrom,
-					ValidUntil:       input.ValidUntil,
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-
-				result := formatMCPResponse(memory, getContextString())
-				result["action_taken"] = "created"
-				result["_created_in_project"] = projectID
-				result["_encrypted"] = true
-				result["_encryption_scope"] = "personal"
-				if input.TTL > 0 {
-					result["_ttl_seconds"] = input.TTL
-				}
-				result["_message"] = "✅ Memory created (encrypted) in project " + projectID[:8] + "..."
-				return mustTextResult(result), nil, nil
-			}
-		}
-	}
-
-	// Determine memory type - use provided or auto-detect
-	memoryType := strings.TrimSpace(input.Type)
-	if memoryType == "" {
-		memoryType = DetectMemoryType(content)
-	} else if !IsValidMemoryType(memoryType) {
-		return nil, nil, fmt.Errorf("invalid memory type '%s'. Valid types: %v", memoryType, ValidMemoryTypes())
-	}
-
-	// Non-encrypted memory creation (user doesn't have encryption enabled)
-	memory, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
-		ProjectID:  projectID,
-		Content:    content,
-		Type:       memoryType,
-		TTL:        input.TTL,
-		ValidFrom:  input.ValidFrom,
-		ValidUntil: input.ValidUntil,
-		Trigger:    input.Trigger,
-		Steps:      input.Steps,
-		Validation: input.Validation,
-		Visibility: input.Visibility,
-		Readers:    input.Readers,
-		Writers:    input.Writers,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Return with context info showing where memory was created
-	result := formatMCPResponse(memory, getContextString())
-	result["action_taken"] = "created"
-	result["_created_in_project"] = projectID
-	result["_type"] = memoryType
-	result["_type_auto_detected"] = input.Type == ""
-	if input.TTL > 0 {
-		result["_ttl_seconds"] = input.TTL
-	}
-	if input.ValidFrom != "" || input.ValidUntil != "" {
-		result["_temporal"] = true
-	}
-	result["_message"] = "✅ Memory created successfully in project " + projectID[:8] + "..."
-
-	return mustTextResult(result), nil, nil
-}
-
 // ============================================================================
-// REMEMBER TOOL - Ultra-simple memory storage
+// REMEMBER TOOL - Ultra-simple memory storage (replaces add_memory)
 // ============================================================================
 
 type RememberInput struct {
@@ -1887,7 +1635,7 @@ func handleSurfaceSkills(ctx context.Context, req *mcp.CallToolRequest, input Su
 	}
 
 	if len(results) == 0 {
-		response["_hint"] = "No matching skills found. Consider creating a skill memory with add_memory(type='skill', trigger='...', steps=[...], validation='...') when you learn a new procedure."
+		response["_hint"] = "No matching skills found. Consider creating a skill memory with remember(content) including trigger, steps, and validation info."
 	}
 
 	return mustTextResult(response), nil, nil
@@ -2278,7 +2026,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "list_projects", Description: "🔴 ESSENTIAL | List all projects."},
 		{Name: "list_tasks", Description: "🔴 ESSENTIAL | List/search/prioritize tasks. Supports query, next_priority params."},
 		{Name: "create_task", Description: "🔴 ESSENTIAL | Create a new task."},
-		{Name: "add_memory", Description: "🔴 ESSENTIAL | Store knowledge (use type='skill' for procedural memory)."},
+		{Name: "remember", Description: "🔴 ESSENTIAL | Ultra-simple memory storage with auto-detection."},
 		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
 		{Name: "surface_skills", Description: "🟡 COMMON | Find relevant procedural skills based on context."},
 		{Name: "manage_focus", Description: "🔴 ESSENTIAL | Get/set/clear active workspace focus."},
@@ -2292,7 +2040,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "get_memory", Description: "🟡 COMMON | Get memory details by ID."},
 		{Name: "list_context_packs", Description: "🟡 COMMON | List all context packs."},
 		{Name: "get_context_pack", Description: "🟡 COMMON | Get detailed context pack info."},
-		{Name: "manage_context_pack", Description: "🟡 COMMON | Create/update/add_memory/add_task to context packs."},
+		{Name: "manage_context_pack", Description: "🟡 COMMON | Create/update/link_memory/link_task to context packs."},
 		{Name: "create_decision", Description: "🟡 COMMON | Record an architectural decision (ADR)."},
 		{Name: "list_decisions", Description: "🟡 COMMON | List architectural decisions."},
 		{Name: "get_stats", Description: "🟡 COMMON | Get task statistics and completion rates."},

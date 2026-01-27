@@ -138,24 +138,24 @@ func handleManageTask(ctx context.Context, req *mcp.CallToolRequest, input Manag
 	}
 }
 
-// --- manage_context_pack: create/update/add_memory/add_task ---
+// --- manage_context_pack: create/update/link_memory/link_task ---
 
 type ManageContextPackInput struct {
-	Action      string   `json:"action"`                // create, update, add_memory, add_task
-	PackID      string   `json:"packId,omitempty"`      // Required for update/add_memory/add_task
+	Action      string   `json:"action"`                // create, update, link_memory, link_task
+	PackID      string   `json:"packId,omitempty"`      // Required for update/link_memory/link_task
 	Name        string   `json:"name,omitempty"`        // For create/update
 	Type        string   `json:"type,omitempty"`        // For create (project, integration, decision, custom)
 	Description string   `json:"description,omitempty"` // For create/update
 	Status      string   `json:"status,omitempty"`      // For update
 	Tags        []string `json:"tags,omitempty"`        // For create
-	MemoryID    string   `json:"memoryId,omitempty"`    // For add_memory
-	TaskID      string   `json:"taskId,omitempty"`      // For add_task
+	MemoryID    string   `json:"memoryId,omitempty"`    // For link_memory
+	TaskID      string   `json:"taskId,omitempty"`      // For link_task
 }
 
 func handleManageContextPack(ctx context.Context, req *mcp.CallToolRequest, input ManageContextPackInput) (*mcp.CallToolResult, interface{}, error) {
 	action := strings.TrimSpace(strings.ToLower(input.Action))
 	if action == "" {
-		return nil, nil, errors.New("action is required (create|update|add_memory|add_task)")
+		return nil, nil, errors.New("action is required (create|update|link_memory|link_task)")
 	}
 
 	switch action {
@@ -198,11 +198,11 @@ func handleManageContextPack(ctx context.Context, req *mcp.CallToolRequest, inpu
 		}
 		return mustTextResult(pack), nil, nil
 
-	case "add_memory":
+	case "link_memory":
 		packID := strings.TrimSpace(input.PackID)
 		memoryID := strings.TrimSpace(input.MemoryID)
 		if packID == "" || memoryID == "" {
-			return nil, nil, errors.New("packId and memoryId are required for add_memory action")
+			return nil, nil, errors.New("packId and memoryId are required for link_memory action")
 		}
 		pack, err := apiClient.GetContextPack(packID)
 		if err != nil {
@@ -224,11 +224,11 @@ func handleManageContextPack(ctx context.Context, req *mcp.CallToolRequest, inpu
 		}
 		return mustTextResult(result), nil, nil
 
-	case "add_task":
+	case "link_task":
 		packID := strings.TrimSpace(input.PackID)
 		taskID := strings.TrimSpace(input.TaskID)
 		if packID == "" || taskID == "" {
-			return nil, nil, errors.New("packId and taskId are required for add_task action")
+			return nil, nil, errors.New("packId and taskId are required for link_task action")
 		}
 		pack, err := apiClient.GetContextPack(packID)
 		if err != nil {
@@ -251,7 +251,7 @@ func handleManageContextPack(ctx context.Context, req *mcp.CallToolRequest, inpu
 		return mustTextResult(result), nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: create, update, add_memory, or add_task", action)
+		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: create, update, link_memory, or link_task", action)
 	}
 }
 

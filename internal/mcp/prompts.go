@@ -237,7 +237,7 @@ func handleMemoryConsolidationPrompt(_ context.Context, req *mcp.GetPromptReques
 
 ## Step 4: Link Related Memories
 - Group related memories into context packs if not already organized
-- Use add_memory_to_pack to associate memories with relevant context packs
+- Use manage_context_pack(action="link_memory") to associate memories with relevant context packs
 
 ## Step 5: Create Summary Memories
 - For clusters of related memories, create a summary memory that synthesizes the key points
