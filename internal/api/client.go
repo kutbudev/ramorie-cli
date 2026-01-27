@@ -2511,3 +2511,397 @@ func (c *Client) RotateOrgEncryption(orgID, newSalt, newPassphraseHash string, n
 	_, err := c.makeRequest("POST", endpoint, body)
 	return err
 }
+
+// ============================================================================
+// Entity & Knowledge Graph API Methods
+// ============================================================================
+
+// ListEntities lists entities with optional filtering
+func (c *Client) ListEntities(entityType, projectID, query string, limit, offset int) (*models.EntityListResponse, error) {
+	params := url.Values{}
+	if entityType != "" {
+		params.Add("type", entityType)
+	}
+	if projectID != "" {
+		params.Add("project_id", projectID)
+	}
+	if query != "" {
+		params.Add("q", query)
+	}
+	if limit > 0 {
+		params.Add("limit", fmt.Sprintf("%d", limit))
+	}
+	if offset > 0 {
+		params.Add("offset", fmt.Sprintf("%d", offset))
+	}
+
+	endpoint := "/entities"
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response models.EntityListResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal entities: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetEntity gets an entity by ID
+func (c *Client) GetEntity(id string) (*models.Entity, error) {
+	respBody, err := c.makeRequest("GET", "/entities/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var entity models.Entity
+	if err := json.Unmarshal(respBody, &entity); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal entity: %w", err)
+	}
+
+	return &entity, nil
+}
+
+// CreateEntity creates a new entity
+func (c *Client) CreateEntity(req *models.CreateEntityRequest) (*models.Entity, error) {
+	respBody, err := c.makeRequest("POST", "/entities", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var entity models.Entity
+	if err := json.Unmarshal(respBody, &entity); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal entity: %w", err)
+	}
+
+	return &entity, nil
+}
+
+// GetEntityRelationships gets relationships for an entity
+func (c *Client) GetEntityRelationships(entityID, direction string) (*models.EntityRelationshipsResponse, error) {
+	endpoint := fmt.Sprintf("/entities/%s/relationships", entityID)
+	if direction != "" {
+		endpoint += "?direction=" + direction
+	}
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response models.EntityRelationshipsResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal relationships: %w", err)
+	}
+
+	return &response, nil
+}
+
+// CreateRelationship creates a relationship between two entities
+func (c *Client) CreateRelationship(req *models.CreateRelationshipRequest) (*models.EntityRelationship, error) {
+	respBody, err := c.makeRequest("POST", "/entity-relationships", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var relationship models.EntityRelationship
+	if err := json.Unmarshal(respBody, &relationship); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal relationship: %w", err)
+	}
+
+	return &relationship, nil
+}
+
+// GetEntityGraph gets the graph (N-hop subgraph) for an entity
+func (c *Client) GetEntityGraph(entityID string, hops int) (*models.EntityGraphResponse, error) {
+	endpoint := fmt.Sprintf("/entities/%s/graph", entityID)
+	if hops > 0 {
+		endpoint += fmt.Sprintf("?hops=%d", hops)
+	}
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response models.EntityGraphResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal graph: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetEntityMemories gets memory IDs for an entity (with optional hop traversal)
+func (c *Client) GetEntityMemories(entityID string, hops, limit int) (*models.EntityMemoriesResponse, error) {
+	endpoint := fmt.Sprintf("/entities/%s/memories", entityID)
+	params := url.Values{}
+	if hops > 0 {
+		params.Add("hops", fmt.Sprintf("%d", hops))
+	}
+	if limit > 0 {
+		params.Add("limit", fmt.Sprintf("%d", limit))
+	}
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response models.EntityMemoriesResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal entity memories: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetMemoryEntities gets entities extracted from a memory
+func (c *Client) GetMemoryEntities(memoryID string) (*models.MemoryEntitiesResponse, error) {
+	endpoint := fmt.Sprintf("/memories/%s/entities", memoryID)
+
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response models.MemoryEntitiesResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal memory entities: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetEntityStats gets knowledge graph statistics
+func (c *Client) GetEntityStats() (*models.EntityStatsResponse, error) {
+	respBody, err := c.makeRequest("GET", "/entities/stats", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response models.EntityStatsResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal entity stats: %w", err)
+	}
+
+	return &response, nil
+}
+
+// ============================================================================
+// SKILLS API METHODS
+// ============================================================================
+
+// ListSkills lists procedural skills (memories with type='skill')
+func (c *Client) ListSkills(projectID string, limit int) ([]models.Memory, error) {
+	params := url.Values{}
+	params.Set("type", "skill")
+	if projectID != "" {
+		params.Set("project_id", projectID)
+	}
+	if limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+
+	endpoint := "/memories?" + params.Encode()
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool             `json:"success"`
+		Data    []models.Memory  `json:"data"`
+		Error   string           `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal skills: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return response.Data, nil
+}
+
+// CreateSkill creates a new procedural skill
+func (c *Client) CreateSkill(projectID, trigger, description string, steps []string, validation string, tags []string) (*models.Memory, error) {
+	body := map[string]interface{}{
+		"project_id":  projectID,
+		"content":     description,
+		"type":        "skill",
+		"trigger":     trigger,
+		"steps":       steps,
+	}
+
+	if validation != "" {
+		body["validation"] = validation
+	}
+
+	if len(tags) > 0 {
+		body["tags"] = tags
+	}
+
+	// Add agent metadata if available
+	if c.AgentName != "" {
+		body["created_by_agent"] = c.AgentName
+	}
+	if c.AgentModel != "" {
+		body["agent_model"] = c.AgentModel
+	}
+	if c.AgentSessionID != "" {
+		body["agent_session_id"] = c.AgentSessionID
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool           `json:"success"`
+		Data    models.Memory  `json:"data"`
+		Error   string         `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal skill: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}
+
+// StartSkillExecution starts tracking a skill execution
+func (c *Client) StartSkillExecution(skillID, context string, agentName, agentModel *string) (*models.SkillExecution, error) {
+	body := map[string]interface{}{}
+
+	if context != "" {
+		body["context"] = context
+	}
+
+	if agentName != nil {
+		body["agent_name"] = *agentName
+	}
+	if agentModel != nil {
+		body["agent_model"] = *agentModel
+	}
+
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/skills/%s/execute", skillID), body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                   `json:"success"`
+		Data    models.SkillExecution  `json:"data"`
+		Error   string                 `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal execution: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}
+
+// CompleteSkillExecution marks an execution as complete
+func (c *Client) CompleteSkillExecution(executionID string, success bool, notes string) (*models.SkillExecution, error) {
+	body := map[string]interface{}{
+		"success": success,
+	}
+
+	if notes != "" {
+		body["notes"] = notes
+	}
+
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/skills/executions/%s", executionID), body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                   `json:"success"`
+		Data    models.SkillExecution  `json:"data"`
+		Error   string                 `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal execution: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}
+
+// GetSkillStats retrieves execution statistics for a skill
+func (c *Client) GetSkillStats(skillID string) (*models.SkillStats, error) {
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/skills/%s/stats", skillID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool              `json:"success"`
+		Data    models.SkillStats `json:"data"`
+		Error   string            `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal skill stats: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}
+
+// GenerateSkill generates a skill from a description using AI
+func (c *Client) GenerateSkill(description string, projectID *string, autoSave bool) (*models.GenerateSkillResponse, error) {
+	body := map[string]interface{}{
+		"description": description,
+		"auto_save":   autoSave,
+	}
+
+	if projectID != nil {
+		body["project_id"] = *projectID
+	}
+
+	respBody, err := c.makeRequest("POST", "/skills/generate", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                         `json:"success"`
+		Data    models.GenerateSkillResponse `json:"data"`
+		Error   string                       `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal generated skill: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}

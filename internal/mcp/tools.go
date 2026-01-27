@@ -184,8 +184,29 @@ Example: remember(content: "API uses JWT authentication")`,
 	}, handleRemember)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "recall",
-		Description: "🔴 ESSENTIAL | Search memories. REQUIRED: term. Supports OR (space-separated) and AND (comma-separated) search. Optional: project, tag, type, min_score, limit, valid_at (RFC3339 timestamp to query memories valid at that time), include_expired (include TTL-expired memories).",
+		Name: "recall",
+		Description: `🔴 ESSENTIAL | Search memories with optional knowledge graph traversal.
+
+REQUIRED: term
+Supports OR (space-separated) and AND (comma-separated) search.
+
+Optional:
+- project: Scope to project
+- tag: Filter by tag
+- type: Filter by memory type (general, decision, bug_fix, preference, pattern, reference, skill)
+- entity_hops: (0-3) Include memories from related entities via knowledge graph (default 0)
+- min_score: Minimum relevance score
+- limit: Max results
+- valid_at: RFC3339 timestamp to query memories valid at that time
+- include_expired: Include TTL-expired memories
+
+When entity_hops > 0, recall will:
+1. Find entities matching your search term
+2. Traverse the knowledge graph by N hops
+3. Include memories linked to discovered entities
+4. Boost scores for directly matching memories
+
+Example: recall(term: "React", entity_hops: 2) - finds React memories + memories about related tools`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Search Memories",
 			ReadOnlyHint:  true,
@@ -460,6 +481,235 @@ Example: create_project(name: "my-project", description: "My awesome project")`,
 			OpenWorldHint:   boolPtr(false),
 		},
 	}, handleCleanupMemories)
+
+	// ============================================================================
+	// 🟡 COMMON - Entity & Knowledge Graph Tools
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_entities",
+		Description: `🟡 COMMON | List entities (knowledge graph nodes) with filtering.
+
+Optional: type (person|tool|concept|project|organization|location|event|document|api|other), project, query, limit, offset.
+
+Returns entities sorted by mention count (most mentioned first).
+
+Example: list_entities(type: "tool", project: "Ramorie Frontend")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Entities",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleListEntities)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_entity",
+		Description: "🟡 COMMON | Get entity details by ID. REQUIRED: entity_id. Returns entity with full metadata including confidence, aliases, mention count.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Entity",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleGetEntity)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_entity_graph",
+		Description: `🟡 COMMON | Get knowledge graph visualization data for an entity.
+
+REQUIRED: entity_id
+Optional: hops (1-3, default 1) - how many relationship hops to traverse
+
+Returns nodes and edges for graph visualization, including the root entity and all connected entities within N hops.
+
+Example: get_entity_graph(entity_id: "uuid", hops: 2)`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Entity Graph",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleGetEntityGraph)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_memory_entities",
+		Description: `🟡 COMMON | Get entities extracted from a specific memory.
+
+REQUIRED: memory_id
+
+Returns all entities that were automatically extracted from the memory content during processing.`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Memory Entities",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleGetMemoryEntities)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_entity_memories",
+		Description: `🟡 COMMON | Get memories that mention a specific entity.
+
+REQUIRED: entity_id
+Optional: hops (0-3, default 0) - include memories from related entities within N hops
+Optional: limit (default 50)
+
+Use hops > 0 to discover related context through the knowledge graph.
+
+Example: get_entity_memories(entity_id: "uuid", hops: 2)`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Entity Memories",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleGetEntityMemories)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_entity_stats",
+		Description: "🟡 COMMON | Get knowledge graph statistics. Returns total entities, total relationships, and breakdown by entity type.",
+		InputSchema: emptyObjectSchema(),
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Entity Stats",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleGetEntityStats)
+
+	// ============================================================================
+	// 🟢 ADVANCED - Entity Management Tools
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "create_entity",
+		Description: `🟢 ADVANCED | Create a new entity (knowledge graph node) manually.
+
+REQUIRED: name, type (person|tool|concept|project|organization|location|event|document|api|other)
+Optional: description, aliases (array), project, confidence (0-1)
+
+Use this when you want to explicitly add an entity rather than relying on auto-extraction.
+
+Example: create_entity(name: "React", type: "tool", description: "JavaScript UI library")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Entity",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleCreateEntity)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "create_relationship",
+		Description: `🟢 ADVANCED | Create a relationship (knowledge graph edge) between two entities.
+
+REQUIRED: source_entity_id, target_entity_id, relationship_type
+Optional: label, description, strength (0-1, default 1)
+
+Relationship types: uses, works_on, related_to, depends_on, part_of, created_by, belongs_to, connects_to, replaces, similar_to, contradicts, references, implements, extends
+
+Example: create_relationship(source_entity_id: "uuid1", target_entity_id: "uuid2", relationship_type: "uses")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Relationship",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleCreateRelationship)
+
+	// ============================================================================
+	// 🟡 COMMON - Skills Tools (Procedural Memory)
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_skills",
+		Description: `🟡 COMMON | List procedural skills (memories with type='skill').
+
+Optional: project (filter by project name or ID), limit (default 50)
+
+Returns skills with their triggers, steps, and validation criteria.
+
+Example: list_skills(project: "Ramorie Frontend")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "List Skills",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleListSkills)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "create_skill",
+		Description: `🟡 COMMON | Create a new procedural skill (how-to knowledge).
+
+REQUIRED: project (name or ID), trigger, description, steps (array of strings)
+Optional: validation (how to verify success), tags (array)
+
+A skill is a procedural memory that can be surfaced and executed by agents.
+
+Example: create_skill(project: "Ramorie", trigger: "When deploying to production", description: "Production deployment procedure", steps: ["Run tests", "Build", "Deploy"])`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Skill",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleCreateSkill)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "execute_skill",
+		Description: `🟡 COMMON | Start tracking execution of a skill. Returns the skill's steps to follow.
+
+REQUIRED: skill_id
+Optional: context (what triggered the execution)
+
+Call this before following a skill's steps. Use complete_execution when done.
+
+Example: execute_skill(skill_id: "uuid", context: "Production deploy requested")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Execute Skill",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleExecuteSkill)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "complete_execution",
+		Description: `🟡 COMMON | Mark a skill execution as complete.
+
+REQUIRED: execution_id, success (boolean)
+Optional: notes (outcome details)
+
+Call this after following a skill's steps to track effectiveness.
+
+Example: complete_execution(execution_id: "uuid", success: true, notes: "Deployment successful")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Complete Execution",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleCompleteExecution)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_skill_stats",
+		Description: `🟡 COMMON | Get execution statistics for a skill.
+
+REQUIRED: skill_id
+
+Returns total executions, success/failure counts, success rate, and last execution time.
+
+Example: get_skill_stats(skill_id: "uuid")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Get Skill Stats",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleGetSkillStats)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "generate_skill",
+		Description: `🟡 COMMON | Generate a procedural skill from a natural language description using AI.
+
+REQUIRED: description (what the skill should accomplish)
+Optional: project (save to this project), auto_save (save automatically if true)
+
+Uses Gemini to generate trigger, steps, and validation criteria.
+
+Example: generate_skill(description: "How to deploy a Next.js app to Vercel", project: "Ramorie Frontend", auto_save: true)`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Generate Skill",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleGenerateSkill)
 }
 
 // ============================================================================
@@ -1326,6 +1576,9 @@ type RecallInput struct {
 	MinScore         float64 `json:"min_score,omitempty"`
 	Cursor           string  `json:"cursor,omitempty"` // Pagination cursor
 
+	// Knowledge graph integration
+	EntityHops float64 `json:"entity_hops,omitempty"` // 0-3: Include memories from related entities via knowledge graph
+
 	// Temporal query support
 	ValidAt        string `json:"valid_at,omitempty"`        // RFC3339 timestamp - query memories valid at this time (default: now)
 	IncludeExpired bool   `json:"include_expired,omitempty"` // Include TTL-expired memories (default: false)
@@ -1352,6 +1605,46 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		pid, err := resolveProjectID(apiClient, input.Project)
 		if err == nil {
 			projectID = pid
+		}
+	}
+
+	// Check if entity_hops is enabled for knowledge graph traversal
+	entityHops := int(input.EntityHops)
+	if entityHops < 0 {
+		entityHops = 0
+	}
+	if entityHops > 3 {
+		entityHops = 3
+	}
+
+	// Collect memory IDs to fetch via entity graph traversal
+	var entityMemoryIDs map[string]int // memory ID -> hop distance
+	var matchedEntities []map[string]interface{}
+
+	if entityHops > 0 {
+		entityMemoryIDs = make(map[string]int)
+
+		// Search for entities matching the term
+		entityResp, err := apiClient.ListEntities("", projectID, term, 20, 0)
+		if err == nil && len(entityResp.Entities) > 0 {
+			for _, entity := range entityResp.Entities {
+				matchedEntities = append(matchedEntities, map[string]interface{}{
+					"id":   entity.ID.String(),
+					"name": entity.Name,
+					"type": entity.Type,
+				})
+
+				// Get memories for this entity with hops
+				memResp, err := apiClient.GetEntityMemories(entity.ID.String(), entityHops, 50)
+				if err == nil {
+					for _, mid := range memResp.MemoryIDs {
+						// Track hop distance (direct=0, related=hops)
+						if _, exists := entityMemoryIDs[mid]; !exists {
+							entityMemoryIDs[mid] = entityHops
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -1433,12 +1726,34 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 			}
 		}
 
+		// Check if memory is linked to an entity (knowledge graph boost)
+		memoryIDStr := m.ID.String()
+		entityBoost := 0
+		fromEntity := false
+		if entityMemoryIDs != nil {
+			if hopDistance, exists := entityMemoryIDs[memoryIDStr]; exists {
+				fromEntity = true
+				// Boost based on hop distance (closer = higher boost)
+				// Direct (0 hops) = +30, 1 hop = +20, 2 hops = +10, 3 hops = +5
+				entityBoost = max(30-hopDistance*10, 5)
+			}
+		}
+
 		if isAndSearch && matchCount < len(searchTerms) {
-			continue
+			// If entity_hops is enabled and memory is from entity graph, still include it
+			if !fromEntity {
+				continue
+			}
 		}
 		if !isAndSearch && matchCount == 0 {
-			continue
+			// If entity_hops is enabled and memory is from entity graph, still include it
+			if !fromEntity {
+				continue
+			}
 		}
+
+		// Apply entity boost
+		score += entityBoost
 
 		if m.LinkedTaskID != nil {
 			score += 5
@@ -1457,6 +1772,10 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		}
 		if m.Importance != nil {
 			result["importance"] = *m.Importance
+		}
+		if fromEntity {
+			result["from_entity"] = true
+			result["entity_boost"] = entityBoost
 		}
 
 		if includeRelations {
@@ -1498,6 +1817,10 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	}
 	if nextCursor != "" {
 		response["nextCursor"] = nextCursor
+	}
+	if entityHops > 0 {
+		response["entity_hops"] = entityHops
+		response["matched_entities"] = matchedEntities
 	}
 
 	return mustTextResult(response), nil, nil
@@ -2600,6 +2923,625 @@ func handleGetAgentActivity(ctx context.Context, req *mcp.CallToolRequest, input
 	}
 	if nextCursor != "" {
 		result["nextCursor"] = nextCursor
+	}
+
+	return mustTextResult(result), nil, nil
+}
+
+// ============================================================================
+// ENTITY & KNOWLEDGE GRAPH TOOL HANDLERS
+// ============================================================================
+
+type ListEntitiesInput struct {
+	Type    string  `json:"type,omitempty"`    // Entity type filter
+	Project string  `json:"project,omitempty"` // Project name or ID
+	Query   string  `json:"query,omitempty"`   // Search query
+	Limit   float64 `json:"limit,omitempty"`
+	Offset  float64 `json:"offset,omitempty"`
+}
+
+func handleListEntities(ctx context.Context, req *mcp.CallToolRequest, input ListEntitiesInput) (*mcp.CallToolResult, any, error) {
+	entityType := strings.TrimSpace(input.Type)
+	query := strings.TrimSpace(input.Query)
+
+	// Resolve project if provided
+	projectID := ""
+	if project := strings.TrimSpace(input.Project); project != "" {
+		pid, err := resolveProjectID(apiClient, project)
+		if err == nil {
+			projectID = pid
+		}
+	}
+
+	limit := int(input.Limit)
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := int(input.Offset)
+
+	response, err := apiClient.ListEntities(entityType, projectID, query, limit, offset)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list entities: %w", err)
+	}
+
+	// Format entities for output
+	entities := make([]map[string]interface{}, 0, len(response.Entities))
+	for _, e := range response.Entities {
+		entity := map[string]interface{}{
+			"id":            e.ID.String(),
+			"name":          e.Name,
+			"type":          e.Type,
+			"mention_count": e.MentionCount,
+			"confidence":    e.Confidence,
+		}
+		if e.Description != nil {
+			entity["description"] = *e.Description
+		}
+		if len(e.Aliases) > 0 {
+			entity["aliases"] = e.Aliases
+		}
+		entities = append(entities, entity)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"entities": entities,
+		"total":    response.Total,
+		"limit":    response.Limit,
+		"offset":   response.Offset,
+		"_context": getContextString(),
+	}), nil, nil
+}
+
+type GetEntityInput struct {
+	EntityID string `json:"entity_id"`
+}
+
+func handleGetEntity(ctx context.Context, req *mcp.CallToolRequest, input GetEntityInput) (*mcp.CallToolResult, any, error) {
+	entityID := strings.TrimSpace(input.EntityID)
+	if entityID == "" {
+		return nil, nil, errors.New("entity_id is required")
+	}
+
+	entity, err := apiClient.GetEntity(entityID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get entity: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":              entity.ID.String(),
+		"name":            entity.Name,
+		"normalized_name": entity.NormalizedName,
+		"type":            entity.Type,
+		"mention_count":   entity.MentionCount,
+		"confidence":      entity.Confidence,
+		"created_at":      entity.CreatedAt,
+		"updated_at":      entity.UpdatedAt,
+	}
+	if entity.Description != nil {
+		result["description"] = *entity.Description
+	}
+	if len(entity.Aliases) > 0 {
+		result["aliases"] = entity.Aliases
+	}
+	if entity.ProjectID != nil {
+		result["project_id"] = entity.ProjectID.String()
+	}
+
+	return mustTextResult(result), nil, nil
+}
+
+type GetEntityGraphInput struct {
+	EntityID string  `json:"entity_id"`
+	Hops     float64 `json:"hops,omitempty"`
+}
+
+func handleGetEntityGraph(ctx context.Context, req *mcp.CallToolRequest, input GetEntityGraphInput) (*mcp.CallToolResult, any, error) {
+	entityID := strings.TrimSpace(input.EntityID)
+	if entityID == "" {
+		return nil, nil, errors.New("entity_id is required")
+	}
+
+	hops := int(input.Hops)
+	if hops < 1 {
+		hops = 1
+	}
+	if hops > 3 {
+		hops = 3
+	}
+
+	response, err := apiClient.GetEntityGraph(entityID, hops)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get entity graph: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"root_entity": response.RootEntity,
+		"nodes":       response.Nodes,
+		"edges":       response.Edges,
+		"hops":        response.Hops,
+		"node_count":  response.NodeCount,
+		"edge_count":  response.EdgeCount,
+		"_context":    getContextString(),
+	}), nil, nil
+}
+
+type GetMemoryEntitiesInput struct {
+	MemoryID string `json:"memory_id"`
+}
+
+func handleGetMemoryEntities(ctx context.Context, req *mcp.CallToolRequest, input GetMemoryEntitiesInput) (*mcp.CallToolResult, any, error) {
+	memoryID := strings.TrimSpace(input.MemoryID)
+	if memoryID == "" {
+		return nil, nil, errors.New("memory_id is required")
+	}
+
+	response, err := apiClient.GetMemoryEntities(memoryID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get memory entities: %w", err)
+	}
+
+	// Format entities for output
+	entities := make([]map[string]interface{}, 0, len(response.Entities))
+	for _, e := range response.Entities {
+		entity := map[string]interface{}{
+			"id":            e.ID.String(),
+			"name":          e.Name,
+			"type":          e.Type,
+			"confidence":    e.Confidence,
+			"mention_count": e.MentionCount,
+		}
+		if e.Description != nil {
+			entity["description"] = *e.Description
+		}
+		entities = append(entities, entity)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"entities":  entities,
+		"memory_id": response.MemoryID,
+		"total":     response.Total,
+		"_context":  getContextString(),
+	}), nil, nil
+}
+
+type GetEntityMemoriesInput struct {
+	EntityID string  `json:"entity_id"`
+	Hops     float64 `json:"hops,omitempty"`
+	Limit    float64 `json:"limit,omitempty"`
+}
+
+func handleGetEntityMemories(ctx context.Context, req *mcp.CallToolRequest, input GetEntityMemoriesInput) (*mcp.CallToolResult, any, error) {
+	entityID := strings.TrimSpace(input.EntityID)
+	if entityID == "" {
+		return nil, nil, errors.New("entity_id is required")
+	}
+
+	hops := int(input.Hops)
+	if hops < 0 {
+		hops = 0
+	}
+	if hops > 3 {
+		hops = 3
+	}
+
+	limit := int(input.Limit)
+	if limit <= 0 {
+		limit = 50
+	}
+
+	response, err := apiClient.GetEntityMemories(entityID, hops, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get entity memories: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"memory_ids": response.MemoryIDs,
+		"entity_id":  response.EntityID,
+		"hops":       response.Hops,
+		"total":      response.Total,
+		"_context":   getContextString(),
+	}), nil, nil
+}
+
+func handleGetEntityStats(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, any, error) {
+	response, err := apiClient.GetEntityStats()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get entity stats: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"total_entities":      response.TotalEntities,
+		"total_relationships": response.TotalRelationships,
+		"entities_by_type":    response.EntitiesByType,
+		"_context":            getContextString(),
+	}), nil, nil
+}
+
+type CreateEntityInput struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Description string   `json:"description,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
+	Project     string   `json:"project,omitempty"`
+	Confidence  float64  `json:"confidence,omitempty"`
+}
+
+func handleCreateEntity(ctx context.Context, req *mcp.CallToolRequest, input CreateEntityInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("create_entity"); err != nil {
+		return nil, nil, err
+	}
+
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+
+	entityType := strings.TrimSpace(input.Type)
+	if entityType == "" {
+		return nil, nil, errors.New("type is required")
+	}
+
+	// Validate entity type
+	validTypes := map[string]bool{
+		"person": true, "tool": true, "concept": true, "project": true,
+		"organization": true, "location": true, "event": true,
+		"document": true, "api": true, "other": true,
+	}
+	if !validTypes[entityType] {
+		return nil, nil, fmt.Errorf("invalid entity type: %s. Valid types: person, tool, concept, project, organization, location, event, document, api, other", entityType)
+	}
+
+	createReq := &models.CreateEntityRequest{
+		Name:    name,
+		Type:    models.GraphEntityType(entityType),
+		Aliases: input.Aliases,
+	}
+
+	if desc := strings.TrimSpace(input.Description); desc != "" {
+		createReq.Description = &desc
+	}
+
+	if project := strings.TrimSpace(input.Project); project != "" {
+		projectID, err := resolveProjectID(apiClient, project)
+		if err == nil {
+			createReq.ProjectID = &projectID
+		}
+	}
+
+	if input.Confidence > 0 && input.Confidence <= 1 {
+		createReq.Confidence = &input.Confidence
+	}
+
+	entity, err := apiClient.CreateEntity(createReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create entity: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":   "entity_created",
+		"entity":   entity,
+		"_message": fmt.Sprintf("✅ Entity '%s' created successfully", entity.Name),
+	}), nil, nil
+}
+
+type CreateRelationshipInput struct {
+	SourceEntityID   string  `json:"source_entity_id"`
+	TargetEntityID   string  `json:"target_entity_id"`
+	RelationshipType string  `json:"relationship_type"`
+	Label            string  `json:"label,omitempty"`
+	Description      string  `json:"description,omitempty"`
+	Strength         float64 `json:"strength,omitempty"`
+}
+
+func handleCreateRelationship(ctx context.Context, req *mcp.CallToolRequest, input CreateRelationshipInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("create_relationship"); err != nil {
+		return nil, nil, err
+	}
+
+	sourceID := strings.TrimSpace(input.SourceEntityID)
+	if sourceID == "" {
+		return nil, nil, errors.New("source_entity_id is required")
+	}
+
+	targetID := strings.TrimSpace(input.TargetEntityID)
+	if targetID == "" {
+		return nil, nil, errors.New("target_entity_id is required")
+	}
+
+	relType := strings.TrimSpace(input.RelationshipType)
+	if relType == "" {
+		return nil, nil, errors.New("relationship_type is required")
+	}
+
+	// Validate relationship type
+	validTypes := map[string]bool{
+		"uses": true, "works_on": true, "related_to": true, "depends_on": true,
+		"part_of": true, "created_by": true, "belongs_to": true, "connects_to": true,
+		"replaces": true, "similar_to": true, "contradicts": true, "references": true,
+		"implements": true, "extends": true,
+	}
+	if !validTypes[relType] {
+		return nil, nil, fmt.Errorf("invalid relationship type: %s. Valid types: uses, works_on, related_to, depends_on, part_of, created_by, belongs_to, connects_to, replaces, similar_to, contradicts, references, implements, extends", relType)
+	}
+
+	createReq := &models.CreateRelationshipRequest{
+		SourceEntityID:   sourceID,
+		TargetEntityID:   targetID,
+		RelationshipType: models.RelationshipType(relType),
+	}
+
+	if label := strings.TrimSpace(input.Label); label != "" {
+		createReq.Label = &label
+	}
+
+	if desc := strings.TrimSpace(input.Description); desc != "" {
+		createReq.Description = &desc
+	}
+
+	if input.Strength > 0 && input.Strength <= 1 {
+		createReq.Strength = &input.Strength
+	}
+
+	relationship, err := apiClient.CreateRelationship(createReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create relationship: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":       "relationship_created",
+		"relationship": relationship,
+		"_message":     fmt.Sprintf("✅ Relationship '%s' created between entities", relType),
+	}), nil, nil
+}
+
+// ============================================================================
+// SKILLS TOOLS HANDLERS
+// ============================================================================
+
+type ListSkillsInput struct {
+	Project string `json:"project,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
+func handleListSkills(ctx context.Context, req *mcp.CallToolRequest, input ListSkillsInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("list_skills"); err != nil {
+		return nil, nil, err
+	}
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// Get skills via memory list with type=skill filter
+	projectID := ""
+	if input.Project != "" {
+		resolved, err := resolveProjectID(apiClient, input.Project)
+		if err == nil {
+			projectID = resolved
+		}
+	}
+
+	skills, err := apiClient.ListSkills(projectID, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list skills: %w", err)
+	}
+
+	// Format skills for output
+	var result []map[string]interface{}
+	for _, skill := range skills {
+		item := map[string]interface{}{
+			"id":          skill.ID,
+			"content":     skill.Content,
+			"trigger":     skill.Trigger,
+			"steps":       skill.Steps,
+			"validation":  skill.Validation,
+			"tags":        skill.Tags,
+			"created_at":  skill.CreatedAt,
+		}
+		if skill.Project != nil {
+			item["project_name"] = skill.Project.Name
+		}
+		result = append(result, item)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":   "skills_listed",
+		"skills":   result,
+		"count":    len(result),
+		"_message": fmt.Sprintf("Found %d skills", len(result)),
+	}), nil, nil
+}
+
+type CreateSkillInput struct {
+	Project     string   `json:"project"`
+	Trigger     string   `json:"trigger"`
+	Description string   `json:"description"`
+	Steps       []string `json:"steps"`
+	Validation  string   `json:"validation,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+func handleCreateSkill(ctx context.Context, req *mcp.CallToolRequest, input CreateSkillInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("create_skill"); err != nil {
+		return nil, nil, err
+	}
+
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil || projectID == "" {
+		return nil, nil, errors.New("project is required")
+	}
+
+	if input.Trigger == "" {
+		return nil, nil, errors.New("trigger is required")
+	}
+
+	if input.Description == "" {
+		return nil, nil, errors.New("description is required")
+	}
+
+	if len(input.Steps) == 0 {
+		return nil, nil, errors.New("steps array is required and must not be empty")
+	}
+
+	// Create skill via memory API with type=skill
+	skill, err := apiClient.CreateSkill(projectID, input.Trigger, input.Description, input.Steps, input.Validation, input.Tags)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create skill: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":   "skill_created",
+		"skill":    skill,
+		"_message": fmt.Sprintf("✅ Skill created: %s", skill.Content),
+	}), nil, nil
+}
+
+type ExecuteSkillInput struct {
+	SkillID string `json:"skill_id"`
+	Context string `json:"context,omitempty"`
+}
+
+func handleExecuteSkill(ctx context.Context, req *mcp.CallToolRequest, input ExecuteSkillInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("execute_skill"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.SkillID == "" {
+		return nil, nil, errors.New("skill_id is required")
+	}
+
+	session := GetCurrentSession()
+	var agentName, agentModel *string
+	if session != nil {
+		agentName = &session.AgentName
+		agentModel = &session.AgentModel
+	}
+
+	execution, err := apiClient.StartSkillExecution(input.SkillID, input.Context, agentName, agentModel)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to start execution: %w", err)
+	}
+
+	// Extract steps from the skill (Steps is already []string in CLI models)
+	var steps []string
+	if execution.Skill != nil {
+		steps = execution.Skill.Steps
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":       "execution_started",
+		"execution_id": execution.ID,
+		"skill_id":     execution.SkillID,
+		"trigger":      execution.Skill.Trigger,
+		"steps":        steps,
+		"validation":   execution.Skill.Validation,
+		"_message":     fmt.Sprintf("⚡ Execution started. Follow these %d steps, then call complete_execution.", len(steps)),
+	}), nil, nil
+}
+
+type CompleteExecutionInput struct {
+	ExecutionID string `json:"execution_id"`
+	Success     bool   `json:"success"`
+	Notes       string `json:"notes,omitempty"`
+}
+
+func handleCompleteExecution(ctx context.Context, req *mcp.CallToolRequest, input CompleteExecutionInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("complete_execution"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.ExecutionID == "" {
+		return nil, nil, errors.New("execution_id is required")
+	}
+
+	execution, err := apiClient.CompleteSkillExecution(input.ExecutionID, input.Success, input.Notes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to complete execution: %w", err)
+	}
+
+	status := "✅ succeeded"
+	if !input.Success {
+		status = "❌ failed"
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":       "execution_completed",
+		"execution_id": execution.ID,
+		"success":      input.Success,
+		"_message":     fmt.Sprintf("Execution %s", status),
+	}), nil, nil
+}
+
+type GetSkillStatsInput struct {
+	SkillID string `json:"skill_id"`
+}
+
+func handleGetSkillStats(ctx context.Context, req *mcp.CallToolRequest, input GetSkillStatsInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("get_skill_stats"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.SkillID == "" {
+		return nil, nil, errors.New("skill_id is required")
+	}
+
+	stats, err := apiClient.GetSkillStats(input.SkillID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get skill stats: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":           "skill_stats_retrieved",
+		"skill_id":         stats.SkillID,
+		"total_executions": stats.TotalExecutions,
+		"success_count":    stats.SuccessCount,
+		"failure_count":    stats.FailureCount,
+		"success_rate":     fmt.Sprintf("%.1f%%", stats.SuccessRate*100),
+		"last_executed_at": stats.LastExecutedAt,
+		"_message":         fmt.Sprintf("📊 %d executions (%.1f%% success rate)", stats.TotalExecutions, stats.SuccessRate*100),
+	}), nil, nil
+}
+
+type GenerateSkillInput struct {
+	Description string `json:"description"`
+	Project     string `json:"project,omitempty"`
+	AutoSave    bool   `json:"auto_save,omitempty"`
+}
+
+func handleGenerateSkill(ctx context.Context, req *mcp.CallToolRequest, input GenerateSkillInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("generate_skill"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.Description == "" {
+		return nil, nil, errors.New("description is required")
+	}
+
+	var projectID *string
+	if input.Project != "" {
+		resolved, err := resolveProjectID(apiClient, input.Project)
+		if err == nil && resolved != "" {
+			projectID = &resolved
+		}
+	}
+
+	response, err := apiClient.GenerateSkill(input.Description, projectID, input.AutoSave)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate skill: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"action":     "skill_generated",
+		"skill":      response.Skill,
+		"ai_model":   response.AIModel,
+		"latency_ms": response.LatencyMs,
+		"_message":   fmt.Sprintf("🤖 Skill generated (%.1f%% confidence)", response.Skill.Confidence*100),
+	}
+
+	if response.SavedID != nil {
+		result["saved_id"] = response.SavedID
+		result["_message"] = fmt.Sprintf("🤖 Skill generated and saved (ID: %s)", response.SavedID)
 	}
 
 	return mustTextResult(result), nil, nil

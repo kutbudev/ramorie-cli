@@ -149,3 +149,229 @@ type AnnotationListResponse struct {
 	Success bool         `json:"success"`
 	Data    []Annotation `json:"data"`
 }
+
+// ============================================================================
+// Entity & Knowledge Graph Types
+// ============================================================================
+
+// GraphEntityType represents the type of an entity
+type GraphEntityType string
+
+const (
+	GraphEntityTypePerson       GraphEntityType = "person"
+	GraphEntityTypeTool         GraphEntityType = "tool"
+	GraphEntityTypeConcept      GraphEntityType = "concept"
+	GraphEntityTypeProject      GraphEntityType = "project"
+	GraphEntityTypeOrganization GraphEntityType = "organization"
+	GraphEntityTypeLocation     GraphEntityType = "location"
+	GraphEntityTypeEvent        GraphEntityType = "event"
+	GraphEntityTypeDocument     GraphEntityType = "document"
+	GraphEntityTypeAPI          GraphEntityType = "api"
+	GraphEntityTypeOther        GraphEntityType = "other"
+)
+
+// RelationshipType represents the type of relationship between entities
+type RelationshipType string
+
+const (
+	RelationshipUses        RelationshipType = "uses"
+	RelationshipWorksOn     RelationshipType = "works_on"
+	RelationshipRelatedTo   RelationshipType = "related_to"
+	RelationshipDependsOn   RelationshipType = "depends_on"
+	RelationshipPartOf      RelationshipType = "part_of"
+	RelationshipCreatedBy   RelationshipType = "created_by"
+	RelationshipBelongsTo   RelationshipType = "belongs_to"
+	RelationshipConnectsTo  RelationshipType = "connects_to"
+	RelationshipReplaces    RelationshipType = "replaces"
+	RelationshipSimilarTo   RelationshipType = "similar_to"
+	RelationshipContradicts RelationshipType = "contradicts"
+	RelationshipReferences  RelationshipType = "references"
+	RelationshipImplements  RelationshipType = "implements"
+	RelationshipExtends     RelationshipType = "extends"
+)
+
+// Entity represents an extracted entity from memories (knowledge graph node)
+type Entity struct {
+	ID             uuid.UUID              `json:"id"`
+	UserID         uuid.UUID              `json:"user_id"`
+	OrgID          *uuid.UUID             `json:"org_id,omitempty"`
+	ProjectID      *uuid.UUID             `json:"project_id,omitempty"`
+	Name           string                 `json:"name"`
+	NormalizedName string                 `json:"normalized_name"`
+	Type           GraphEntityType        `json:"type"`
+	Description    *string                `json:"description,omitempty"`
+	Aliases        []string               `json:"aliases,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Confidence     float64                `json:"confidence"`
+	MentionCount   int                    `json:"mention_count"`
+	ValidFrom      time.Time              `json:"valid_from"`
+	ValidUntil     *time.Time             `json:"valid_until,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+}
+
+// EntityRelationship represents a relationship between two entities (knowledge graph edge)
+type EntityRelationship struct {
+	ID               uuid.UUID              `json:"id"`
+	UserID           uuid.UUID              `json:"user_id"`
+	OrgID            *uuid.UUID             `json:"org_id,omitempty"`
+	SourceEntityID   uuid.UUID              `json:"source_entity_id"`
+	TargetEntityID   uuid.UUID              `json:"target_entity_id"`
+	RelationshipType RelationshipType       `json:"relationship_type"`
+	Label            *string                `json:"label,omitempty"`
+	Description      *string                `json:"description,omitempty"`
+	Strength         float64                `json:"strength"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	SourceMemoryID   *uuid.UUID             `json:"source_memory_id,omitempty"`
+	ValidFrom        time.Time              `json:"valid_from"`
+	ValidUntil       *time.Time             `json:"valid_until,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
+	// Loaded relationships
+	SourceEntity *Entity `json:"source_entity,omitempty"`
+	TargetEntity *Entity `json:"target_entity,omitempty"`
+}
+
+// CreateEntityRequest represents the request to create a new entity
+type CreateEntityRequest struct {
+	Name        string          `json:"name"`
+	Type        GraphEntityType `json:"type"`
+	Description *string         `json:"description,omitempty"`
+	Aliases     []string        `json:"aliases,omitempty"`
+	ProjectID   *string         `json:"project_id,omitempty"`
+	Confidence  *float64        `json:"confidence,omitempty"`
+}
+
+// CreateRelationshipRequest represents the request to create a new relationship
+type CreateRelationshipRequest struct {
+	SourceEntityID   string           `json:"source_entity_id"`
+	TargetEntityID   string           `json:"target_entity_id"`
+	RelationshipType RelationshipType `json:"relationship_type"`
+	Label            *string          `json:"label,omitempty"`
+	Description      *string          `json:"description,omitempty"`
+	Strength         *float64         `json:"strength,omitempty"`
+	SourceMemoryID   *string          `json:"source_memory_id,omitempty"`
+}
+
+// EntityListResponse represents the response from list entities endpoint
+type EntityListResponse struct {
+	Entities []Entity `json:"entities"`
+	Total    int64    `json:"total"`
+	Limit    int      `json:"limit"`
+	Offset   int      `json:"offset"`
+}
+
+// EntityGraphResponse represents the response from get entity graph endpoint
+type EntityGraphResponse struct {
+	RootEntity *Entity                  `json:"root_entity"`
+	Nodes      []map[string]interface{} `json:"nodes"`
+	Edges      []map[string]interface{} `json:"edges"`
+	Hops       int                      `json:"hops"`
+	NodeCount  int                      `json:"node_count"`
+	EdgeCount  int                      `json:"edge_count"`
+}
+
+// EntityRelationshipsResponse represents the response from get entity relationships endpoint
+type EntityRelationshipsResponse struct {
+	Entity           *Entity              `json:"entity"`
+	RelationshipsOut []EntityRelationship `json:"relationships_out"`
+	RelationshipsIn  []EntityRelationship `json:"relationships_in"`
+}
+
+// EntityMemoriesResponse represents the response from get entity memories endpoint
+type EntityMemoriesResponse struct {
+	MemoryIDs []string `json:"memory_ids"`
+	EntityID  string   `json:"entity_id"`
+	Hops      int      `json:"hops"`
+	Total     int      `json:"total"`
+}
+
+// MemoryEntitiesResponse represents the response from get memory entities endpoint
+type MemoryEntitiesResponse struct {
+	Entities []Entity `json:"entities"`
+	MemoryID string   `json:"memory_id"`
+	Total    int      `json:"total"`
+}
+
+// EntityStatsResponse represents the response from get entity stats endpoint
+type EntityStatsResponse struct {
+	TotalEntities      int64            `json:"total_entities"`
+	TotalRelationships int64            `json:"total_relationships"`
+	EntitiesByType     map[string]int64 `json:"entities_by_type"`
+}
+
+// ExtractedEntity represents an entity extracted during memory processing
+type ExtractedEntity struct {
+	Name       string          `json:"name"`
+	Type       GraphEntityType `json:"type"`
+	Confidence float64         `json:"confidence"`
+	Position   int             `json:"position"`
+	Context    string          `json:"context"`
+}
+
+// ExtractedRelationship represents a relationship extracted during processing
+type ExtractedRelationship struct {
+	SourceName       string           `json:"source_name"`
+	TargetName       string           `json:"target_name"`
+	RelationshipType RelationshipType `json:"relationship_type"`
+	Confidence       float64          `json:"confidence"`
+}
+
+// ExtractionResult represents the result of entity extraction
+type ExtractionResult struct {
+	Entities      []ExtractedEntity       `json:"entities"`
+	Relationships []ExtractedRelationship `json:"relationships"`
+	UsedAI        bool                    `json:"used_ai"`
+}
+
+// ============================================================================
+// Skills & Execution Types
+// ============================================================================
+
+// SkillExecution represents an execution of a procedural skill
+type SkillExecution struct {
+	ID             uuid.UUID  `json:"id"`
+	SkillID        uuid.UUID  `json:"skill_id"`
+	UserID         uuid.UUID  `json:"user_id"`
+	OrgID          *uuid.UUID `json:"org_id,omitempty"`
+	AgentName      *string    `json:"agent_name,omitempty"`
+	AgentModel     *string    `json:"agent_model,omitempty"`
+	AgentSessionID *string    `json:"agent_session_id,omitempty"`
+	Context        *string    `json:"context,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	Success        *bool      `json:"success,omitempty"`
+	Notes          *string    `json:"notes,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	// Loaded relationships
+	Skill *Memory `json:"skill,omitempty"`
+}
+
+// SkillStats represents aggregated statistics for a skill
+type SkillStats struct {
+	SkillID         uuid.UUID  `json:"skill_id"`
+	TotalExecutions int64      `json:"total_executions"`
+	SuccessCount    int64      `json:"success_count"`
+	FailureCount    int64      `json:"failure_count"`
+	SuccessRate     float64    `json:"success_rate"`
+	LastExecutedAt  *time.Time `json:"last_executed_at,omitempty"`
+}
+
+// GeneratedSkill represents an AI-generated skill
+type GeneratedSkill struct {
+	Trigger       string   `json:"trigger"`
+	Description   string   `json:"description"`
+	Steps         []string `json:"steps"`
+	Validation    string   `json:"validation"`
+	Confidence    float64  `json:"confidence"`
+	SuggestedTags []string `json:"suggested_tags"`
+}
+
+// GenerateSkillResponse is the response for skill generation
+type GenerateSkillResponse struct {
+	Skill     GeneratedSkill `json:"skill"`
+	SavedID   *uuid.UUID     `json:"saved_id,omitempty"`
+	AIModel   string         `json:"ai_model"`
+	LatencyMs int            `json:"latency_ms"`
+}
