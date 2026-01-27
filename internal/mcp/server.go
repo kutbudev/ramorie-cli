@@ -20,6 +20,13 @@ func ServeStdio(client *api.Client) error {
 	}
 	apiClient = client
 
+	// Try to load a persisted session from a previous MCP run
+	// This helps maintain org context across stdio restarts
+	if LoadPersistedSession() {
+		// Restore agent info on the API client
+		setAgentInfoFromSession(client)
+	}
+
 	// Create server with implementation info and instructions
 	server := mcp.NewServer(
 		&mcp.Implementation{

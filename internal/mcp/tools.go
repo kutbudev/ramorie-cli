@@ -138,8 +138,19 @@ func registerTools(server *mcp.Server) {
 	}, handleListTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_task",
-		Description: "🔴 ESSENTIAL | Create a new task. REQUIRED: project, description. Optional: priority (L/M/H).",
+		Name: "create_task",
+		Description: `🔴 ESSENTIAL | Create a new task.
+
+REQUIRED: project (name or ID), description
+OPTIONAL: priority (L/M/H, default: M)
+
+IMPORTANT:
+- Call 'setup_agent' first if you get session errors
+- Use 'list_projects' to see available project names
+- If in an organization, use 'switch_organization' first
+- Project names are case-insensitive
+
+Example: create_task(project: "my-project", description: "Implement login feature", priority: "H")`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Create Task",
 			DestructiveHint: boolPtr(false),
@@ -148,8 +159,19 @@ func registerTools(server *mcp.Server) {
 	}, handleCreateTask)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "add_memory",
-		Description: "🔴 ESSENTIAL | Store knowledge. REQUIRED: project, content. Optional: type ('skill' for procedural memory), ttl, valid_from/valid_until, visibility (private/project/organization/public), readers, writers. For type='skill': trigger, steps, validation.",
+		Name: "add_memory",
+		Description: `🔴 ESSENTIAL | Store knowledge.
+
+REQUIRED: project (name or ID), content
+OPTIONAL: type (general|decision|bug_fix|preference|pattern|reference|skill), force (bypass similarity check)
+
+IMPORTANT:
+- Call 'setup_agent' first if you get session errors
+- Use 'list_projects' to see available project names
+- If in an organization, use 'switch_organization' first
+- Project names are case-insensitive
+
+Example: add_memory(project: "my-project", content: "API uses JWT auth", type: "decision")`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Add Memory",
 			DestructiveHint: boolPtr(false),
@@ -336,8 +358,18 @@ func registerTools(server *mcp.Server) {
 	// 🟢 ADVANCED (9 tools)
 	// ============================================================================
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_project",
-		Description: "🟢 ADVANCED | Create a new project. REQUIRED: name, description. Optional: force (bypass duplicate check), org_id.",
+		Name: "create_project",
+		Description: `🟢 ADVANCED | Create a new project.
+
+REQUIRED: name, description
+OPTIONAL: force (bypass duplicate check), org_id (organization UUID)
+
+IMPORTANT:
+- If org_id is provided, you must be a member of that organization
+- Use 'list_organizations' to see available organizations
+- Project names must be unique per user (or per org if org_id provided)
+
+Example: create_project(name: "my-project", description: "My awesome project")`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Create Project",
 			DestructiveHint: boolPtr(false),
@@ -2089,17 +2121,46 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 		return "", errors.New("project parameter is required")
 	}
 
-	projects, err := client.ListProjects(getActiveOrgIDString())
+	orgID := getActiveOrgIDString()
+	projects, err := client.ListProjects(orgID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
+
+	// Check for exact name match or ID prefix match
 	for _, p := range projects {
-		if p.Name == projectIdentifier || strings.HasPrefix(p.ID.String(), projectIdentifier) {
+		if strings.EqualFold(p.Name, projectIdentifier) || strings.HasPrefix(p.ID.String(), projectIdentifier) {
 			return p.ID.String(), nil
 		}
 	}
 
-	return "", errors.New("project not found")
+	// Build helpful error message with available projects
+	if len(projects) == 0 {
+		if orgID != "" {
+			return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+				"No projects found in the current organization.\n"+
+				"Create one with: create_project(name=\"%s\", description=\"...\")\n"+
+				"Or switch to a different org with: switch_organization(orgId=\"...\")",
+				projectIdentifier, projectIdentifier)
+		}
+		return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+			"No projects found. Create one with:\n"+
+			"  create_project(name=\"%s\", description=\"...\")",
+			projectIdentifier, projectIdentifier)
+	}
+
+	// List available projects
+	availableNames := make([]string, 0, len(projects))
+	for _, p := range projects {
+		availableNames = append(availableNames, p.Name)
+	}
+
+	return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+		"Available projects: %s\n\n"+
+		"💡 Tips:\n"+
+		"- Use exact project name (case-insensitive)\n"+
+		"- If in an org, make sure switch_organization was called first",
+		projectIdentifier, strings.Join(availableNames, ", "))
 }
 
 // resolveProjectWithOrg resolves project ID and returns the org ID if the project belongs to an org
@@ -2109,12 +2170,15 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		return "", "", errors.New("project parameter is required")
 	}
 
-	projects, err := client.ListProjects(getActiveOrgIDString())
+	activeOrgID := getActiveOrgIDString()
+	projects, err := client.ListProjects(activeOrgID)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("failed to list projects: %w", err)
 	}
+
+	// Check for exact name match or ID prefix match
 	for _, p := range projects {
-		if p.Name == projectIdentifier || strings.HasPrefix(p.ID.String(), projectIdentifier) {
+		if strings.EqualFold(p.Name, projectIdentifier) || strings.HasPrefix(p.ID.String(), projectIdentifier) {
 			pid := p.ID.String()
 			oid := ""
 			if p.OrganizationID != nil {
@@ -2124,7 +2188,33 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		}
 	}
 
-	return "", "", errors.New("project not found")
+	// Build helpful error message with available projects
+	if len(projects) == 0 {
+		if activeOrgID != "" {
+			return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+				"No projects found in the current organization.\n"+
+				"Create one with: create_project(name=\"%s\", description=\"...\")\n"+
+				"Or switch to a different org with: switch_organization(orgId=\"...\")",
+				projectIdentifier, projectIdentifier)
+		}
+		return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+			"No projects found. Create one with:\n"+
+			"  create_project(name=\"%s\", description=\"...\")",
+			projectIdentifier, projectIdentifier)
+	}
+
+	// List available projects
+	availableNames := make([]string, 0, len(projects))
+	for _, p := range projects {
+		availableNames = append(availableNames, p.Name)
+	}
+
+	return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+		"Available projects: %s\n\n"+
+		"💡 Tips:\n"+
+		"- Use exact project name (case-insensitive)\n"+
+		"- If in an org, make sure switch_organization was called first",
+		projectIdentifier, strings.Join(availableNames, ", "))
 }
 
 // determineEncryptionScope decides the encryption scope for a project.
