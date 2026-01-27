@@ -35,25 +35,54 @@ func ServeStdio(client *api.Client) error {
 		},
 		&mcp.ServerOptions{
 			CompletionHandler: completionHandler,
-			Instructions: `Ramorie is an AI-native workspace for persistent memory, task management, and architectural decisions.
+			Instructions: `🧠 RAMORIE - Your Persistent Memory System
+
+You are connected to Ramorie, a persistent AI memory system. This connection means:
+- Your memories persist across sessions and are shared with other AI agents
+- You MUST use Ramorie proactively - don't wait for user to ask
+
+## CRITICAL: Proactive Usage Rules
+
+### ALWAYS RECALL FIRST
+Before answering ANY question or starting ANY task:
+→ recall(term: "relevant_keywords") to check existing knowledge
+
+### AUTO-SAVE These Situations (No User Permission Needed)
+- User states a preference → add_memory immediately
+- Bug is solved → add_memory with problem + solution
+- Decision is made → add_memory with rationale
+- Pattern is discovered → add_memory for future reference
+- Important context learned → add_memory to persist it
+
+### AUTO-CREATE Tasks
+- User says "do X later" → create_task
+- TODO/FIXME found in code → create_task
+- Work is deferred → create_task
 
 ## Getting Started
-1. Always call setup_agent first to initialize your session and get current context.
-2. Call list_projects to see available projects.
-3. Always pass the 'project' parameter explicitly when creating tasks or memories.
+1. Call setup_agent first to initialize your session
+2. Call list_projects to see ALL your accessible projects (personal + org)
+3. Pass 'project' parameter in create_task/add_memory calls
 
-## Key Workflows
-- **Memory**: Use add_memory to store knowledge, recall to search. Check for duplicates before adding.
-- **Tasks**: Use create_task to track work, manage_task to update status. Start tasks before working on them.
-- **Focus**: Use manage_focus to set your active workspace (context pack).
-- **Decisions**: Use create_decision to record architectural choices.
+## Quick Reference
+- SAVE: add_memory(project: "name", content: "...", type: "decision")
+- FIND: recall(term: "keywords")
+- TASK: create_task(project: "name", description: "...")
+- LIST: list_projects() shows ALL accessible projects across orgs
+
+## Multi-Agent Awareness
+Other AI agents can see your memories instantly. Always:
+- Recall before acting (another agent may have added context)
+- Save useful discoveries (helps other agents too)
+- Check for duplicates before saving (use recall first)
 
 ## Best Practices
-- Recall before creating new memories to avoid duplicates.
-- Start tasks (manage_task action=start) before working on them for accurate tracking.
-- Use the 'type' parameter in add_memory for better categorization (general, decision, bug_fix, preference, pattern, reference, skill).
-- Context packs bundle related memories and tasks into workspaces.
-- All data is scoped to the active organization.`,
+- Start tasks (manage_task action=start) before working on them
+- Use 'type' parameter in add_memory: general, decision, bug_fix, preference, pattern, reference, skill
+- Context packs bundle related memories and tasks into workspaces
+
+⚠️ DO NOT ask user "should I save this?" - just save it.
+⚠️ DO NOT forget to recall before answering questions.`,
 		},
 	)
 

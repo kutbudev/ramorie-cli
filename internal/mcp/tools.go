@@ -118,7 +118,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_projects",
-		Description: "🔴 ESSENTIAL | List all projects.",
+		Description: "🔴 ESSENTIAL | List ALL accessible projects (personal + all organizations you're a member of). No org switch required.",
 		InputSchema: emptyObjectSchema(),
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "List Projects",
@@ -147,7 +147,7 @@ OPTIONAL: priority (L/M/H, default: M)
 IMPORTANT:
 - Call 'setup_agent' first if you get session errors
 - Use 'list_projects' to see available project names
-- If in an organization, use 'switch_organization' first
+- Project names work across all your organizations - no switch required
 - Project names are case-insensitive
 
 Example: create_task(project: "my-project", description: "Implement login feature", priority: "H")`,
@@ -168,7 +168,7 @@ OPTIONAL: type (general|decision|bug_fix|preference|pattern|reference|skill), fo
 IMPORTANT:
 - Call 'setup_agent' first if you get session errors
 - Use 'list_projects' to see available project names
-- If in an organization, use 'switch_organization' first
+- Project names work across all your organizations - no switch required
 - Project names are case-insensitive
 
 Example: add_memory(project: "my-project", content: "API uses JWT auth", type: "decision")`,
@@ -560,14 +560,8 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 }
 
 func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, any, error) {
-	// Pass active org ID from session to get organization-scoped projects
-	var orgID string
-	session := GetCurrentSession()
-	if session != nil && session.ActiveOrgID != nil {
-		orgID = session.ActiveOrgID.String()
-	}
-
-	projects, err := apiClient.ListProjects(orgID)
+	// Get ALL accessible projects (no org filtering) - enables cross-org project access
+	projects, err := apiClient.ListProjects("")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2121,8 +2115,8 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 		return "", errors.New("project parameter is required")
 	}
 
-	orgID := getActiveOrgIDString()
-	projects, err := client.ListProjects(orgID)
+	// Get ALL accessible projects (no org filtering) - enables cross-org project access
+	projects, err := client.ListProjects("")
 	if err != nil {
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
@@ -2136,30 +2130,25 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 
 	// Build helpful error message with available projects
 	if len(projects) == 0 {
-		if orgID != "" {
-			return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
-				"No projects found in the current organization.\n"+
-				"Create one with: create_project(name=\"%s\", description=\"...\")\n"+
-				"Or switch to a different org with: switch_organization(orgId=\"...\")",
-				projectIdentifier, projectIdentifier)
-		}
 		return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
 			"No projects found. Create one with:\n"+
 			"  create_project(name=\"%s\", description=\"...\")",
 			projectIdentifier, projectIdentifier)
 	}
 
-	// List available projects
+	// List available projects (include org name for clarity)
 	availableNames := make([]string, 0, len(projects))
 	for _, p := range projects {
-		availableNames = append(availableNames, p.Name)
+		name := p.Name
+		if p.Organization != nil && p.Organization.Name != "" {
+			name = fmt.Sprintf("%s (%s)", p.Name, p.Organization.Name)
+		}
+		availableNames = append(availableNames, name)
 	}
 
 	return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
 		"Available projects: %s\n\n"+
-		"💡 Tips:\n"+
-		"- Use exact project name (case-insensitive)\n"+
-		"- If in an org, make sure switch_organization was called first",
+		"💡 Tip: Use exact project name (case-insensitive)",
 		projectIdentifier, strings.Join(availableNames, ", "))
 }
 
@@ -2170,8 +2159,8 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		return "", "", errors.New("project parameter is required")
 	}
 
-	activeOrgID := getActiveOrgIDString()
-	projects, err := client.ListProjects(activeOrgID)
+	// Get ALL accessible projects (no org filtering) - enables cross-org project access
+	projects, err := client.ListProjects("")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to list projects: %w", err)
 	}
@@ -2190,30 +2179,25 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 
 	// Build helpful error message with available projects
 	if len(projects) == 0 {
-		if activeOrgID != "" {
-			return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
-				"No projects found in the current organization.\n"+
-				"Create one with: create_project(name=\"%s\", description=\"...\")\n"+
-				"Or switch to a different org with: switch_organization(orgId=\"...\")",
-				projectIdentifier, projectIdentifier)
-		}
 		return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
 			"No projects found. Create one with:\n"+
 			"  create_project(name=\"%s\", description=\"...\")",
 			projectIdentifier, projectIdentifier)
 	}
 
-	// List available projects
+	// List available projects (include org name for clarity)
 	availableNames := make([]string, 0, len(projects))
 	for _, p := range projects {
-		availableNames = append(availableNames, p.Name)
+		name := p.Name
+		if p.Organization != nil && p.Organization.Name != "" {
+			name = fmt.Sprintf("%s (%s)", p.Name, p.Organization.Name)
+		}
+		availableNames = append(availableNames, name)
 	}
 
 	return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
 		"Available projects: %s\n\n"+
-		"💡 Tips:\n"+
-		"- Use exact project name (case-insensitive)\n"+
-		"- If in an org, make sure switch_organization was called first",
+		"💡 Tip: Use exact project name (case-insensitive)",
 		projectIdentifier, strings.Join(availableNames, ", "))
 }
 
