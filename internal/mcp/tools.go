@@ -2338,6 +2338,19 @@ func getActiveOrgIDString() string {
 	return ""
 }
 
+// normalizeForMatch removes spaces, hyphens, underscores, dots for fuzzy path matching
+// "Ramorie Frontend" -> "ramoriefrontend"
+// "ramorie-frontend" -> "ramoriefrontend"
+// "orkai.io" -> "orkaiio"
+func normalizeForMatch(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, ".", "")
+	return s
+}
+
 func resolveProjectID(client *api.Client, projectIdentifier string) (string, error) {
 	projectIdentifier = strings.TrimSpace(projectIdentifier)
 
@@ -2362,14 +2375,32 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 		// Try 2: CWD Match - Current working directory contains project name
 		if cwd, err := os.Getwd(); err == nil && cwd != "" {
 			cwdLower := strings.ToLower(cwd)
+			// Extract path segments for matching
+			pathSegments := strings.Split(cwdLower, "/")
+
 			for _, p := range projects {
 				projectNameLower := strings.ToLower(p.Name)
-				// Check if CWD contains project name as path segment
-				// e.g., /Users/x/GitHub/orkai/api matches "orkai"
-				if strings.Contains(cwdLower, "/"+projectNameLower+"/") ||
-					strings.HasSuffix(cwdLower, "/"+projectNameLower) {
-					SetSessionLastProject(p.ID)
-					return p.ID.String(), nil
+				// Normalize: remove spaces, hyphens, underscores, dots for fuzzy matching
+				projectNorm := normalizeForMatch(projectNameLower)
+
+				// Check each path segment
+				for _, segment := range pathSegments {
+					if segment == "" {
+						continue
+					}
+					segmentNorm := normalizeForMatch(segment)
+
+					// Exact normalized match: "ramorie-frontend" == "Ramorie Frontend"
+					if segmentNorm == projectNorm {
+						SetSessionLastProject(p.ID)
+						return p.ID.String(), nil
+					}
+
+					// Prefix match: "ramorie-frontend-app" contains "ramorie-frontend"
+					if len(projectNorm) >= 4 && strings.HasPrefix(segmentNorm, projectNorm) {
+						SetSessionLastProject(p.ID)
+						return p.ID.String(), nil
+					}
 				}
 			}
 		}
@@ -2462,7 +2493,34 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 			}
 		}
 
-		// Try 2: Use single project if user has only one
+		// Try 2: CWD Match - Current working directory contains project name
+		if cwd, err := os.Getwd(); err == nil && cwd != "" {
+			cwdLower := strings.ToLower(cwd)
+			pathSegments := strings.Split(cwdLower, "/")
+
+			for _, p := range projects {
+				projectNameLower := strings.ToLower(p.Name)
+				projectNorm := normalizeForMatch(projectNameLower)
+
+				for _, segment := range pathSegments {
+					if segment == "" {
+						continue
+					}
+					segmentNorm := normalizeForMatch(segment)
+
+					if segmentNorm == projectNorm || (len(projectNorm) >= 4 && strings.HasPrefix(segmentNorm, projectNorm)) {
+						SetSessionLastProject(p.ID)
+						oid := ""
+						if p.OrganizationID != nil {
+							oid = p.OrganizationID.String()
+						}
+						return p.ID.String(), oid, nil
+					}
+				}
+			}
+		}
+
+		// Try 3: Use single project if user has only one
 		if len(projects) == 1 {
 			p := projects[0]
 			// Track this as last used
