@@ -710,6 +710,67 @@ Example: generate_skill(description: "How to deploy a Next.js app to Vercel", pr
 			OpenWorldHint:   boolPtr(false),
 		},
 	}, handleGenerateSkill)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "update_skill",
+		Description: `🟡 COMMON | Update an existing skill's content, steps, or validation.
+
+REQUIRED: skill_id
+Optional: trigger, description, steps (array), validation, tags (array)
+
+Only the provided fields will be updated.
+
+Example: update_skill(skill_id: "uuid", steps: ["New step 1", "New step 2"], validation: "Updated validation")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Update Skill",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleUpdateSkill)
+
+	// ============================================================================
+	// 🟢 ADVANCED - Graph Traversal & Extraction Tools
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "traverse_graph",
+		Description: `🟢 ADVANCED | Advanced knowledge graph traversal with path finding and cluster discovery.
+
+REQUIRED: start_entity_id
+Optional:
+- target_entity_id: Find paths to this entity
+- max_depth (1-5, default 3): Maximum traversal depth
+- relationship_types: Filter by relationship types (array)
+- entity_types: Filter by entity types (array)
+- mode: "paths" (find paths to target), "cluster" (discover connected cluster), "neighbors" (immediate neighbors)
+
+Returns traversal results with paths, clusters, or neighbor lists.
+
+Example: traverse_graph(start_entity_id: "uuid", mode: "cluster", max_depth: 2)`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Traverse Graph",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleTraverseGraph)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "extract_entities",
+		Description: `🟢 ADVANCED | Preview AI entity extraction from content without persisting.
+
+REQUIRED: content (text to analyze)
+
+Uses AI (Gemini) or rule-based extraction to identify entities and relationships.
+Results are returned for review but NOT saved to the knowledge graph.
+
+Use this to preview what would be extracted before saving a memory.
+
+Example: extract_entities(content: "We use React with TypeScript and PostgreSQL for the Ramorie project")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Extract Entities",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleExtractEntities)
 }
 
 // ============================================================================
@@ -3543,6 +3604,245 @@ func handleGenerateSkill(ctx context.Context, req *mcp.CallToolRequest, input Ge
 		result["saved_id"] = response.SavedID
 		result["_message"] = fmt.Sprintf("🤖 Skill generated and saved (ID: %s)", response.SavedID)
 	}
+
+	return mustTextResult(result), nil, nil
+}
+
+// ============================================================================
+// Update Skill Handler (C17)
+// ============================================================================
+
+type UpdateSkillInput struct {
+	SkillID     string   `json:"skill_id"`
+	Trigger     string   `json:"trigger,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Steps       []string `json:"steps,omitempty"`
+	Validation  string   `json:"validation,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+func handleUpdateSkill(ctx context.Context, req *mcp.CallToolRequest, input UpdateSkillInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("update_skill"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.SkillID == "" {
+		return nil, nil, errors.New("skill_id is required")
+	}
+
+	// Build updates map
+	updates := make(map[string]interface{})
+	if input.Trigger != "" {
+		updates["trigger"] = input.Trigger
+	}
+	if input.Description != "" {
+		updates["content"] = input.Description
+	}
+	if len(input.Steps) > 0 {
+		updates["steps"] = input.Steps
+	}
+	if input.Validation != "" {
+		updates["validation"] = input.Validation
+	}
+	if len(input.Tags) > 0 {
+		// Ensure "skill" tag is always present
+		hasSkillTag := false
+		for _, t := range input.Tags {
+			if t == "skill" {
+				hasSkillTag = true
+				break
+			}
+		}
+		if !hasSkillTag {
+			input.Tags = append(input.Tags, "skill")
+		}
+		updates["tags"] = input.Tags
+	}
+
+	if len(updates) == 0 {
+		return nil, nil, errors.New("at least one field to update is required")
+	}
+
+	// Use memory update endpoint (skills are stored as memories with type=skill)
+	updated, err := apiClient.UpdateMemory(input.SkillID, updates)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to update skill: %w", err)
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":   "skill_updated",
+		"skill":    updated,
+		"_message": "✅ Skill updated successfully",
+	}), nil, nil
+}
+
+// ============================================================================
+// Traverse Graph Handler (C6)
+// ============================================================================
+
+type TraverseGraphInput struct {
+	StartEntityID     string   `json:"start_entity_id"`
+	TargetEntityID    string   `json:"target_entity_id,omitempty"`
+	MaxDepth          int      `json:"max_depth,omitempty"`
+	RelationshipTypes []string `json:"relationship_types,omitempty"`
+	EntityTypes       []string `json:"entity_types,omitempty"`
+	Mode              string   `json:"mode,omitempty"` // "paths", "cluster", "neighbors"
+}
+
+func handleTraverseGraph(ctx context.Context, req *mcp.CallToolRequest, input TraverseGraphInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("traverse_graph"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.StartEntityID == "" {
+		return nil, nil, errors.New("start_entity_id is required")
+	}
+
+	// Default values
+	if input.MaxDepth <= 0 || input.MaxDepth > 5 {
+		input.MaxDepth = 3
+	}
+	if input.Mode == "" {
+		input.Mode = "cluster"
+	}
+
+	// For "neighbors" mode, use depth 1
+	if input.Mode == "neighbors" {
+		input.MaxDepth = 1
+	}
+
+	// Get the graph data using the existing entity graph endpoint
+	graph, err := apiClient.GetEntityGraph(input.StartEntityID, input.MaxDepth)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to traverse graph: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"mode":         input.Mode,
+		"start_entity": input.StartEntityID,
+		"max_depth":    input.MaxDepth,
+	}
+
+	// Convert to interface slices for filtering
+	nodes := make([]interface{}, len(graph.Nodes))
+	for i, n := range graph.Nodes {
+		nodes[i] = n
+	}
+	edges := make([]interface{}, len(graph.Edges))
+	for i, e := range graph.Edges {
+		edges[i] = e
+	}
+
+	// Apply entity type filter if specified
+	if len(input.EntityTypes) > 0 {
+		filteredNodes := make([]interface{}, 0)
+		typeSet := make(map[string]bool)
+		for _, t := range input.EntityTypes {
+			typeSet[t] = true
+		}
+		for _, n := range nodes {
+			node := n.(map[string]interface{})
+			if nodeType, ok := node["type"].(string); ok && typeSet[nodeType] {
+				filteredNodes = append(filteredNodes, n)
+			}
+		}
+		nodes = filteredNodes
+	}
+
+	// Apply relationship type filter if specified
+	if len(input.RelationshipTypes) > 0 {
+		filteredEdges := make([]interface{}, 0)
+		typeSet := make(map[string]bool)
+		for _, t := range input.RelationshipTypes {
+			typeSet[t] = true
+		}
+		for _, e := range edges {
+			edge := e.(map[string]interface{})
+			if edgeType, ok := edge["type"].(string); ok && typeSet[edgeType] {
+				filteredEdges = append(filteredEdges, e)
+			}
+		}
+		edges = filteredEdges
+	}
+
+	switch input.Mode {
+	case "paths":
+		if input.TargetEntityID == "" {
+			return nil, nil, errors.New("target_entity_id is required for 'paths' mode")
+		}
+		// Simple path finding - check if target is in the graph
+		targetFound := false
+		for _, n := range nodes {
+			node := n.(map[string]interface{})
+			if node["id"] == input.TargetEntityID {
+				targetFound = true
+				break
+			}
+		}
+		result["target_entity"] = input.TargetEntityID
+		result["path_exists"] = targetFound
+		result["nodes"] = nodes
+		result["edges"] = edges
+		if targetFound {
+			result["_message"] = fmt.Sprintf("✅ Path found to target within %d hops", input.MaxDepth)
+		} else {
+			result["_message"] = fmt.Sprintf("❌ No path found to target within %d hops", input.MaxDepth)
+		}
+
+	case "cluster":
+		result["nodes"] = nodes
+		result["edges"] = edges
+		result["node_count"] = len(nodes)
+		result["edge_count"] = len(edges)
+		result["_message"] = fmt.Sprintf("📊 Discovered cluster with %d entities and %d relationships", len(nodes), len(edges))
+
+	case "neighbors":
+		result["neighbors"] = nodes
+		result["relationships"] = edges
+		result["neighbor_count"] = len(nodes) - 1 // Exclude root
+		result["_message"] = fmt.Sprintf("👥 Found %d immediate neighbors", len(nodes)-1)
+	}
+
+	return mustTextResult(result), nil, nil
+}
+
+// ============================================================================
+// Extract Entities Handler (C7)
+// ============================================================================
+
+type ExtractEntitiesInput struct {
+	Content string `json:"content"`
+}
+
+func handleExtractEntities(ctx context.Context, req *mcp.CallToolRequest, input ExtractEntitiesInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("extract_entities"); err != nil {
+		return nil, nil, err
+	}
+
+	if input.Content == "" {
+		return nil, nil, errors.New("content is required")
+	}
+
+	if len(input.Content) < 10 {
+		return nil, nil, errors.New("content must be at least 10 characters")
+	}
+
+	// Call the backend preview extraction endpoint
+	result, err := apiClient.PreviewExtraction(input.Content)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to extract entities: %w", err)
+	}
+
+	entityCount := 0
+	relCount := 0
+	if entities, ok := result["entities"].([]interface{}); ok {
+		entityCount = len(entities)
+	}
+	if rels, ok := result["relationships"].([]interface{}); ok {
+		relCount = len(rels)
+	}
+
+	result["_message"] = fmt.Sprintf("🔍 Extracted %d entities and %d relationships (preview only, not saved)", entityCount, relCount)
 
 	return mustTextResult(result), nil, nil
 }

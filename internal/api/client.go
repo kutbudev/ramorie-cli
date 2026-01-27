@@ -2697,6 +2697,25 @@ func (c *Client) GetEntityStats() (*models.EntityStatsResponse, error) {
 	return &response, nil
 }
 
+// PreviewExtraction previews entity extraction from content without persisting
+func (c *Client) PreviewExtraction(content string) (map[string]interface{}, error) {
+	payload := map[string]string{
+		"content": content,
+	}
+
+	respBody, err := c.makeRequest("POST", "/extraction/preview", payload)
+	if err != nil {
+		return nil, err
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal extraction preview: %w", err)
+	}
+
+	return response, nil
+}
+
 // ============================================================================
 // SKILLS API METHODS
 // ============================================================================
