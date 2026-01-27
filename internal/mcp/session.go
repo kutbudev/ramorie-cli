@@ -13,13 +13,14 @@ import (
 
 // Session represents an MCP agent session with context
 type Session struct {
-	ID             string
-	Initialized    bool
-	AgentName      string
-	AgentModel     string
-	ActiveOrgID    *uuid.UUID
-	CreatedAt      time.Time
-	LastActivityAt time.Time
+	ID                string
+	Initialized       bool
+	AgentName         string
+	AgentModel        string
+	ActiveOrgID       *uuid.UUID
+	LastUsedProjectID *uuid.UUID // Track last used project for auto-detection
+	CreatedAt         time.Time
+	LastActivityAt    time.Time
 }
 
 // SessionManager manages MCP sessions
@@ -124,6 +125,27 @@ func GetSessionActiveOrgID() *uuid.UUID {
 	return nil
 }
 
+// SetSessionLastProject sets the last used project for the session
+func SetSessionLastProject(projectID uuid.UUID) {
+	sessionManager.mu.Lock()
+	defer sessionManager.mu.Unlock()
+	if sessionManager.currentSession != nil {
+		sessionManager.currentSession.LastUsedProjectID = &projectID
+		sessionManager.currentSession.LastActivityAt = time.Now()
+		go PersistSession()
+	}
+}
+
+// GetSessionLastProjectID returns the last used project ID from the current session
+func GetSessionLastProjectID() *uuid.UUID {
+	sessionManager.mu.RLock()
+	defer sessionManager.mu.RUnlock()
+	if sessionManager.currentSession != nil {
+		return sessionManager.currentSession.LastUsedProjectID
+	}
+	return nil
+}
+
 // ResetSession clears the current session (useful for testing)
 func ResetSession() {
 	sessionManager.mu.Lock()
@@ -163,12 +185,13 @@ const persistedSessionFile = "ramorie-mcp-session.json"
 
 // PersistedSession is the JSON structure for saving session to disk
 type PersistedSession struct {
-	ID          string `json:"id"`
-	AgentName   string `json:"agent_name"`
-	AgentModel  string `json:"agent_model"`
-	ActiveOrgID string `json:"active_org_id,omitempty"`
-	CreatedAt   int64  `json:"created_at"`
-	ExpiresAt   int64  `json:"expires_at"`
+	ID                string `json:"id"`
+	AgentName         string `json:"agent_name"`
+	AgentModel        string `json:"agent_model"`
+	ActiveOrgID       string `json:"active_org_id,omitempty"`
+	LastUsedProjectID string `json:"last_used_project_id,omitempty"`
+	CreatedAt         int64  `json:"created_at"`
+	ExpiresAt         int64  `json:"expires_at"`
 }
 
 // getSessionFilePath returns the path to the session persistence file
@@ -197,6 +220,10 @@ func PersistSession() error {
 
 	if s.ActiveOrgID != nil {
 		persisted.ActiveOrgID = s.ActiveOrgID.String()
+	}
+
+	if s.LastUsedProjectID != nil {
+		persisted.LastUsedProjectID = s.LastUsedProjectID.String()
 	}
 
 	data, err := json.Marshal(persisted)
@@ -244,6 +271,13 @@ func LoadPersistedSession() bool {
 		orgID, err := uuid.Parse(persisted.ActiveOrgID)
 		if err == nil {
 			sessionManager.currentSession.ActiveOrgID = &orgID
+		}
+	}
+
+	if persisted.LastUsedProjectID != "" {
+		projectID, err := uuid.Parse(persisted.LastUsedProjectID)
+		if err == nil {
+			sessionManager.currentSession.LastUsedProjectID = &projectID
 		}
 	}
 

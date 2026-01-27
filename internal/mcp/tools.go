@@ -180,6 +180,29 @@ Example: add_memory(project: "my-project", content: "API uses JWT auth", type: "
 	}, handleAddMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "remember",
+		Description: `🔴 ESSENTIAL | Ultra-simple memory storage.
+
+Just tell me what to remember - I'll figure out the rest.
+
+REQUIRED: content (what to remember)
+OPTIONAL: project (auto-detected from last used if not provided)
+
+The type is auto-detected from content:
+- "decided X" → decision
+- "fixed bug" → bug_fix
+- "prefer X" → preference
+- "todo: X" / "later: X" → auto-creates TASK instead of memory
+
+Example: remember(content: "API uses JWT authentication")`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Remember",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleRemember)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "recall",
 		Description: "🔴 ESSENTIAL | Search memories. REQUIRED: term. Supports OR (space-separated) and AND (comma-separated) search. Optional: project, tag, type, min_score, limit, valid_at (RFC3339 timestamp to query memories valid at that time), include_expired (include TTL-expired memories).",
 		Annotations: &mcp.ToolAnnotations{
@@ -1228,6 +1251,210 @@ func handleAddMemory(ctx context.Context, req *mcp.CallToolRequest, input AddMem
 	return mustTextResult(result), nil, nil
 }
 
+// ============================================================================
+// REMEMBER TOOL - Ultra-simple memory storage
+// ============================================================================
+
+type RememberInput struct {
+	Content string `json:"content"`           // REQUIRED - what to remember
+	Project string `json:"project,omitempty"` // OPTIONAL - auto-detected from last used
+}
+
+func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input RememberInput) (*mcp.CallToolResult, any, error) {
+	// Check session initialization
+	if err := checkSessionInit("remember"); err != nil {
+		return nil, nil, err
+	}
+
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return nil, nil, errors.New("content is required - tell me what to remember")
+	}
+
+	// Check if this should be a task instead
+	if shouldBeTask(content) {
+		taskDesc := extractTaskDescription(content)
+
+		// Resolve project (auto-detect if empty)
+		projectID, orgID, err := resolveProjectWithOrg(apiClient, input.Project)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Get agent metadata from current session
+		session := GetCurrentSession()
+		var meta *api.AgentMetadata
+		if session != nil && session.Initialized {
+			meta = &api.AgentMetadata{
+				AgentName:  session.AgentName,
+				AgentModel: session.AgentModel,
+				SessionID:  session.ID,
+				CreatedVia: "mcp",
+			}
+		}
+
+		// Determine encryption scope
+		scope := determineEncryptionScope(orgID)
+
+		// Check if user has encryption enabled
+		cfg, _ := config.LoadConfig()
+		if cfg != nil && cfg.EncryptionEnabled {
+			if scope == "organization" && orgID != "" && crypto.IsOrgVaultUnlocked(orgID) {
+				encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContentWithScope(taskDesc, "organization", orgID)
+				if err == nil && isEncrypted {
+					task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
+					if err != nil {
+						return nil, nil, err
+					}
+					return mustTextResult(map[string]interface{}{
+						"action":    "task_created",
+						"message":   "📋 Created task instead of memory (detected TODO)",
+						"task":      task,
+						"encrypted": true,
+					}), nil, nil
+				}
+			} else if scope == "personal" && crypto.IsVaultUnlocked() {
+				encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(taskDesc)
+				if err == nil && isEncrypted {
+					task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
+					if err != nil {
+						return nil, nil, err
+					}
+					return mustTextResult(map[string]interface{}{
+						"action":    "task_created",
+						"message":   "📋 Created task instead of memory (detected TODO)",
+						"task":      task,
+						"encrypted": true,
+					}), nil, nil
+				}
+			}
+		}
+
+		// Create non-encrypted task (title=taskDesc, empty description)
+		task, err := apiClient.CreateTaskWithMeta(projectID, taskDesc, "", "M", meta)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return mustTextResult(map[string]interface{}{
+			"action":  "task_created",
+			"message": "📋 Created task instead of memory (detected TODO)",
+			"task":    task,
+		}), nil, nil
+	}
+
+	// Resolve project (auto-detect if empty)
+	projectID, orgID, err := resolveProjectWithOrg(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Auto-detect memory type
+	memoryType := DetectMemoryType(content)
+
+	// Determine encryption scope
+	scope := determineEncryptionScope(orgID)
+
+	// Check if user has encryption enabled
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.EncryptionEnabled {
+		if scope == "organization" && orgID != "" && crypto.IsOrgVaultUnlocked(orgID) {
+			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContentWithScope(content, "organization", orgID)
+			if err == nil && isEncrypted {
+				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				if err != nil {
+					return nil, nil, err
+				}
+				return mustTextResult(map[string]interface{}{
+					"action":         "memory_saved",
+					"message":        fmt.Sprintf("💾 Remembered as %s (org-encrypted)", memoryType),
+					"memory":         memory,
+					"type":           memoryType,
+					"auto_detected":  true,
+					"encrypted":      true,
+					"project_id":     projectID,
+				}), nil, nil
+			}
+		} else if scope == "personal" && crypto.IsVaultUnlocked() {
+			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
+			if err == nil && isEncrypted {
+				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				if err != nil {
+					return nil, nil, err
+				}
+				return mustTextResult(map[string]interface{}{
+					"action":         "memory_saved",
+					"message":        fmt.Sprintf("💾 Remembered as %s (encrypted)", memoryType),
+					"memory":         memory,
+					"type":           memoryType,
+					"auto_detected":  true,
+					"encrypted":      true,
+					"project_id":     projectID,
+				}), nil, nil
+			}
+		}
+	}
+
+	// Create non-encrypted memory with auto-detected type
+	memory, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
+		ProjectID: projectID,
+		Content:   content,
+		Type:      memoryType,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return mustTextResult(map[string]interface{}{
+		"action":        "memory_saved",
+		"message":       fmt.Sprintf("💾 Remembered as %s", memoryType),
+		"memory":        memory,
+		"type":          memoryType,
+		"auto_detected": true,
+		"project_id":    projectID,
+	}), nil, nil
+}
+
+// shouldBeTask checks if the content looks like a TODO/task rather than a memory
+func shouldBeTask(content string) bool {
+	lower := strings.ToLower(content)
+	taskIndicators := []string{
+		"todo:", "todo ", "later:", "later ",
+		"need to ", "should ", "must ", "reminder:",
+		"task:", "action:", "followup:", "follow-up:",
+	}
+	for _, indicator := range taskIndicators {
+		if strings.HasPrefix(lower, indicator) || strings.Contains(lower, " "+indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractTaskDescription extracts the task description from TODO-like content
+func extractTaskDescription(content string) string {
+	lower := strings.ToLower(content)
+	prefixes := []string{
+		"todo:", "todo ", "later:", "later ",
+		"need to ", "should ", "must ", "reminder:",
+		"task:", "action:", "followup:", "follow-up:",
+	}
+
+	for _, prefix := range prefixes {
+		idx := strings.Index(lower, prefix)
+		if idx != -1 {
+			// Return everything after the prefix
+			result := strings.TrimSpace(content[idx+len(prefix):])
+			if result != "" {
+				return result
+			}
+		}
+	}
+
+	// Fallback: return original content
+	return content
+}
+
 type ListMemoriesInput struct {
 	Project string  `json:"project"` // REQUIRED - project name or ID
 	Term    string  `json:"term,omitempty"`
@@ -2111,9 +2338,6 @@ func getActiveOrgIDString() string {
 
 func resolveProjectID(client *api.Client, projectIdentifier string) (string, error) {
 	projectIdentifier = strings.TrimSpace(projectIdentifier)
-	if projectIdentifier == "" {
-		return "", errors.New("project parameter is required")
-	}
 
 	// Get ALL accessible projects (no org filtering) - enables cross-org project access
 	projects, err := client.ListProjects("")
@@ -2121,9 +2345,52 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
 
+	// AUTO-DETECT: If project not provided, try to auto-detect
+	if projectIdentifier == "" {
+		// Try 1: Use last used project from session
+		if lastProject := GetSessionLastProjectID(); lastProject != nil {
+			// Verify it still exists
+			for _, p := range projects {
+				if p.ID == *lastProject {
+					return lastProject.String(), nil
+				}
+			}
+		}
+
+		// Try 2: Use single project if user has only one
+		if len(projects) == 1 {
+			projectID := projects[0].ID.String()
+			// Track this as last used
+			SetSessionLastProject(projects[0].ID)
+			return projectID, nil
+		}
+
+		// No auto-detection possible - require explicit project
+		if len(projects) == 0 {
+			return "", errors.New("❌ Project not specified and no projects found.\n\n" +
+				"Create a project first:\n" +
+				"  create_project(name=\"my-project\", description=\"...\")")
+		}
+
+		names := make([]string, 0, len(projects))
+		for _, p := range projects {
+			name := p.Name
+			if p.Organization != nil && p.Organization.Name != "" {
+				name = fmt.Sprintf("%s (%s)", p.Name, p.Organization.Name)
+			}
+			names = append(names, name)
+		}
+		return "", fmt.Errorf("❌ Project not specified.\n\n"+
+			"Available projects: %s\n\n"+
+			"💡 Specify project explicitly, or use a project first to set default.",
+			strings.Join(names, ", "))
+	}
+
 	// Check for exact name match or ID prefix match
 	for _, p := range projects {
 		if strings.EqualFold(p.Name, projectIdentifier) || strings.HasPrefix(p.ID.String(), projectIdentifier) {
+			// Track this as last used project
+			SetSessionLastProject(p.ID)
 			return p.ID.String(), nil
 		}
 	}
@@ -2155,9 +2422,6 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 // resolveProjectWithOrg resolves project ID and returns the org ID if the project belongs to an org
 func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projectID string, orgID string, err error) {
 	projectIdentifier = strings.TrimSpace(projectIdentifier)
-	if projectIdentifier == "" {
-		return "", "", errors.New("project parameter is required")
-	}
 
 	// Get ALL accessible projects (no org filtering) - enables cross-org project access
 	projects, err := client.ListProjects("")
@@ -2165,9 +2429,60 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		return "", "", fmt.Errorf("failed to list projects: %w", err)
 	}
 
+	// AUTO-DETECT: If project not provided, try to auto-detect
+	if projectIdentifier == "" {
+		// Try 1: Use last used project from session
+		if lastProject := GetSessionLastProjectID(); lastProject != nil {
+			// Verify it still exists and get org info
+			for _, p := range projects {
+				if p.ID == *lastProject {
+					oid := ""
+					if p.OrganizationID != nil {
+						oid = p.OrganizationID.String()
+					}
+					return lastProject.String(), oid, nil
+				}
+			}
+		}
+
+		// Try 2: Use single project if user has only one
+		if len(projects) == 1 {
+			p := projects[0]
+			// Track this as last used
+			SetSessionLastProject(p.ID)
+			oid := ""
+			if p.OrganizationID != nil {
+				oid = p.OrganizationID.String()
+			}
+			return p.ID.String(), oid, nil
+		}
+
+		// No auto-detection possible - require explicit project
+		if len(projects) == 0 {
+			return "", "", errors.New("❌ Project not specified and no projects found.\n\n" +
+				"Create a project first:\n" +
+				"  create_project(name=\"my-project\", description=\"...\")")
+		}
+
+		names := make([]string, 0, len(projects))
+		for _, p := range projects {
+			name := p.Name
+			if p.Organization != nil && p.Organization.Name != "" {
+				name = fmt.Sprintf("%s (%s)", p.Name, p.Organization.Name)
+			}
+			names = append(names, name)
+		}
+		return "", "", fmt.Errorf("❌ Project not specified.\n\n"+
+			"Available projects: %s\n\n"+
+			"💡 Specify project explicitly, or use a project first to set default.",
+			strings.Join(names, ", "))
+	}
+
 	// Check for exact name match or ID prefix match
 	for _, p := range projects {
 		if strings.EqualFold(p.Name, projectIdentifier) || strings.HasPrefix(p.ID.String(), projectIdentifier) {
+			// Track this as last used project
+			SetSessionLastProject(p.ID)
 			pid := p.ID.String()
 			oid := ""
 			if p.OrganizationID != nil {
