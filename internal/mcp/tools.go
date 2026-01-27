@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"sort"
-	"strings"
 )
 
 // ============================================================================
@@ -2357,7 +2359,22 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 			}
 		}
 
-		// Try 2: Use single project if user has only one
+		// Try 2: CWD Match - Current working directory contains project name
+		if cwd, err := os.Getwd(); err == nil && cwd != "" {
+			cwdLower := strings.ToLower(cwd)
+			for _, p := range projects {
+				projectNameLower := strings.ToLower(p.Name)
+				// Check if CWD contains project name as path segment
+				// e.g., /Users/x/GitHub/orkai/api matches "orkai"
+				if strings.Contains(cwdLower, "/"+projectNameLower+"/") ||
+					strings.HasSuffix(cwdLower, "/"+projectNameLower) {
+					SetSessionLastProject(p.ID)
+					return p.ID.String(), nil
+				}
+			}
+		}
+
+		// Try 3: Use single project if user has only one
 		if len(projects) == 1 {
 			projectID := projects[0].ID.String()
 			// Track this as last used
