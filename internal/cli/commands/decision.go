@@ -44,7 +44,7 @@ func decisionListCmd() *cli.Command {
 			limit := c.Int("limit")
 
 			client := api.NewClient()
-			decisions, err := client.ListDecisions(status, area, limit)
+			decisions, err := client.ListDecisions("", status, area, limit) // Empty projectID to list all
 			if err != nil {
 				fmt.Println(apierrors.ParseAPIError(err))
 				return err
@@ -101,7 +101,7 @@ func decisionCreateCmd() *cli.Command {
 			source := c.String("source")
 
 			client := api.NewClient()
-			decision, err := client.CreateDecision(title, description, status, area, context, consequences, source)
+			decision, err := client.CreateDecision("", title, description, status, area, context, consequences, source) // Empty projectID
 			if err != nil {
 				fmt.Println(apierrors.ParseAPIError(err))
 				return err

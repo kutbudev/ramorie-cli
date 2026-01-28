@@ -1493,9 +1493,12 @@ type DecisionListResponse struct {
 }
 
 // ListDecisions lists all decisions with optional filtering
-func (c *Client) ListDecisions(status, area string, limit int) ([]Decision, error) {
+func (c *Client) ListDecisions(projectID, status, area string, limit int) ([]Decision, error) {
 	endpoint := "/decisions"
 	params := url.Values{}
+	if projectID != "" {
+		params.Add("project_id", projectID)
+	}
 	if status != "" {
 		params.Add("status", status)
 	}
@@ -1537,9 +1540,12 @@ func (c *Client) GetDecision(identifier string) (*Decision, error) {
 }
 
 // CreateDecision creates a new decision (ADR)
-func (c *Client) CreateDecision(title, description, status, area, context, consequences, source string) (*Decision, error) {
+func (c *Client) CreateDecision(projectID, title, description, status, area, context, consequences, source string) (*Decision, error) {
 	reqBody := map[string]interface{}{
 		"title": title,
+	}
+	if projectID != "" {
+		reqBody["project_id"] = projectID
 	}
 	if description != "" {
 		reqBody["description"] = description

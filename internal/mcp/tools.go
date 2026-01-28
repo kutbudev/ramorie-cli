@@ -341,7 +341,7 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
-		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title. Optional: description, status, area, context, consequences.",
+		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title. Optional: project, description, status, area, context, consequences.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Create Decision Record",
 			DestructiveHint: boolPtr(false),
@@ -351,7 +351,7 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_decisions",
-		Description: "🟡 COMMON | List architectural decisions. Optional: status, area, limit.",
+		Description: "🟡 COMMON | List architectural decisions. Optional: project, status, area, limit.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "List Decisions",
 			ReadOnlyHint:  true,
@@ -2294,6 +2294,7 @@ func handleCleanupMemories(ctx context.Context, req *mcp.CallToolRequest, input 
 }
 
 type CreateDecisionInput struct {
+	Project      string `json:"project,omitempty"` // Project name or ID (optional)
 	Title        string `json:"title"`
 	Description  string `json:"description,omitempty"`
 	Status       string `json:"status,omitempty"`
@@ -2308,12 +2309,23 @@ func handleCreateDecision(ctx context.Context, req *mcp.CallToolRequest, input C
 		return nil, nil, errors.New("title is required")
 	}
 
+	// Resolve project if provided (optional)
+	var projectID string
+	if project := strings.TrimSpace(input.Project); project != "" {
+		var err error
+		projectID, err = resolveProjectID(apiClient, project)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// AGENT ENFORCEMENT: Force draft status and agent source
 	// Agents can only create drafts - users must approve them
 	status := "draft"
 	source := "agent"
 
 	decision, err := apiClient.CreateDecision(
+		projectID, // Project ID (optional)
 		title,
 		strings.TrimSpace(input.Description),
 		status, // Always "draft" for agent-created decisions
@@ -2329,15 +2341,26 @@ func handleCreateDecision(ctx context.Context, req *mcp.CallToolRequest, input C
 }
 
 type ListDecisionsInput struct {
-	Status string  `json:"status,omitempty"`
-	Area   string  `json:"area,omitempty"`
-	Limit  float64 `json:"limit,omitempty"`
-	Cursor string  `json:"cursor,omitempty"` // Pagination cursor
+	Project string  `json:"project,omitempty"` // Filter by project name or ID (optional)
+	Status  string  `json:"status,omitempty"`
+	Area    string  `json:"area,omitempty"`
+	Limit   float64 `json:"limit,omitempty"`
+	Cursor  string  `json:"cursor,omitempty"` // Pagination cursor
 }
 
 func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, any, error) {
+	// Resolve project if provided (optional)
+	var projectID string
+	if project := strings.TrimSpace(input.Project); project != "" {
+		var err error
+		projectID, err = resolveProjectID(apiClient, project)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// Fetch all matching decisions from API
-	decisions, err := apiClient.ListDecisions(strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), 0)
+	decisions, err := apiClient.ListDecisions(projectID, strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), 0)
 	if err != nil {
 		return nil, nil, err
 	}
