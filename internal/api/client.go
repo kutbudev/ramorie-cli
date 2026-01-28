@@ -2720,10 +2720,9 @@ func (c *Client) PreviewExtraction(content string) (map[string]interface{}, erro
 // SKILLS API METHODS
 // ============================================================================
 
-// ListSkills lists procedural skills (memories with type='skill')
+// ListSkills lists procedural skills via /skills endpoint
 func (c *Client) ListSkills(projectID string, limit int) ([]models.Memory, error) {
 	params := url.Values{}
-	params.Set("type", "skill")
 	if projectID != "" {
 		params.Set("project_id", projectID)
 	}
@@ -2731,16 +2730,23 @@ func (c *Client) ListSkills(projectID string, limit int) ([]models.Memory, error
 		params.Set("limit", fmt.Sprintf("%d", limit))
 	}
 
-	endpoint := "/memories?" + params.Encode()
+	endpoint := "/skills"
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
 	respBody, err := c.makeRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
+	// Backend returns: { "success": true, "data": { "skills": [], "total": N } }
 	var response struct {
-		Success bool             `json:"success"`
-		Data    []models.Memory  `json:"data"`
-		Error   string           `json:"error"`
+		Success bool   `json:"success"`
+		Data    struct {
+			Skills []models.Memory `json:"skills"`
+			Total  int             `json:"total"`
+		} `json:"data"`
+		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal skills: %w", err)
@@ -2750,7 +2756,7 @@ func (c *Client) ListSkills(projectID string, limit int) ([]models.Memory, error
 		return nil, fmt.Errorf("API error: %s", response.Error)
 	}
 
-	return response.Data, nil
+	return response.Data.Skills, nil
 }
 
 // CreateSkill creates a new procedural skill
