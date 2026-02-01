@@ -1097,11 +1097,21 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 		scope = determineEncryptionScope(orgID)
 	}
 
+	// ORGANIZATION ENCRYPTION ENFORCEMENT:
+	// For organization projects, encryption_scope MUST be "organization"
+	// This ensures team members can decrypt content with org key
+	if orgID != "" && scope == "personal" {
+		return nil, nil, errors.New("❌ Personal encryption not allowed in organization projects.\n\n" +
+			"Organization projects require organization-scope encryption so that\n" +
+			"team members can view the content.\n\n" +
+			"Please use encryption_scope='organization' or leave it empty to auto-detect.")
+	}
+
 	// Check if user has encryption enabled and vault is unlocked
 	cfg, _ := config.LoadConfig()
 	if cfg != nil && cfg.EncryptionEnabled {
-		if scope == "organization" && orgID != "" {
-			// Organization-scoped encryption
+		if orgID != "" {
+			// Organization-scoped encryption (REQUIRED for org projects)
 			if !crypto.IsOrgVaultUnlocked(orgID) {
 				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
 					"To unlock, the user must run:\n" +
@@ -1132,7 +1142,7 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 				return mustTextResult(result), nil, nil
 			}
 		} else {
-			// Personal-scoped encryption
+			// Personal-scoped encryption (only for personal projects)
 			if !crypto.IsVaultUnlocked() {
 				return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
 					"To unlock, the user must run:\n" +
@@ -1354,13 +1364,18 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 			}
 		}
 
-		// Determine encryption scope
-		scope := determineEncryptionScope(orgID)
-
 		// Check if user has encryption enabled
 		cfg, _ := config.LoadConfig()
 		if cfg != nil && cfg.EncryptionEnabled {
-			if scope == "organization" && orgID != "" && crypto.IsOrgVaultUnlocked(orgID) {
+			if orgID != "" {
+				// ORGANIZATION ENCRYPTION ENFORCEMENT: Org projects require org encryption
+				if !crypto.IsOrgVaultUnlocked(orgID) {
+					return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
+						"To unlock, the user must run:\n" +
+						"  ramorie org unlock " + orgID[:8] + "\n\n" +
+						"This only needs to be done once per session.\n" +
+						"Please inform the user to unlock their org vault.")
+				}
 				encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContentWithScope(taskDesc, "organization", orgID)
 				if err == nil && isEncrypted {
 					task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
@@ -1374,7 +1389,8 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 						"encrypted": true,
 					}), nil, nil
 				}
-			} else if scope == "personal" && crypto.IsVaultUnlocked() {
+			} else if crypto.IsVaultUnlocked() {
+				// Personal project - use personal encryption
 				encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(taskDesc)
 				if err == nil && isEncrypted {
 					task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
@@ -1413,13 +1429,18 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 	// Auto-detect memory type
 	memoryType := DetectMemoryType(content)
 
-	// Determine encryption scope
-	scope := determineEncryptionScope(orgID)
-
 	// Check if user has encryption enabled
 	cfg, _ := config.LoadConfig()
 	if cfg != nil && cfg.EncryptionEnabled {
-		if scope == "organization" && orgID != "" && crypto.IsOrgVaultUnlocked(orgID) {
+		if orgID != "" {
+			// ORGANIZATION ENCRYPTION ENFORCEMENT: Org projects require org encryption
+			if !crypto.IsOrgVaultUnlocked(orgID) {
+				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
+					"To unlock, the user must run:\n" +
+					"  ramorie org unlock " + orgID[:8] + "\n\n" +
+					"This only needs to be done once per session.\n" +
+					"Please inform the user to unlock their org vault.")
+			}
 			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContentWithScope(content, "organization", orgID)
 			if err == nil && isEncrypted {
 				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
@@ -1436,7 +1457,8 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 					"project_id":     projectID,
 				}), nil, nil
 			}
-		} else if scope == "personal" && crypto.IsVaultUnlocked() {
+		} else if crypto.IsVaultUnlocked() {
+			// Personal project - use personal encryption
 			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
 			if err == nil && isEncrypted {
 				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
