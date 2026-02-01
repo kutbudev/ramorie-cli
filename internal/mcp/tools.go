@@ -166,8 +166,7 @@ Example: create_task(project: "my-project", description: "Implement login featur
 
 Just tell me what to remember - I'll figure out the rest.
 
-REQUIRED: content (what to remember)
-OPTIONAL: project (auto-detected from last used if not provided)
+REQUIRED: content (what to remember), project (name or ID)
 
 The type is auto-detected from content:
 - "decided X" → decision
@@ -175,7 +174,7 @@ The type is auto-detected from content:
 - "prefer X" → preference
 - "todo: X" / "later: X" → auto-creates TASK instead of memory
 
-Example: remember(content: "API uses JWT authentication")`,
+Example: remember(content: "API uses JWT authentication", project: "my-project")`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Remember",
 			DestructiveHint: boolPtr(false),
@@ -341,7 +340,7 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
-		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title. Optional: project, description, status, area, context, consequences.",
+		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title, project. Optional: description, status, area, context, consequences.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Create Decision Record",
 			DestructiveHint: boolPtr(false),
@@ -1342,11 +1341,16 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		return nil, nil, errors.New("content is required - tell me what to remember")
 	}
 
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this memory belongs to.\n\nUse list_projects to see available projects.\nExample: remember(content=\"...\", project=\"my-project\")")
+	}
+
 	// Check if this should be a task instead
 	if shouldBeTask(content) {
 		taskDesc := extractTaskDescription(content)
 
-		// Resolve project (auto-detect if empty)
+		// Resolve project
 		projectID, orgID, err := resolveProjectWithOrg(apiClient, input.Project)
 		if err != nil {
 			return nil, nil, err
@@ -2331,14 +2335,15 @@ func handleCreateDecision(ctx context.Context, req *mcp.CallToolRequest, input C
 		return nil, nil, errors.New("title is required")
 	}
 
-	// Resolve project if provided (optional)
-	var projectID string
-	if project := strings.TrimSpace(input.Project); project != "" {
-		var err error
-		projectID, err = resolveProjectID(apiClient, project)
-		if err != nil {
-			return nil, nil, err
-		}
+	// REQUIRED: project parameter must be specified
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this decision belongs to.\n\nUse list_projects to see available projects.\nExample: create_decision(title=\"...\", project=\"my-project\")")
+	}
+
+	// Resolve project
+	projectID, err := resolveProjectID(apiClient, input.Project)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// AGENT ENFORCEMENT: Force draft status and agent source
