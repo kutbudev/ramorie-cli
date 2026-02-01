@@ -800,6 +800,7 @@ type CreateEncryptedMemoryOptions struct {
 	ProjectID        string   // Required
 	EncryptedContent string   // Required: base64 ciphertext
 	ContentNonce     string   // Required: base64 nonce
+	ContentHash      string   // Optional: SHA-256 hash of plaintext for duplicate detection
 	Tags             []string // Optional
 	TTL              int      // Optional: time-to-live in seconds
 	ValidFrom        string   // Optional: RFC3339 timestamp
@@ -813,6 +814,11 @@ func (c *Client) CreateEncryptedMemoryWithOptions(opts CreateEncryptedMemoryOpti
 		"encrypted_content": opts.EncryptedContent,
 		"content_nonce":     opts.ContentNonce,
 		"is_encrypted":      true,
+	}
+
+	// Add content hash for duplicate detection (computed before encryption)
+	if opts.ContentHash != "" {
+		reqBody["content_hash"] = opts.ContentHash
 	}
 
 	// Add tags if provided
@@ -847,12 +853,18 @@ func (c *Client) CreateEncryptedMemoryWithOptions(opts CreateEncryptedMemoryOpti
 }
 
 // CreateEncryptedMemory creates a memory with encrypted content (zero-knowledge encryption)
-func (c *Client) CreateEncryptedMemory(projectID, encryptedContent, contentNonce string, tags ...string) (*models.Memory, error) {
+// contentHash is optional - if provided, enables duplicate detection for encrypted memories
+func (c *Client) CreateEncryptedMemory(projectID, encryptedContent, contentNonce, contentHash string, tags ...string) (*models.Memory, error) {
 	reqBody := map[string]interface{}{
 		"project_id":        projectID,
 		"encrypted_content": encryptedContent, // base64 ciphertext
 		"content_nonce":     contentNonce,     // base64 nonce
 		"is_encrypted":      true,
+	}
+
+	// Add content hash for duplicate detection (computed before encryption)
+	if contentHash != "" {
+		reqBody["content_hash"] = contentHash
 	}
 
 	// Add tags if provided

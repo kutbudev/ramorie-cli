@@ -6,7 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -171,4 +174,35 @@ func DecryptSymmetricKey(encryptedKey, nonce, stretchedMasterKey []byte) ([]byte
 		return nil, err
 	}
 	return []byte(decrypted), nil
+}
+
+// ============================================================================
+// CONTENT HASH - For duplicate detection before encryption
+// ============================================================================
+
+// ComputeContentHash computes a SHA-256 hash of normalized content for duplicate detection.
+// This should be called BEFORE encryption so the hash represents the plaintext.
+// The normalization ensures that minor formatting differences don't create different hashes.
+func ComputeContentHash(content string) string {
+	normalized := normalizeForHash(content)
+	hash := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(hash[:])
+}
+
+// normalizeForHash normalizes content for consistent hash computation
+// - Converts to lowercase
+// - Collapses multiple whitespace to single space
+// - Trims leading/trailing whitespace
+func normalizeForHash(content string) string {
+	// Convert to lowercase
+	normalized := strings.ToLower(content)
+
+	// Replace multiple whitespace (spaces, tabs, newlines) with single space
+	whitespaceRegex := regexp.MustCompile(`\s+`)
+	normalized = whitespaceRegex.ReplaceAllString(normalized, " ")
+
+	// Trim leading/trailing whitespace
+	normalized = strings.TrimSpace(normalized)
+
+	return normalized
 }

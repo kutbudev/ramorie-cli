@@ -1580,9 +1580,12 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 					"This only needs to be done once per session.\n" +
 					"Please inform the user to unlock their org vault.")
 			}
+			// Compute content hash BEFORE encryption for duplicate detection
+			contentHash := crypto.ComputeContentHash(content)
+
 			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContentWithScope(content, "organization", orgID)
 			if err == nil && isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1598,9 +1601,12 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 			}
 		} else if crypto.IsVaultUnlocked() {
 			// Personal project - use personal encryption
+			// Compute content hash BEFORE encryption for duplicate detection
+			contentHash := crypto.ComputeContentHash(content)
+
 			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
 			if err == nil && isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce)
+				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash)
 				if err != nil {
 					return nil, nil, err
 				}

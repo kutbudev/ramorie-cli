@@ -86,6 +86,9 @@ func rememberCmd() *cli.Command {
 			var err error
 
 			if crypto.IsVaultUnlocked() {
+				// Compute content hash BEFORE encryption for duplicate detection
+				contentHash := crypto.ComputeContentHash(content)
+
 				// Encrypt content before sending (zero-knowledge encryption)
 				encryptedContent, nonce, isEncrypted, encErr := crypto.EncryptContent(content)
 				if encErr != nil {
@@ -93,7 +96,7 @@ func rememberCmd() *cli.Command {
 				}
 
 				if isEncrypted {
-					memory, err = client.CreateEncryptedMemory(projectID, encryptedContent, nonce, tags...)
+					memory, err = client.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash, tags...)
 					if err == nil {
 						fmt.Printf("🔐 Memory encrypted and stored! (ID: %s)\n", memory.ID.String()[:8])
 					}
