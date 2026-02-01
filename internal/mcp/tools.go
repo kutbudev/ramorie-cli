@@ -162,11 +162,16 @@ Example: create_task(project: "my-project", description: "Implement login featur
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "remember",
-		Description: `🔴 ESSENTIAL | Ultra-simple memory storage.
+		Description: `🔴 ESSENTIAL | Ultra-simple memory storage with duplicate prevention.
 
 Just tell me what to remember - I'll figure out the rest.
 
 REQUIRED: content (what to remember), project (name or ID)
+OPTIONAL: force (bool) - Skip similarity check and save anyway
+
+⚠️ DUPLICATE PREVENTION: By default, remember() checks for similar existing memories.
+If similar content exists (>80% match), you'll get a warning with the existing memory.
+Use force=true to bypass this check and save anyway.
 
 The type is auto-detected from content:
 - "decided X" → decision
@@ -174,7 +179,10 @@ The type is auto-detected from content:
 - "prefer X" → preference
 - "todo: X" / "later: X" → auto-creates TASK instead of memory
 
-Example: remember(content: "API uses JWT authentication", project: "my-project")`,
+💡 Best Practice: Always call recall(term) BEFORE remember() to check existing knowledge.
+
+Example: remember(content: "API uses JWT authentication", project: "my-project")
+Example with force: remember(content: "...", project: "...", force: true)`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Remember",
 			DestructiveHint: boolPtr(false),
@@ -859,11 +867,66 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 		"initialized": session.Initialized,
 	}
 
+	// Add recommended_actions for structured next steps
+	result["recommended_actions"] = []map[string]interface{}{
+		{
+			"priority": 1,
+			"action":   "list_projects",
+			"reason":   "Understand available projects before creating tasks/memories",
+		},
+		{
+			"priority": 2,
+			"action":   "recall",
+			"reason":   "ALWAYS recall relevant context before starting work",
+			"example":  "recall(term=\"<topic>\", project=\"<project>\")",
+		},
+		{
+			"priority": 3,
+			"action":   "work",
+			"reason":   "Perform your work using the recalled context",
+		},
+		{
+			"priority": 4,
+			"action":   "remember/create_task",
+			"reason":   "Save learnings or create follow-up tasks",
+			"example":  "remember(content=\"...\", project=\"<project>\")",
+		},
+	}
+
+	// Add workflow pattern for clear guidance
+	result["workflow_pattern"] = map[string]interface{}{
+		"1_setup":   "setup_agent (DONE)",
+		"2_context": "list_projects - see available projects",
+		"3_recall":  "recall(term) - BEFORE acting on any topic",
+		"4_work":    "Perform your work",
+		"5_save":    "remember/create_task - save learnings",
+		"critical":  "⚠️ ALWAYS recall BEFORE remember to avoid duplicates",
+	}
+
+	// Add last used project if available
+	if lastProject := GetSessionLastProjectID(); lastProject != nil {
+		// Try to get project name from cached projects
+		projects, err := apiClient.ListProjects("")
+		if err == nil {
+			for _, p := range projects {
+				if p.ID == *lastProject {
+					result["last_used_project"] = map[string]interface{}{
+						"id":   lastProject.String(),
+						"name": p.Name,
+						"hint": "Previously used project - can be used as default",
+					}
+					break
+				}
+			}
+		}
+	}
+
 	// Add clear next steps for workflow enforcement
 	result["workflow_guide"] = map[string]interface{}{
 		"step_1": "✅ setup_agent called - session initialized",
 		"step_2": "📋 Call list_projects to see available projects",
-		"step_3": "📝 Use remember(content) or create_task(project, description)",
+		"step_3": "🔍 ALWAYS call recall(term) BEFORE remember() to check for existing knowledge",
+		"step_4": "📝 Use remember(content) or create_task(project, description)",
 		"note":   "Always pass the 'project' parameter explicitly when creating tasks or memories",
 	}
 
@@ -879,8 +942,25 @@ func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input Emp
 	if err != nil {
 		return nil, nil, err
 	}
-	// Wrap array response to fix "expected record, received array" error
-	return mustTextResult(formatMCPResponse(projects, getContextString())), nil, nil
+
+	// Build response with last_used_project hint
+	response := formatMCPResponse(projects, getContextString())
+
+	// Add last_used_project if available
+	if lastProjectID := GetSessionLastProjectID(); lastProjectID != nil {
+		for _, p := range projects {
+			if p.ID == *lastProjectID {
+				response["last_used_project"] = map[string]interface{}{
+					"id":   lastProjectID.String(),
+					"name": p.Name,
+					"hint": "Previously used - specify explicitly if intended",
+				}
+				break
+			}
+		}
+	}
+
+	return mustTextResult(response), nil, nil
 }
 
 type CreateProjectInput struct {
@@ -1328,6 +1408,23 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 type RememberInput struct {
 	Content string `json:"content"`           // REQUIRED - what to remember
 	Project string `json:"project,omitempty"` // OPTIONAL - auto-detected from last used
+	Force   bool   `json:"force,omitempty"`   // Skip similarity check and save anyway
+}
+
+// checkForSimilarMemories checks if similar memories already exist in the project
+// Uses existing CheckSimilarMemories function from similarity.go with 80% threshold
+// Returns a list of similar memories
+func checkForSimilarMemories(client *api.Client, projectID, content string) ([]SimilarMemoryResult, error) {
+	// Search existing memories using the API
+	memories, err := client.ListMemories(projectID, "")
+	if err != nil {
+		return nil, err // Don't block on errors, just skip check
+	}
+
+	// Use existing CheckSimilarMemories function with 80% threshold
+	similar := CheckSimilarMemories(memories, content, 0.80)
+
+	return similar, nil
 }
 
 func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input RememberInput) (*mcp.CallToolResult, any, error) {
@@ -1343,7 +1440,45 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 
 	// REQUIRED: project parameter must be specified
 	if strings.TrimSpace(input.Project) == "" {
-		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this memory belongs to.\n\nUse list_projects to see available projects.\nExample: remember(content=\"...\", project=\"my-project\")")
+		errMsg := "❌ 'project' parameter is REQUIRED. Specify which project this memory belongs to.\n\nUse list_projects to see available projects.\nExample: remember(content=\"...\", project=\"my-project\")"
+
+		// Add last used project suggestion if available
+		if lastProjectID := GetSessionLastProjectID(); lastProjectID != nil {
+			projects, err := apiClient.ListProjects("")
+			if err == nil {
+				for _, p := range projects {
+					if p.ID == *lastProjectID {
+						errMsg = fmt.Sprintf("❌ 'project' parameter is REQUIRED.\n\n💡 Did you mean '%s'? (last used project)\n\nUse list_projects to see all available projects.\nExample: remember(content=\"...\", project=\"%s\")", p.Name, p.Name)
+						break
+					}
+				}
+			}
+		}
+
+		return nil, nil, errors.New(errMsg)
+	}
+
+	// DUPLICATE PREVENTION: Check for similar memories unless force=true
+	if !input.Force {
+		// First resolve the project to get the ID
+		tempProjectID, _, err := resolveProjectWithOrg(apiClient, input.Project)
+		if err == nil {
+			similarMemories, err := checkForSimilarMemories(apiClient, tempProjectID, content)
+			if err == nil && len(similarMemories) > 0 {
+				// Found similar memories - return warning with existing memories
+				return mustTextResult(map[string]interface{}{
+					"status":           "similar_exists",
+					"similar_memories": similarMemories,
+					"requested_content": truncateContent(content, 200),
+					"_message": fmt.Sprintf("⚠️ Found %d similar memory(ies) already saved. To avoid duplicates:\n"+
+						"1. Use the existing memory if it covers the same knowledge, OR\n"+
+						"2. Call remember(..., force=true) to save anyway", len(similarMemories)),
+					"_action":   "Either skip saving (duplicate) or use force=true to save anyway",
+					"_hint":     "💡 Best practice: Always call recall(term) BEFORE remember() to check existing knowledge",
+				}), nil, nil
+			}
+		}
+		// If project resolution or similarity check fails, proceed anyway
 	}
 
 	// Check if this should be a task instead
@@ -2643,10 +2778,21 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 		availableNames = append(availableNames, name)
 	}
 
-	return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+	// Check if we have a last used project to suggest
+	lastProjectHint := ""
+	if lastProjectID := GetSessionLastProjectID(); lastProjectID != nil {
+		for _, p := range projects {
+			if p.ID == *lastProjectID {
+				lastProjectHint = fmt.Sprintf("\n\n💡 Did you mean '%s'? (last used project)", p.Name)
+				break
+			}
+		}
+	}
+
+	return "", fmt.Errorf("❌ Project '%s' not found.%s\n\n"+
 		"Available projects: %s\n\n"+
 		"💡 Tip: Use exact project name (case-insensitive)",
-		projectIdentifier, strings.Join(availableNames, ", "))
+		projectIdentifier, lastProjectHint, strings.Join(availableNames, ", "))
 }
 
 // resolveProjectWithOrg resolves project ID and returns the org ID if the project belongs to an org
