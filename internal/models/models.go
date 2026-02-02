@@ -375,3 +375,137 @@ type GenerateSkillResponse struct {
 	AIModel   string         `json:"ai_model"`
 	LatencyMs int            `json:"latency_ms"`
 }
+
+// ============================================================================
+// Project Analysis & Bootstrap Types
+// ============================================================================
+
+// FileInput represents a file to analyze
+type FileInput struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// ManualProjectInput represents manual project description for analysis
+type ManualProjectInput struct {
+	Description string   `json:"description"`
+	TechStack   []string `json:"tech_stack,omitempty"`
+	Conventions string   `json:"conventions,omitempty"`
+	SetupSteps  []string `json:"setup_steps,omitempty"`
+}
+
+// AnalyzeProjectRequest is the request for project analysis
+type AnalyzeProjectRequest struct {
+	Files       []FileInput         `json:"files,omitempty"`
+	ManualInput *ManualProjectInput `json:"manual_input,omitempty"`
+}
+
+// TechStackItem represents a detected technology in the project
+type TechStackItem struct {
+	Category string `json:"category"`
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	Detected string `json:"detected"`
+}
+
+// SuggestedMemory represents an AI-suggested memory for bootstrap
+type SuggestedMemory struct {
+	ID         string   `json:"id"`
+	Content    string   `json:"content"`
+	Type       string   `json:"type"`
+	Tags       []string `json:"tags"`
+	Source     string   `json:"source"`
+	Confidence float64  `json:"confidence"`
+	Selected   bool     `json:"selected"`
+}
+
+// SuggestedDecision represents an AI-suggested decision/ADR for bootstrap
+type SuggestedDecision struct {
+	ID           string  `json:"id"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description"`
+	Status       string  `json:"status"`
+	Area         string  `json:"area"`
+	Context      string  `json:"context,omitempty"`
+	Consequences string  `json:"consequences,omitempty"`
+	Source       string  `json:"source"`
+	Confidence   float64 `json:"confidence"`
+	Selected     bool    `json:"selected"`
+}
+
+// SuggestedTask represents an AI-suggested task for bootstrap
+type SuggestedTask struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Priority    string   `json:"priority"`
+	Source      string   `json:"source"`
+	Tags        []string `json:"tags"`
+	Selected    bool     `json:"selected"`
+}
+
+// AnalysisResult is the response from project analysis
+type AnalysisResult struct {
+	ProjectID          string              `json:"project_id"`
+	AnalyzedAt         string              `json:"analyzed_at"`
+	Source             string              `json:"source"` // github, mcp, manual
+	TechStack          []TechStackItem     `json:"tech_stack"`
+	FileStructure      []string            `json:"file_structure,omitempty"`
+	SuggestedMemories  []SuggestedMemory   `json:"suggested_memories"`
+	SuggestedDecisions []SuggestedDecision `json:"suggested_decisions"`
+	SuggestedTasks     []SuggestedTask     `json:"suggested_tasks"`
+	Confidence         float64             `json:"confidence"`
+	FilesAnalyzed      int                 `json:"files_analyzed"`
+	AIModel            string              `json:"ai_model"`
+	LatencyMs          int                 `json:"latency_ms"`
+}
+
+// BootstrapMemoryInput represents a memory to create during bootstrap
+type BootstrapMemoryInput struct {
+	Content    string   `json:"content"`
+	Type       string   `json:"type,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Source     string   `json:"source,omitempty"`
+	Visibility string   `json:"visibility,omitempty"`
+}
+
+// BootstrapDecisionInput represents a decision to create during bootstrap
+type BootstrapDecisionInput struct {
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	Status       string `json:"status,omitempty"`
+	Area         string `json:"area,omitempty"`
+	Context      string `json:"context,omitempty"`
+	Consequences string `json:"consequences,omitempty"`
+}
+
+// BootstrapTaskInput represents a task to create during bootstrap
+type BootstrapTaskInput struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Priority    string   `json:"priority,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+// BootstrapProjectRequest is the request for project bootstrapping
+type BootstrapProjectRequest struct {
+	Memories          []BootstrapMemoryInput   `json:"memories"`
+	Decisions         []BootstrapDecisionInput `json:"decisions"`
+	Tasks             []BootstrapTaskInput     `json:"tasks"`
+	CreateContextPack bool                     `json:"create_context_pack,omitempty"`
+	MarkAsOnboarded   bool                     `json:"mark_as_onboarded,omitempty"`
+}
+
+// BootstrapResult is the response from project bootstrapping
+type BootstrapResult struct {
+	ProjectID     string `json:"project_id"`
+	ContextPackID string `json:"context_pack_id,omitempty"`
+	Created       struct {
+		Memories  int `json:"memories"`
+		Decisions int `json:"decisions"`
+		Tasks     int `json:"tasks"`
+	} `json:"created"`
+	Errors []string `json:"errors,omitempty"`
+}

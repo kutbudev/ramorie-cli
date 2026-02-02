@@ -778,6 +778,44 @@ Example: extract_entities(content: "We use React with TypeScript and PostgreSQL 
 			OpenWorldHint: boolPtr(false),
 		},
 	}, handleExtractEntities)
+
+	// ============================================================================
+	// 🟢 ADVANCED - Project Analysis & Bootstrap
+	// ============================================================================
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "analyze_project",
+		Description: `🟢 ADVANCED | Analyze codebase and generate AI-powered suggestions for project context.
+
+REQUIRED: project (name or ID)
+Optional:
+- files: array of {path, content} - local files to analyze
+- description: manual project description
+- tech_stack: array of technologies used
+- conventions: coding conventions description
+
+This tool analyzes provided files or manual input using AI (Gemini) to generate:
+- Suggested memories (tech stack, patterns, conventions)
+- Suggested decisions (ADRs from config files)
+- Suggested tasks (from TODO/FIXME comments)
+
+Best used when:
+1. Adding Ramorie to an existing project
+2. Bootstrapping project context from codebase
+3. Generating initial memories from README, package.json, etc.
+
+Example workflow:
+1. Agent scans local files (README.md, package.json, etc.)
+2. Agent calls analyze_project with file contents
+3. Review suggestions returned
+4. Call remember/create_task for approved items
+
+Example: analyze_project(project: "my-project", files: [{path: "README.md", content: "..."}])`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Analyze Project",
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
+	}, handleAnalyzeProject)
 }
 
 // ============================================================================
@@ -2634,6 +2672,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "cleanup_memories", Description: "🟢 ADVANCED | Clean up TTL-expired memories."},
 		{Name: "export_context_pack", Description: "🟢 ADVANCED | Export context pack as portable JSON bundle."},
 		{Name: "import_context_pack", Description: "🟢 ADVANCED | Import context pack bundle with all linked items."},
+		{Name: "analyze_project", Description: "🟢 ADVANCED | Analyze codebase and generate AI-powered context suggestions."},
 	}
 }
 

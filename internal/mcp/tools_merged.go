@@ -718,3 +718,123 @@ func planStatusMessage(plan *api.Plan) (string, float64) {
 
 	return msg, progress
 }
+
+// ============================================================================
+// Project Analysis & Bootstrap Handler
+// ============================================================================
+
+// AnalyzeProjectInput represents input for analyze_project tool
+type AnalyzeProjectInput struct {
+	Project     string `json:"project"`               // Project name or ID (required)
+	Description string `json:"description,omitempty"` // Manual project description
+	TechStack   string `json:"tech_stack,omitempty"`  // Comma-separated tech stack
+	Conventions string `json:"conventions,omitempty"` // Coding conventions
+	// Files to analyze - agent provides these after scanning local codebase
+	Files []struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	} `json:"files,omitempty"`
+}
+
+func handleAnalyzeProject(ctx context.Context, req *mcp.CallToolRequest, input AnalyzeProjectInput) (*mcp.CallToolResult, interface{}, error) {
+	if err := checkSessionInit("analyze_project"); err != nil {
+		return nil, nil, err
+	}
+
+	projectName := strings.TrimSpace(input.Project)
+	if projectName == "" {
+		return nil, nil, errors.New("project is required")
+	}
+
+	// Resolve project ID
+	projectID, err := resolveProjectID(apiClient, projectName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to resolve project: %w", err)
+	}
+
+	// Build the request
+	var analysisReq api.AnalyzeProjectRequest
+
+	// Add files if provided
+	if len(input.Files) > 0 {
+		analysisReq.Files = make([]api.FileInput, len(input.Files))
+		for i, f := range input.Files {
+			analysisReq.Files[i] = api.FileInput{
+				Path:    f.Path,
+				Content: f.Content,
+			}
+		}
+	}
+
+	// Add manual input if provided
+	if input.Description != "" || input.TechStack != "" || input.Conventions != "" {
+		manualInput := &api.ManualProjectInput{
+			Description: input.Description,
+			Conventions: input.Conventions,
+		}
+		if input.TechStack != "" {
+			// Parse comma-separated tech stack
+			parts := strings.Split(input.TechStack, ",")
+			for _, p := range parts {
+				if trimmed := strings.TrimSpace(p); trimmed != "" {
+					manualInput.TechStack = append(manualInput.TechStack, trimmed)
+				}
+			}
+		}
+		analysisReq.ManualInput = manualInput
+	}
+
+	// Validate that we have something to analyze
+	if len(analysisReq.Files) == 0 && analysisReq.ManualInput == nil {
+		return nil, nil, errors.New("either files or manual input (description/tech_stack) is required")
+	}
+
+	// Call the API
+	result, err := apiClient.AnalyzeProject(projectID, analysisReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("analysis failed: %w", err)
+	}
+
+	// Build response with helpful message
+	response := map[string]interface{}{
+		"project_id":    result.ProjectID,
+		"analyzed_at":   result.AnalyzedAt,
+		"source":        result.Source,
+		"confidence":    result.Confidence,
+		"ai_model":      result.AIModel,
+		"latency_ms":    result.LatencyMs,
+		"files_analyzed": result.FilesAnalyzed,
+	}
+
+	// Add tech stack
+	if len(result.TechStack) > 0 {
+		response["tech_stack"] = result.TechStack
+	}
+
+	// Add suggestions
+	if len(result.SuggestedMemories) > 0 {
+		response["suggested_memories"] = result.SuggestedMemories
+	}
+	if len(result.SuggestedDecisions) > 0 {
+		response["suggested_decisions"] = result.SuggestedDecisions
+	}
+	if len(result.SuggestedTasks) > 0 {
+		response["suggested_tasks"] = result.SuggestedTasks
+	}
+
+	// Add helpful message
+	totalSuggestions := len(result.SuggestedMemories) + len(result.SuggestedDecisions) + len(result.SuggestedTasks)
+	response["_message"] = fmt.Sprintf(
+		"🎯 Analysis complete! Found %d suggestions:\n"+
+			"• %d memories (tech stack, patterns, conventions)\n"+
+			"• %d decisions (architectural decisions)\n"+
+			"• %d tasks (from TODO/FIXME comments)\n\n"+
+			"To import: Use remember() for memories, create_decision() for decisions, create_task() for tasks.",
+		totalSuggestions,
+		len(result.SuggestedMemories),
+		len(result.SuggestedDecisions),
+		len(result.SuggestedTasks),
+	)
+
+	return mustTextResult(response), nil, nil
+}

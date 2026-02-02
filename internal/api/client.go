@@ -2948,3 +2948,75 @@ func (c *Client) GenerateSkill(description string, projectID *string, autoSave b
 
 	return &response.Data, nil
 }
+
+// ============================================================================
+// Project Analysis & Bootstrap
+// ============================================================================
+
+// AnalyzeProject analyzes a project and returns AI-generated suggestions
+func (c *Client) AnalyzeProject(projectID string, req models.AnalyzeProjectRequest) (*models.AnalysisResult, error) {
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/projects/%s/analyze", projectID), req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                  `json:"success"`
+		Data    models.AnalysisResult `json:"data"`
+		Error   string                `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal analysis result: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}
+
+// BootstrapProject creates initial context from analysis suggestions
+func (c *Client) BootstrapProject(projectID string, req models.BootstrapProjectRequest) (*models.BootstrapResult, error) {
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/projects/%s/bootstrap", projectID), req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                   `json:"success"`
+		Data    models.BootstrapResult `json:"data"`
+		Error   string                 `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal bootstrap result: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}
+
+// ============================================================================
+// Type Aliases for Project Analysis (for use in MCP handlers)
+// ============================================================================
+
+// FileInput is an alias for models.FileInput
+type FileInput = models.FileInput
+
+// ManualProjectInput is an alias for models.ManualProjectInput
+type ManualProjectInput = models.ManualProjectInput
+
+// AnalyzeProjectRequest is an alias for models.AnalyzeProjectRequest
+type AnalyzeProjectRequest = models.AnalyzeProjectRequest
+
+// AnalysisResult is an alias for models.AnalysisResult
+type AnalysisResult = models.AnalysisResult
+
+// BootstrapProjectRequest is an alias for models.BootstrapProjectRequest
+type BootstrapProjectRequest = models.BootstrapProjectRequest
+
+// BootstrapResult is an alias for models.BootstrapResult
+type BootstrapResult = models.BootstrapResult
