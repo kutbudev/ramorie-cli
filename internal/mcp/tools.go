@@ -1606,11 +1606,14 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 	// Auto-detect memory type
 	memoryType := DetectMemoryType(content)
 
-	// Check if user has encryption enabled
+	// Check encryption based on project scope (org vs personal)
 	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.EncryptionEnabled {
-		if orgID != "" {
-			// ORGANIZATION ENCRYPTION ENFORCEMENT: Org projects require org encryption
+
+	if orgID != "" {
+		// Organization project - check if ORG encryption is enabled (not personal encryption)
+		orgEncConfig, err := apiClient.GetOrgEncryptionConfig(orgID)
+		if err == nil && orgEncConfig.IsEnabled {
+			// Org has encryption enabled - require vault unlock
 			if !crypto.IsOrgVaultUnlocked(orgID) {
 				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
 					"To unlock, the user must run:\n" +
@@ -1637,27 +1640,28 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 					"project_id":     projectID,
 				}), nil, nil
 			}
-		} else if crypto.IsVaultUnlocked() {
-			// Personal project - use personal encryption
-			// Compute content hash BEFORE encryption for duplicate detection
-			contentHash := crypto.ComputeContentHash(content)
+		}
+		// If org encryption not enabled or failed, fall through to plaintext save
+	} else if cfg != nil && cfg.EncryptionEnabled && crypto.IsVaultUnlocked() {
+		// Personal project with personal encryption enabled and vault unlocked
+		// Compute content hash BEFORE encryption for duplicate detection
+		contentHash := crypto.ComputeContentHash(content)
 
-			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
-			if err == nil && isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash)
-				if err != nil {
-					return nil, nil, err
-				}
-				return mustTextResult(map[string]interface{}{
-					"action":         "memory_saved",
-					"message":        fmt.Sprintf("💾 Remembered as %s (encrypted)", memoryType),
-					"memory":         memory,
-					"type":           memoryType,
-					"auto_detected":  true,
-					"encrypted":      true,
-					"project_id":     projectID,
-				}), nil, nil
+		encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
+		if err == nil && isEncrypted {
+			memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash)
+			if err != nil {
+				return nil, nil, err
 			}
+			return mustTextResult(map[string]interface{}{
+				"action":         "memory_saved",
+				"message":        fmt.Sprintf("💾 Remembered as %s (encrypted)", memoryType),
+				"memory":         memory,
+				"type":           memoryType,
+				"auto_detected":  true,
+				"encrypted":      true,
+				"project_id":     projectID,
+			}), nil, nil
 		}
 	}
 
