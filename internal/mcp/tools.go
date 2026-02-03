@@ -102,11 +102,13 @@ func emptyObjectSchema() map[string]interface{} {
 
 // registerTools registers all MCP tools with the server using go-sdk
 // The SDK automatically infers InputSchema from the handler's input struct type
-// v3: Simplified from 61 tools to 26 tools via removal and consolidation
+// v4: Simplified from 49 tools to 15 action-based tools for better agent compliance
 func registerTools(server *mcp.Server) {
 	// ============================================================================
-	// 🔴 ESSENTIAL (7 tools)
+	// 🔴 CORE (5 tools) - Every session
 	// ============================================================================
+
+	// 1. setup_agent - Initialize session
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "setup_agent",
 		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, agent_directives, and system info.",

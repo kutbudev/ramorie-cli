@@ -1,212 +1,104 @@
 package mcp
 
-// AgentDirectives contains the auto-directive system for AI agents
-// This instructs agents to proactively use Ramorie for memory, tasks, and recall
+// AgentDirectives contains the simplified directive system for AI agents
+// Reduced from verbose explanations to 3 core rules for better agent compliance
 type AgentDirectives struct {
-	// Structured triggers - machine readable
-	Triggers TriggerSet `json:"triggers"`
+	// The three core rules - machine and agent readable
+	Rules []AgentRule `json:"rules"`
 
-	// Natural language prompt - agent readable
-	SystemPrompt string `json:"system_prompt"`
+	// Behavioral triggers - IF-THEN patterns
+	Triggers []BehaviorTrigger `json:"triggers"`
 
-	// Quick reference
+	// Anti-patterns to avoid
+	AntiPatterns []string `json:"anti_patterns"`
+
+	// Quick reference for agents
 	Cheatsheet string `json:"cheatsheet"`
-
-	// Multi-agent awareness
-	MultiAgentNote string `json:"multi_agent_note"`
 }
 
-// TriggerSet contains all trigger categories
-type TriggerSet struct {
-	Memory []TriggerRule `json:"memory"`
-	Task   []TriggerRule `json:"task"`
-	Recall []TriggerRule `json:"recall"`
+// AgentRule defines a core behavioral rule
+type AgentRule struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	When        string `json:"when"`
+	Action      string `json:"action"`
 }
 
-// TriggerRule defines when an action should be automatically taken
-type TriggerRule struct {
-	Condition string   `json:"condition"`
-	Action    string   `json:"action"`
-	Examples  []string `json:"examples"`
+// BehaviorTrigger defines an IF-THEN behavioral pattern
+type BehaviorTrigger struct {
+	If   string `json:"if"`
+	Then string `json:"then"`
 }
 
-// GetAgentDirectives returns the complete directive system for AI agents
+// GetAgentDirectives returns the simplified 3-rule directive system
 func GetAgentDirectives() AgentDirectives {
 	return AgentDirectives{
-		Triggers: TriggerSet{
-			Memory: []TriggerRule{
-				{
-					Condition: "User states a preference or configuration choice",
-					Action:    "remember(content) immediately",
-					Examples: []string{
-						"User: 'I prefer TypeScript over JavaScript' → save as memory",
-						"User: 'Use dark mode for all UI components' → save as memory",
-						"User: 'Always use yarn instead of npm' → save as memory",
-					},
-				},
-				{
-					Condition: "Bug is solved with a specific solution",
-					Action:    "remember(problem + solution)",
-					Examples: []string{
-						"Fixed CORS issue by adding proxy config → save problem AND solution",
-						"Resolved 'module not found' with yarn install → save for future reference",
-						"Database connection timeout fixed with pool settings → save as memory",
-					},
-				},
-				{
-					Condition: "Architectural or technical decision is made",
-					Action:    "remember(decision + rationale)",
-					Examples: []string{
-						"User: 'Use Redis instead of PostgreSQL for sessions' → save decision",
-						"Decided to use WebSocket instead of polling → save with reasoning",
-						"Chose Tailwind CSS over styled-components → save decision and why",
-					},
-				},
-				{
-					Condition: "New pattern or best practice is discovered",
-					Action:    "remember(pattern description)",
-					Examples: []string{
-						"Found effective error handling pattern → save for reuse",
-						"Learned optimal database indexing strategy → save as memory",
-						"Discovered performance optimization technique → save as memory",
-					},
-				},
+		Rules: []AgentRule{
+			{
+				Name:        "RECALL FIRST",
+				Description: "Search memories BEFORE responding to any question or starting any work",
+				When:        "Before ANY response, decision, or action",
+				Action:      "recall(term: \"relevant_keywords\")",
 			},
-			Task: []TriggerRule{
-				{
-					Condition: "User explicitly requests work to be done",
-					Action:    "create_task(project, description) immediately",
-					Examples: []string{
-						"User: 'Add a logout button' → create task",
-						"User: 'Fix the login bug' → create task",
-						"User: 'Implement dark mode' → create task",
-					},
-				},
-				{
-					Condition: "Work is deferred to later",
-					Action:    "create_task(project, deferred_work)",
-					Examples: []string{
-						"User: 'We'll handle this later' → create task",
-						"User: 'Let's postpone the refactoring' → create task",
-						"'This can wait until next sprint' → create task",
-					},
-				},
-				{
-					Condition: "TODO/FIXME comment found in code",
-					Action:    "create_task(project, todo_description)",
-					Examples: []string{
-						"Found '// TODO: add validation' → create task",
-						"Found '// FIXME: handle edge case' → create task",
-						"Found '// HACK: temporary solution' → create task for proper fix",
-					},
-				},
-				{
-					Condition: "Dependency or prerequisite is identified",
-					Action:    "create_task(project, prerequisite)",
-					Examples: []string{
-						"'We need to set up the database first' → create task",
-						"'Authentication must be implemented before this' → create task",
-						"'This requires the API to be ready' → create task",
-					},
-				},
+			{
+				Name:        "REMEMBER ALWAYS",
+				Description: "Auto-save without asking user permission",
+				When:        "Preference stated, bug solved, decision made, pattern learned",
+				Action:      "remember(content: \"...\", project: \"...\")",
 			},
-			Recall: []TriggerRule{
-				{
-					Condition: "Before answering any question",
-					Action:    "recall(relevant_terms, project) FIRST",
-					Examples: []string{
-						"User asks about auth → recall 'authentication' first",
-						"User asks about API → recall 'api endpoint' first",
-						"User mentions a feature → recall related memories first",
-					},
-				},
-				{
-					Condition: "Encountering an error or bug",
-					Action:    "recall(error_keywords) to find past solutions",
-					Examples: []string{
-						"CORS error → recall 'cors' for previous solutions",
-						"Build failure → recall 'build error' for past fixes",
-						"Type error → recall 'typescript error' for similar issues",
-					},
-				},
-				{
-					Condition: "Before making a technical decision",
-					Action:    "recall(decision_topic) to check previous decisions",
-					Examples: []string{
-						"Choosing database → recall 'database decision' first",
-						"Selecting framework → recall 'framework choice' first",
-						"Architecture question → recall 'architecture decision' first",
-					},
-				},
-				{
-					Condition: "Starting work on new project/technology",
-					Action:    "recall(project_name OR technology) for context",
-					Examples: []string{
-						"Starting React work → recall 'react' for project conventions",
-						"New feature in Orkai → recall 'orkai' for existing patterns",
-						"Working with API → recall 'api' for established standards",
-					},
-				},
+			{
+				Name:        "TASK EVERYTHING",
+				Description: "Auto-create tasks from conversation",
+				When:        "User says 'do X', 'fix Y', 'later', 'TODO', or defers work",
+				Action:      "task(action: \"create\", project: \"...\", description: \"...\")",
 			},
 		},
-		SystemPrompt: `## Ramorie Memory Protocol
 
-You are connected to Ramorie, a persistent memory system shared across AI agents.
+		Triggers: []BehaviorTrigger{
+			// Recall triggers
+			{If: "user_asks_question", Then: "recall() BEFORE responding"},
+			{If: "user_mentions_topic", Then: "recall(term: topic) for context"},
+			{If: "encountering_error", Then: "recall(term: error_type) for past solutions"},
+			{If: "making_decision", Then: "recall(term: topic) to check past decisions"},
 
-### PROACTIVE BEHAVIOR (No need to ask user)
+			// Remember triggers
+			{If: "user_states_preference", Then: "remember() immediately WITHOUT asking"},
+			{If: "bug_is_solved", Then: "remember(problem + solution) WITHOUT asking"},
+			{If: "decision_is_made", Then: "remember(decision + rationale) WITHOUT asking"},
+			{If: "pattern_discovered", Then: "remember(pattern) WITHOUT asking"},
 
-**AUTO-SAVE as Memory:**
-- User states a preference → save immediately
-- Bug solved → save problem + solution
-- Architectural decision made → save with rationale
-- New pattern learned → save for future reference
+			// Task triggers
+			{If: "user_says_do_X", Then: "task(create) immediately"},
+			{If: "user_says_fix_Y", Then: "task(create) immediately"},
+			{If: "user_says_later", Then: "task(create) to track deferred work"},
+			{If: "TODO_found_in_code", Then: "task(create) for the TODO item"},
+		},
 
-**AUTO-CREATE as Task:**
-- User says "do X", "add Y" → create task
-- Work deferred "later", "tomorrow" → create task
-- Found TODO/FIXME in code → create task
-- Dependency identified → create prerequisite task
+		AntiPatterns: []string{
+			"NEVER ask 'should I save this?' - just save it",
+			"NEVER skip recall before answering",
+			"NEVER ask 'should I create a task?' - just create it",
+			"NEVER wait to be told to use memory - be proactive",
+		},
 
-**ALWAYS RECALL FIRST:**
-- Before answering questions → recall relevant context
-- On errors → recall similar past solutions
-- Before decisions → recall previous decisions
-- New project/tech → recall related memories
+		Cheatsheet: `# RAMORIE - 3 RULES
 
-### MULTI-AGENT AWARENESS
+1. RECALL FIRST
+   → recall(term) BEFORE any response
 
-You are ONE of potentially MULTIPLE agents working simultaneously.
-- Another agent may have just added relevant context
-- ALWAYS recall before acting - data is real-time
-- Check for duplicates before saving memories
-- Your memories help other agents too
+2. REMEMBER ALWAYS
+   → remember(content) on preference/decision/solution
+   → NO permission needed
 
-### ANTI-PATTERNS (Don't do these)
-- Don't ask "should I save this?" - just save it
-- Don't save trivial/temporary information
-- Don't create duplicate memories - recall first
-- Don't forget to specify project parameter`,
+3. TASK EVERYTHING
+   → task(create) on "do X", "fix Y", "later"
+   → NO permission needed
 
-		Cheatsheet: `
-┌─────────────────────────────────────────────────┐
-│ RAMORIE QUICK REFERENCE                         │
-├─────────────────────────────────────────────────┤
-│ SAVE: remember(content)              │
-│ FIND: recall(term, project?)                    │
-│ TASK: create_task(project, description)         │
-│ LIST: list_memories(project) / list_tasks(...)  │
-├─────────────────────────────────────────────────┤
-│ Always recall BEFORE answering                  │
-│ Save decisions, solutions, preferences          │
-│ Create tasks for deferred work                  │
-│ Other agents can see your memories              │
-└─────────────────────────────────────────────────┘`,
-
-		MultiAgentNote: `IMPORTANT: Multiple AI agents may be connected simultaneously.
-- Agent in Tab 1 saves a memory → Agent in Tab 2 can recall it immediately
-- Always recall() before starting work to get latest context
-- Avoid duplicate memories - check before saving
-- Your work builds shared knowledge for all agents`,
+Quick ref:
+  recall(term)                    # Search memories
+  remember(content, project)      # Save memory
+  task(create, project, desc)     # Create task
+  projects()                      # List projects`,
 	}
 }
 
@@ -214,41 +106,28 @@ You are ONE of potentially MULTIPLE agents working simultaneously.
 func GetDirectivesAsMap() map[string]interface{} {
 	d := GetAgentDirectives()
 
-	memoryTriggers := make([]map[string]interface{}, len(d.Triggers.Memory))
-	for i, t := range d.Triggers.Memory {
-		memoryTriggers[i] = map[string]interface{}{
-			"condition": t.Condition,
-			"action":    t.Action,
-			"examples":  t.Examples,
+	rules := make([]map[string]interface{}, len(d.Rules))
+	for i, r := range d.Rules {
+		rules[i] = map[string]interface{}{
+			"name":        r.Name,
+			"description": r.Description,
+			"when":        r.When,
+			"action":      r.Action,
 		}
 	}
 
-	taskTriggers := make([]map[string]interface{}, len(d.Triggers.Task))
-	for i, t := range d.Triggers.Task {
-		taskTriggers[i] = map[string]interface{}{
-			"condition": t.Condition,
-			"action":    t.Action,
-			"examples":  t.Examples,
-		}
-	}
-
-	recallTriggers := make([]map[string]interface{}, len(d.Triggers.Recall))
-	for i, t := range d.Triggers.Recall {
-		recallTriggers[i] = map[string]interface{}{
-			"condition": t.Condition,
-			"action":    t.Action,
-			"examples":  t.Examples,
+	triggers := make([]map[string]interface{}, len(d.Triggers))
+	for i, t := range d.Triggers {
+		triggers[i] = map[string]interface{}{
+			"if":   t.If,
+			"then": t.Then,
 		}
 	}
 
 	return map[string]interface{}{
-		"triggers": map[string]interface{}{
-			"memory": memoryTriggers,
-			"task":   taskTriggers,
-			"recall": recallTriggers,
-		},
-		"system_prompt":    d.SystemPrompt,
-		"cheatsheet":       d.Cheatsheet,
-		"multi_agent_note": d.MultiAgentNote,
+		"rules":         rules,
+		"triggers":      triggers,
+		"anti_patterns": d.AntiPatterns,
+		"cheatsheet":    d.Cheatsheet,
 	}
 }

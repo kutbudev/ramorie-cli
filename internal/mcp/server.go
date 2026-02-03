@@ -87,7 +87,8 @@ Other AI agents can see your memories instantly. Always:
 	)
 
 	// Register all tools, resources, and prompts
-	registerTools(server)
+	// v4: Simplified from 49 tools to 15 action-based tools
+	registerToolsV4(server)
 	registerResources(server)
 	registerPrompts(server)
 
