@@ -2827,6 +2827,63 @@ func (c *Client) CreateSkill(projectID, trigger, description string, steps []str
 	return &response.Data, nil
 }
 
+// CreateEncryptedSkill creates a new procedural skill with encrypted content
+func (c *Client) CreateEncryptedSkill(projectID, trigger, encryptedContent, contentNonce string, steps []string, validation string, tags []string, encryptionScope, encryptionOrgID string) (*models.Memory, error) {
+	body := map[string]interface{}{
+		"project_id":        projectID,
+		"encrypted_content": encryptedContent,
+		"content_nonce":     contentNonce,
+		"is_encrypted":      true,
+		"type":              "skill",
+		"trigger":           trigger,
+		"steps":             steps,
+		"encryption_scope":  encryptionScope,
+	}
+
+	if encryptionOrgID != "" {
+		body["encryption_org_id"] = encryptionOrgID
+	}
+
+	if validation != "" {
+		body["validation"] = validation
+	}
+
+	if len(tags) > 0 {
+		body["tags"] = tags
+	}
+
+	// Add agent metadata if available
+	if c.AgentName != "" {
+		body["created_by_agent"] = c.AgentName
+	}
+	if c.AgentModel != "" {
+		body["agent_model"] = c.AgentModel
+	}
+	if c.AgentSessionID != "" {
+		body["agent_session_id"] = c.AgentSessionID
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool          `json:"success"`
+		Data    models.Memory `json:"data"`
+		Error   string        `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal encrypted skill: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("API error: %s", response.Error)
+	}
+
+	return &response.Data, nil
+}
+
 // StartSkillExecution starts tracking a skill execution
 func (c *Client) StartSkillExecution(skillID, context string, agentName, agentModel *string) (*models.SkillExecution, error) {
 	body := map[string]interface{}{}

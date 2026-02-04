@@ -623,8 +623,7 @@ func handleUnifiedSkill(ctx context.Context, req *mcp.CallToolRequest, input Uni
 			return nil, nil, err
 		}
 
-		projectID, err := resolveProjectID(apiClient, input.Project)
-		if err != nil || projectID == "" {
+		if input.Project == "" {
 			return nil, nil, errors.New("project is required for create action")
 		}
 		if input.Trigger == "" {
@@ -637,6 +636,61 @@ func handleUnifiedSkill(ctx context.Context, req *mcp.CallToolRequest, input Uni
 			return nil, nil, errors.New("steps array is required for create action")
 		}
 
+		// Resolve project with org info for encryption handling
+		projectID, orgID, err := resolveProjectWithOrg(apiClient, input.Project)
+		if err != nil || projectID == "" {
+			return nil, nil, errors.New("project is required for create action")
+		}
+
+		// Check encryption based on project scope (org vs personal)
+		cfg, _ := config.LoadConfig()
+
+		if orgID != "" {
+			// Organization project - check if ORG encryption is enabled
+			orgEncConfig, err := apiClient.GetOrgEncryptionConfig(orgID)
+			if err == nil && orgEncConfig.IsEnabled {
+				// Org has encryption enabled - require vault unlock
+				if !crypto.IsOrgVaultUnlocked(orgID) {
+					return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
+						"To unlock, the user must run:\n" +
+						"  ramorie org unlock " + orgID[:8] + "\n\n" +
+						"This only needs to be done once per session.\n" +
+						"Please inform the user to unlock their org vault.")
+				}
+				// Encrypt content with org scope
+				encryptedContent, nonce, isEncrypted, err := crypto.EncryptContentWithScope(input.Description, "organization", orgID)
+				if err == nil && isEncrypted {
+					skill, err := apiClient.CreateEncryptedSkill(projectID, input.Trigger, encryptedContent, nonce, input.Steps, input.Validation, input.Tags, "organization", orgID)
+					if err != nil {
+						return nil, nil, fmt.Errorf("failed to create encrypted skill: %w", err)
+					}
+					return mustTextResult(map[string]interface{}{
+						"action":    "created",
+						"skill":     skill,
+						"encrypted": true,
+						"_message":  "Skill created successfully (org-encrypted)",
+					}), nil, nil
+				}
+			}
+			// If org encryption not enabled or failed, fall through to plaintext save
+		} else if cfg != nil && cfg.EncryptionEnabled && crypto.IsVaultUnlocked() {
+			// Personal project with personal encryption enabled and vault unlocked
+			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(input.Description)
+			if err == nil && isEncrypted {
+				skill, err := apiClient.CreateEncryptedSkill(projectID, input.Trigger, encryptedContent, nonce, input.Steps, input.Validation, input.Tags, "personal", "")
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to create encrypted skill: %w", err)
+				}
+				return mustTextResult(map[string]interface{}{
+					"action":    "created",
+					"skill":     skill,
+					"encrypted": true,
+					"_message":  "Skill created successfully (encrypted)",
+				}), nil, nil
+			}
+		}
+
+		// Create non-encrypted skill
 		skill, err := apiClient.CreateSkill(projectID, input.Trigger, input.Description, input.Steps, input.Validation, input.Tags)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create skill: %w", err)
