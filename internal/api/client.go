@@ -2868,20 +2868,12 @@ func (c *Client) CreateEncryptedSkill(projectID, trigger, encryptedContent, cont
 		return nil, err
 	}
 
-	var response struct {
-		Success bool          `json:"success"`
-		Data    models.Memory `json:"data"`
-		Error   string        `json:"error"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
+	var memory models.Memory
+	if err := json.Unmarshal(respBody, &memory); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal encrypted skill: %w", err)
 	}
 
-	if !response.Success {
-		return nil, fmt.Errorf("API error: %s", response.Error)
-	}
-
-	return &response.Data, nil
+	return &memory, nil
 }
 
 // StartSkillExecution starts tracking a skill execution
