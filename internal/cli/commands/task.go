@@ -158,8 +158,17 @@ func taskCreateCmd() *cli.Command {
 
 			var task *models.Task
 
-			if crypto.IsVaultUnlocked() {
-				// Encrypt title and description before sending (zero-knowledge encryption)
+			// Check if project belongs to an org (org projects skip encryption)
+			isOrgProject := false
+			for _, p := range projects {
+				if p.ID.String() == projectID && p.OrganizationID != nil {
+					isOrgProject = true
+					break
+				}
+			}
+
+			if crypto.IsVaultUnlocked() && !isOrgProject {
+				// Personal project only — encrypt with personal key
 				encTitle, titleNonce, titleEncrypted, encErr := crypto.EncryptContent(title)
 				if encErr != nil {
 					return fmt.Errorf("encryption failed: %w", encErr)
@@ -186,7 +195,7 @@ func taskCreateCmd() *cli.Command {
 					}
 				}
 			} else {
-				// Vault is locked - send plaintext
+				// Org project or vault locked — send plaintext
 				task, err = client.CreateTask(projectID, title, description, priority, tags...)
 				if err == nil {
 					fmt.Printf("✅ Task '%s' created successfully!\n", task.Title)

@@ -1543,46 +1543,21 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 			}
 		}
 
-		// Check if user has encryption enabled
+		// Personal project only — encrypt with personal key (org projects skip encryption)
 		cfg, _ := config.LoadConfig()
-		if cfg != nil && cfg.EncryptionEnabled {
-			if orgID != "" {
-				// ORGANIZATION ENCRYPTION ENFORCEMENT: Org projects require org encryption
-				if !crypto.IsOrgVaultUnlocked(orgID) {
-					return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
-						"To unlock, the user must run:\n" +
-						"  ramorie org unlock " + orgID[:8] + "\n\n" +
-						"This only needs to be done once per session.\n" +
-						"Please inform the user to unlock their org vault.")
+		if cfg != nil && cfg.EncryptionEnabled && orgID == "" && crypto.IsVaultUnlocked() {
+			encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(taskDesc)
+			if err == nil && isEncrypted {
+				task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
+				if err != nil {
+					return nil, nil, err
 				}
-				encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContentWithScope(taskDesc, "organization", orgID)
-				if err == nil && isEncrypted {
-					task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
-					if err != nil {
-						return nil, nil, err
-					}
-					return mustTextResult(map[string]interface{}{
-						"action":    "task_created",
-						"message":   "📋 Created task instead of memory (detected TODO)",
-						"task":      task,
-						"encrypted": true,
-					}), nil, nil
-				}
-			} else if crypto.IsVaultUnlocked() {
-				// Personal project - use personal encryption
-				encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(taskDesc)
-				if err == nil && isEncrypted {
-					task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
-					if err != nil {
-						return nil, nil, err
-					}
-					return mustTextResult(map[string]interface{}{
-						"action":    "task_created",
-						"message":   "📋 Created task instead of memory (detected TODO)",
-						"task":      task,
-						"encrypted": true,
-					}), nil, nil
-				}
+				return mustTextResult(map[string]interface{}{
+					"action":    "task_created",
+					"message":   "📋 Created task instead of memory (detected TODO)",
+					"task":      task,
+					"encrypted": true,
+				}), nil, nil
 			}
 		}
 
@@ -1611,42 +1586,8 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 	// Check encryption based on project scope (org vs personal)
 	cfg, _ := config.LoadConfig()
 
-	if orgID != "" {
-		// Organization project - check if ORG encryption is enabled (not personal encryption)
-		orgEncConfig, err := apiClient.GetOrgEncryptionConfig(orgID)
-		if err == nil && orgEncConfig.IsEnabled {
-			// Org has encryption enabled - require vault unlock
-			if !crypto.IsOrgVaultUnlocked(orgID) {
-				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
-					"To unlock, the user must run:\n" +
-					"  ramorie org unlock " + orgID[:8] + "\n\n" +
-					"This only needs to be done once per session.\n" +
-					"Please inform the user to unlock their org vault.")
-			}
-			// Compute content hash BEFORE encryption for duplicate detection
-			contentHash := crypto.ComputeContentHash(content)
-
-			encryptedContent, nonce, isEncrypted, err := crypto.EncryptContentWithScope(content, "organization", orgID)
-			if err == nil && isEncrypted {
-				memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash)
-				if err != nil {
-					return nil, nil, err
-				}
-				return mustTextResult(map[string]interface{}{
-					"action":         "memory_saved",
-					"message":        fmt.Sprintf("💾 Remembered as %s (org-encrypted)", memoryType),
-					"memory":         memory,
-					"type":           memoryType,
-					"auto_detected":  true,
-					"encrypted":      true,
-					"project_id":     projectID,
-				}), nil, nil
-			}
-		}
-		// If org encryption not enabled or failed, fall through to plaintext save
-	} else if cfg != nil && cfg.EncryptionEnabled && crypto.IsVaultUnlocked() {
-		// Personal project with personal encryption enabled and vault unlocked
-		// Compute content hash BEFORE encryption for duplicate detection
+	// Personal project only — encrypt with personal key (org projects skip encryption)
+	if orgID == "" && cfg != nil && cfg.EncryptionEnabled && crypto.IsVaultUnlocked() {
 		contentHash := crypto.ComputeContentHash(content)
 
 		encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)

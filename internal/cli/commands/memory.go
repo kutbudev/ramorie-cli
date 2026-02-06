@@ -81,15 +81,26 @@ func rememberCmd() *cli.Command {
 
 			client := api.NewClient()
 
+			// Check if project belongs to an org (org projects skip encryption)
+			isOrgProject := false
+			if projectID != "" {
+				projects, _ := client.ListProjects()
+				for _, p := range projects {
+					if p.ID.String() == projectID && p.OrganizationID != nil {
+						isOrgProject = true
+						break
+					}
+				}
+			}
+
 			// Check if vault is unlocked for encryption
 			var memory *models.Memory
 			var err error
 
-			if crypto.IsVaultUnlocked() {
-				// Compute content hash BEFORE encryption for duplicate detection
+			if crypto.IsVaultUnlocked() && !isOrgProject {
+				// Personal project only — encrypt with personal key
 				contentHash := crypto.ComputeContentHash(content)
 
-				// Encrypt content before sending (zero-knowledge encryption)
 				encryptedContent, nonce, isEncrypted, encErr := crypto.EncryptContent(content)
 				if encErr != nil {
 					return fmt.Errorf("encryption failed: %w", encErr)
@@ -101,14 +112,13 @@ func rememberCmd() *cli.Command {
 						fmt.Printf("🔐 Memory encrypted and stored! (ID: %s)\n", memory.ID.String()[:8])
 					}
 				} else {
-					// Fallback to unencrypted if encryption didn't happen
 					memory, err = client.CreateMemory(projectID, content, tags...)
 					if err == nil {
 						fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
 					}
 				}
 			} else {
-				// Vault is locked - send plaintext
+				// Org project or vault locked — send plaintext
 				memory, err = client.CreateMemory(projectID, content, tags...)
 				if err == nil {
 					fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
