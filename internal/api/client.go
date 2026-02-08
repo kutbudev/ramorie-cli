@@ -65,19 +65,9 @@ func NewClient() *Client {
 	}
 }
 
-// getAuthBaseURL returns the base URL without /v1 for auth endpoints
-func (c *Client) getAuthBaseURL() string {
-	// Remove /v1 suffix if present
-	baseURL := c.BaseURL
-	if strings.HasSuffix(baseURL, "/v1") {
-		baseURL = strings.TrimSuffix(baseURL, "/v1")
-	}
-	return baseURL
-}
-
-// makeAuthRequest makes an HTTP request to auth endpoints (at root level, not /v1)
+// makeAuthRequest makes an HTTP request to auth endpoints (under /v1/auth)
 func (c *Client) makeAuthRequest(method, endpoint string, body interface{}) ([]byte, error) {
-	url := c.getAuthBaseURL() + endpoint
+	url := c.BaseURL + endpoint
 
 	var reqBody io.Reader
 	if body != nil {
