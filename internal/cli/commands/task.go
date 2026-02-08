@@ -830,8 +830,8 @@ func decryptTaskForCLI(t *models.Task) (title, description string) {
 
 	// Check if vault is unlocked
 	if !crypto.IsVaultUnlocked() {
-		title = "[Vault Locked - run 'ramorie setup unlock']"
-		description = "[Vault Locked - run 'ramorie setup unlock']"
+		title = "[Vault Locked - run 'ramorie vault unlock']"
+		description = "[Vault Locked - run 'ramorie vault unlock']"
 		// If we have non-placeholder titles, use them
 		if t.Title != "" && t.Title != "[Encrypted]" {
 			title = t.Title

@@ -406,7 +406,7 @@ func decryptMemoryForCLI(m *models.Memory) string {
 	}
 
 	if !crypto.IsVaultUnlocked() {
-		return "[Vault Locked - run 'ramorie setup unlock']"
+		return "[Vault Locked - run 'ramorie vault unlock']"
 	}
 
 	plaintext, err := crypto.DecryptContent(m.EncryptedContent, m.ContentNonce, true)

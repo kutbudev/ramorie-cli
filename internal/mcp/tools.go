@@ -1265,7 +1265,7 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 			if !crypto.IsVaultUnlocked() {
 				return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
 					"To unlock, the user must run:\n" +
-					"  ramorie setup unlock\n\n" +
+					"  ramorie vault unlock\n\n" +
 					"This only needs to be done once per session (until computer restarts).\n" +
 					"Please inform the user to unlock their vault.")
 			}
@@ -1414,7 +1414,7 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 		if !crypto.IsVaultUnlocked() {
 			return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
 				"To unlock, the user must run:\n" +
-				"  ramorie setup unlock\n\n" +
+				"  ramorie vault unlock\n\n" +
 				"This only needs to be done once per session (until computer restarts).\n" +
 				"Please inform the user to unlock their vault.")
 		}

@@ -210,7 +210,7 @@ func handleUserLogin() error {
 		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		fmt.Println()
 		fmt.Println("🔐 Encryption is enabled for this account.")
-		fmt.Println("   Run 'ramorie setup unlock' to unlock your vault.")
+		fmt.Println("   Run 'ramorie vault unlock' to unlock your vault.")
 		fmt.Println()
 	} else {
 		fmt.Println()
@@ -274,7 +274,7 @@ func handleAuthStatus() error {
 		fmt.Println("❌ Not authenticated")
 		fmt.Println()
 		fmt.Println("To login, run:")
-		fmt.Println("  ramorie setup login")
+		fmt.Println("  ramorie setup")
 		fmt.Println()
 		fmt.Println("Don't have an account? Register at:")
 		fmt.Printf("  %s\n", webURL)
@@ -375,7 +375,7 @@ func handleInteractiveSetup() error {
 			fmt.Println("✅ Browser opened!")
 		}
 		fmt.Println()
-		fmt.Println("After registration, run 'ramorie setup login' to authenticate.")
+		fmt.Println("After registration, run 'ramorie setup' to authenticate.")
 		return nil
 	case "4":
 		fmt.Println("Setup cancelled.")
@@ -392,7 +392,7 @@ func handleVaultUnlock() error {
 	if err != nil || cfg.APIKey == "" {
 		fmt.Println()
 		fmt.Println("❌ Not authenticated")
-		fmt.Println("   Please run 'ramorie setup login' first.")
+		fmt.Println("   Please run 'ramorie setup' first.")
 		return nil
 	}
 
@@ -477,7 +477,7 @@ func handleVaultUnlock() error {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
 	fmt.Println("Your memories and tasks will now be encrypted/decrypted automatically.")
-	fmt.Println("Run 'ramorie setup lock' to lock your vault when done.")
+	fmt.Println("Run 'ramorie vault lock' to lock your vault when done.")
 	fmt.Println()
 	return nil
 }
@@ -538,7 +538,7 @@ func handleVaultStatus() error {
 }
 
 // NewVaultCommand creates a top-level vault command as an alias for setup vault commands
-// This allows users to run 'ramorie vault unlock' instead of 'ramorie setup unlock'
+// This allows users to run 'ramorie vault unlock' instead of 'ramorie vault unlock'
 func NewVaultCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "vault",

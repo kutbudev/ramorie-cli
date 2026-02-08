@@ -40,7 +40,7 @@ func ParseAPIError(err error) string {
 
 	// Authentication errors
 	if strings.Contains(errStr, "401") || strings.Contains(errLower, "unauthorized") || strings.Contains(errLower, "invalid api key") {
-		return "🔐 Authentication failed. Please run 'ramorie setup login' to authenticate."
+		return "🔐 Authentication failed. Please run 'ramorie setup' to authenticate."
 	}
 
 	// Forbidden / suspended

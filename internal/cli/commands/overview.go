@@ -81,8 +81,7 @@ func NewOverviewCommand() *cli.Command {
 
 ⚙️  CONFIGURATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ramorie setup                  Configure authentication
-  ramorie setup login            Login with credentials
+  ramorie setup                  Interactive setup (login / API key)
   ramorie setup logout           Remove saved credentials
   ramorie setup status           Check auth status
   ramorie config                 View/edit configuration
