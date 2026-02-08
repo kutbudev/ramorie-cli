@@ -13,7 +13,7 @@ import (
 func NewContextCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "context",
-		Aliases: []string{"ctx"},
+		Aliases: []string{"ctx", "contexts"},
 		Usage:   "Manage contexts",
 		Subcommands: []*cli.Command{
 			contextCreateCmd(),

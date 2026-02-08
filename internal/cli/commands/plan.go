@@ -19,7 +19,7 @@ import (
 func NewPlanCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "plan",
-		Aliases: []string{"pl"},
+		Aliases: []string{"pl", "plans"},
 		Usage:   "Multi-agent AI planning with consensus-based execution",
 		Subcommands: []*cli.Command{
 			planCreateCmd(),

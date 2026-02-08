@@ -14,7 +14,7 @@ import (
 func NewProjectCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "project",
-		Aliases: []string{"p"},
+		Aliases: []string{"p", "projects"},
 		Usage:   "Manage projects",
 		Subcommands: []*cli.Command{
 			projectListCmd(),

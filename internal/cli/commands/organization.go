@@ -18,7 +18,7 @@ import (
 func NewOrganizationCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "organization",
-		Aliases: []string{"org"},
+		Aliases: []string{"org", "orgs", "organizations"},
 		Usage:   "Manage organizations",
 		Subcommands: []*cli.Command{
 			orgListCmd(),

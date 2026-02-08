@@ -18,7 +18,7 @@ import (
 func NewMemoryCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "memory",
-		Aliases: []string{"m"},
+		Aliases: []string{"m", "memories"},
 		Usage:   "Manage memories (knowledge base)",
 		Subcommands: []*cli.Command{
 			rememberCmd(),

@@ -221,9 +221,10 @@ func handleUserLogin() error {
 	}
 
 	fmt.Println("You can now use ramorie commands:")
-	fmt.Println("  ramorie projects      - List your projects")
-	fmt.Println("  ramorie list          - List your tasks")
-	fmt.Println("  ramorie task \"...\"    - Create a new task")
+	fmt.Println("  ramorie project list        - List your projects")
+	fmt.Println("  ramorie task list           - List your tasks")
+	fmt.Println("  ramorie task create \"...\"   - Create a new task")
+	fmt.Println("  ramorie mcp serve           - Start MCP server")
 	fmt.Println()
 	return nil
 }

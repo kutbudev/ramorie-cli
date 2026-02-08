@@ -15,7 +15,7 @@ import (
 func NewDecisionCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "decision",
-		Aliases: []string{"dec", "adr"},
+		Aliases: []string{"dec", "adr", "decisions"},
 		Usage:   "Manage architectural decisions (ADRs)",
 		Subcommands: []*cli.Command{
 			decisionListCmd(),

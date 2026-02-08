@@ -13,7 +13,7 @@ import (
 func NewContextPackCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "context-pack",
-		Aliases: []string{"cp", "pack"},
+		Aliases: []string{"cp", "pack", "context-packs", "packs"},
 		Usage:   "Manage context packs (bundles of contexts)",
 		Subcommands: []*cli.Command{
 			contextPackListCmd(),

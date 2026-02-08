@@ -18,7 +18,7 @@ import (
 func NewTaskCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "task",
-		Aliases: []string{"t"},
+		Aliases: []string{"t", "tasks"},
 		Usage:   "Manage tasks",
 		Subcommands: []*cli.Command{
 			taskListCmd(),

@@ -13,7 +13,7 @@ import (
 func NewSubtaskCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "subtask",
-		Aliases: []string{"sub"},
+		Aliases: []string{"sub", "subtasks"},
 		Usage:   "Manage subtasks",
 		Subcommands: []*cli.Command{
 			subtaskListCmd(),
