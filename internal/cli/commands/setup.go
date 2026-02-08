@@ -150,22 +150,36 @@ func handleUserLogin() error {
 		fmt.Println(errorMsg)
 		fmt.Println()
 
-		// Don't offer to register if account is locked or rate limited
-		if !apierrors.IsRateLimitError(err) && !strings.Contains(strings.ToLower(err.Error()), "locked") {
-			fmt.Print("Don't have an account? Open browser to register? (Y/n): ")
-			reader := bufio.NewReader(os.Stdin)
-			answer, _ := reader.ReadString('\n')
-			answer = strings.TrimSpace(strings.ToLower(answer))
-			if answer == "" || answer == "y" || answer == "yes" {
-				fmt.Println()
-				fmt.Println("🌐 Opening browser...")
-				browserErr := openBrowser(webURL + "/login")
-				if browserErr != nil {
-					fmt.Printf("Please visit: %s/login\n", webURL)
-				}
+		// Offer alternatives
+		fmt.Println("What would you like to do?")
+		fmt.Println("  [1] Try again")
+		fmt.Println("  [2] Enter API key instead (from Settings page)")
+		fmt.Println("  [3] Register a new account (opens browser)")
+		fmt.Println("  [4] Exit")
+		fmt.Println()
+		fmt.Print("Choose (1-4): ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(answer)
+
+		switch answer {
+		case "1":
+			return handleUserLogin()
+		case "2":
+			return handleManualAPIKey()
+		case "3":
+			fmt.Println()
+			fmt.Println("🌐 Opening browser...")
+			browserErr := openBrowser(webURL + "/login")
+			if browserErr != nil {
+				fmt.Printf("Please visit: %s/login\n", webURL)
 			}
+			fmt.Println()
+			fmt.Println("After registration, run 'ramorie setup' to authenticate.")
+			return nil
+		default:
+			return nil
 		}
-		return fmt.Errorf("login failed")
 	}
 
 	// Save API key to config
