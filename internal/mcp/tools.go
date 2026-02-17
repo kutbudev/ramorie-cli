@@ -961,6 +961,40 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 		}
 	}
 
+	// CWD-based project detection
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil && cwd != "" {
+		projects, projErr := apiClient.ListProjects("")
+		if projErr == nil {
+			pathSegments := strings.Split(strings.ToLower(cwd), "/")
+			for _, p := range projects {
+				projectNorm := normalizeForMatch(p.Name)
+				if len(projectNorm) < 4 {
+					continue
+				}
+				for _, segment := range pathSegments {
+					if segment == "" {
+						continue
+					}
+					segmentNorm := normalizeForMatch(segment)
+					if segmentNorm == projectNorm || (len(projectNorm) >= 4 && strings.HasPrefix(segmentNorm, projectNorm)) {
+						result["detected_project"] = map[string]interface{}{
+							"id":     p.ID.String(),
+							"name":   p.Name,
+							"source": "cwd",
+							"hint":   fmt.Sprintf("Detected from working directory: %s", cwd),
+						}
+						// Set as session default for subsequent calls
+						SetSessionLastProject(p.ID)
+						break
+					}
+				}
+				if _, found := result["detected_project"]; found {
+					break
+				}
+			}
+		}
+	}
+
 	// Add clear next steps for workflow enforcement
 	result["workflow_guide"] = map[string]interface{}{
 		"step_1": "✅ setup_agent called - session initialized",
@@ -1814,10 +1848,14 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	}
 
 	projectID := ""
+	projectWarning := ""
 	if strings.TrimSpace(input.Project) != "" {
 		pid, err := resolveProjectID(apiClient, input.Project)
 		if err == nil {
 			projectID = pid
+		} else {
+			projectWarning = fmt.Sprintf("⚠️ Project '%s' could not be resolved. Searching ALL projects.\n%s",
+				input.Project, err.Error())
 		}
 	}
 
@@ -2034,6 +2072,23 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	if entityHops > 0 {
 		response["entity_hops"] = entityHops
 		response["matched_entities"] = matchedEntities
+	}
+
+	// Add project resolution warning if applicable
+	if projectWarning != "" {
+		response["warning"] = projectWarning
+	}
+
+	// Add suggestions when no results found
+	if len(results) == 0 {
+		suggestions := []string{"Try broader search terms"}
+		if projectID != "" {
+			suggestions = append(suggestions, "Try without project filter to search all projects")
+		}
+		if entityHops == 0 {
+			suggestions = append(suggestions, "Try entity_hops=1 to find related memories via knowledge graph")
+		}
+		response["suggestions"] = suggestions
 	}
 
 	return mustTextResult(response), nil, nil
@@ -2647,19 +2702,6 @@ func getActiveOrgIDString() string {
 	return ""
 }
 
-// normalizeForMatch removes spaces, hyphens, underscores, dots for fuzzy path matching
-// "Ramorie Frontend" -> "ramoriefrontend"
-// "ramorie-frontend" -> "ramoriefrontend"
-// "orkai.io" -> "orkaiio"
-func normalizeForMatch(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, " ", "")
-	s = strings.ReplaceAll(s, "-", "")
-	s = strings.ReplaceAll(s, "_", "")
-	s = strings.ReplaceAll(s, ".", "")
-	return s
-}
-
 func resolveProjectID(client *api.Client, projectIdentifier string) (string, error) {
 	projectIdentifier = strings.TrimSpace(projectIdentifier)
 
@@ -2752,6 +2794,17 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 		}
 	}
 
+	// Fuzzy matching: try to find a close match before giving up
+	fuzzyMatches := fuzzyMatchProjects(projects, projectIdentifier)
+	if len(fuzzyMatches) > 0 {
+		top := fuzzyMatches[0]
+		// Auto-resolve if high confidence and clearly best match
+		if top.Confidence >= 0.75 && (len(fuzzyMatches) == 1 || top.Confidence-fuzzyMatches[1].Confidence >= 0.10) {
+			SetSessionLastProject(top.Project.ID)
+			return top.Project.ID.String(), nil
+		}
+	}
+
 	// Build helpful error message with available projects
 	if len(projects) == 0 {
 		return "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
@@ -2770,12 +2823,15 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 		availableNames = append(availableNames, name)
 	}
 
-	// Check if we have a last used project to suggest
-	lastProjectHint := ""
-	if lastProjectID := GetSessionLastProjectID(); lastProjectID != nil {
+	// Build "Did you mean?" hint from fuzzy matches
+	fuzzyHint := ""
+	if len(fuzzyMatches) > 0 {
+		top := fuzzyMatches[0]
+		fuzzyHint = fmt.Sprintf("\n\n💡 Did you mean '%s'? (%.0f%% match)", top.Project.Name, top.Confidence*100)
+	} else if lastProjectID := GetSessionLastProjectID(); lastProjectID != nil {
 		for _, p := range projects {
 			if p.ID == *lastProjectID {
-				lastProjectHint = fmt.Sprintf("\n\n💡 Did you mean '%s'? (last used project)", p.Name)
+				fuzzyHint = fmt.Sprintf("\n\n💡 Did you mean '%s'? (last used project)", p.Name)
 				break
 			}
 		}
@@ -2784,7 +2840,7 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 	return "", fmt.Errorf("❌ Project '%s' not found.%s\n\n"+
 		"Available projects: %s\n\n"+
 		"💡 Tip: Use exact project name (case-insensitive)",
-		projectIdentifier, lastProjectHint, strings.Join(availableNames, ", "))
+		projectIdentifier, fuzzyHint, strings.Join(availableNames, ", "))
 }
 
 // resolveProjectWithOrg resolves project ID and returns the org ID if the project belongs to an org
@@ -2887,6 +2943,22 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		}
 	}
 
+	// Fuzzy matching: try to find a close match before giving up
+	fuzzyMatches := fuzzyMatchProjects(projects, projectIdentifier)
+	if len(fuzzyMatches) > 0 {
+		top := fuzzyMatches[0]
+		// Auto-resolve if high confidence and clearly best match
+		if top.Confidence >= 0.75 && (len(fuzzyMatches) == 1 || top.Confidence-fuzzyMatches[1].Confidence >= 0.10) {
+			SetSessionLastProject(top.Project.ID)
+			pid := top.Project.ID.String()
+			oid := ""
+			if top.Project.OrganizationID != nil {
+				oid = top.Project.OrganizationID.String()
+			}
+			return pid, oid, nil
+		}
+	}
+
 	// Build helpful error message with available projects
 	if len(projects) == 0 {
 		return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
@@ -2905,10 +2977,17 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		availableNames = append(availableNames, name)
 	}
 
-	return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
+	// Build "Did you mean?" hint from fuzzy matches
+	fuzzyHint := ""
+	if len(fuzzyMatches) > 0 {
+		top := fuzzyMatches[0]
+		fuzzyHint = fmt.Sprintf("\n\n💡 Did you mean '%s'? (%.0f%% match)", top.Project.Name, top.Confidence*100)
+	}
+
+	return "", "", fmt.Errorf("❌ Project '%s' not found.%s\n\n"+
 		"Available projects: %s\n\n"+
 		"💡 Tip: Use exact project name (case-insensitive)",
-		projectIdentifier, strings.Join(availableNames, ", "))
+		projectIdentifier, fuzzyHint, strings.Join(availableNames, ", "))
 }
 
 // determineEncryptionScope decides the encryption scope for a project.

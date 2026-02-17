@@ -150,3 +150,107 @@ func truncateContent(content string, maxLen int) string {
 	}
 	return content[:maxLen-3] + "..."
 }
+
+// ============================================================================
+// Fuzzy Project Matching
+// ============================================================================
+
+// normalizeForMatch removes spaces, hyphens, underscores, dots for fuzzy matching.
+// "Ramorie Frontend" -> "ramoriefrontend"
+// "ramorie-frontend" -> "ramoriefrontend"
+// "hangienstruman.com" -> "hangienstrumancom"
+func normalizeForMatch(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, ".", "")
+	return s
+}
+
+// projectMatch represents a fuzzy match result for project resolution
+type projectMatch struct {
+	Project    models.Project
+	Confidence float64 // 0.0-1.0
+	MatchType  string  // "normalized", "contains", "prefix"
+}
+
+// fuzzyMatchProjects finds projects that fuzzy-match the input string.
+// Returns matches sorted by confidence DESC. Requires min 4 chars to prevent false positives.
+func fuzzyMatchProjects(projects []models.Project, input string) []projectMatch {
+	input = strings.TrimSpace(input)
+	if len(input) < 4 {
+		return nil
+	}
+
+	inputNorm := normalizeForMatch(input)
+	if inputNorm == "" {
+		return nil
+	}
+
+	var matches []projectMatch
+
+	for _, p := range projects {
+		projectNorm := normalizeForMatch(p.Name)
+		if projectNorm == "" {
+			continue
+		}
+
+		// 1. Normalized exact match (0.95)
+		if inputNorm == projectNorm {
+			matches = append(matches, projectMatch{
+				Project:    p,
+				Confidence: 0.95,
+				MatchType:  "normalized",
+			})
+			continue
+		}
+
+		// 2. Substring contains (0.70-0.90)
+		// Check if input is contained in project name or vice versa
+		if strings.Contains(projectNorm, inputNorm) {
+			coverage := float64(len(inputNorm)) / float64(len(projectNorm))
+			score := 0.70 + coverage*0.20
+			matches = append(matches, projectMatch{
+				Project:    p,
+				Confidence: score,
+				MatchType:  "contains",
+			})
+			continue
+		}
+		if strings.Contains(inputNorm, projectNorm) {
+			coverage := float64(len(projectNorm)) / float64(len(inputNorm))
+			score := 0.70 + coverage*0.20
+			matches = append(matches, projectMatch{
+				Project:    p,
+				Confidence: score,
+				MatchType:  "contains",
+			})
+			continue
+		}
+
+		// 3. Prefix match (0.60-0.85)
+		if strings.HasPrefix(projectNorm, inputNorm) || strings.HasPrefix(inputNorm, projectNorm) {
+			shorter := len(inputNorm)
+			longer := len(projectNorm)
+			if shorter > longer {
+				shorter, longer = longer, shorter
+			}
+			coverage := float64(shorter) / float64(longer)
+			score := 0.60 + coverage*0.25
+			matches = append(matches, projectMatch{
+				Project:    p,
+				Confidence: score,
+				MatchType:  "prefix",
+			})
+			continue
+		}
+	}
+
+	// Sort by confidence DESC
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Confidence > matches[j].Confidence
+	})
+
+	return matches
+}
