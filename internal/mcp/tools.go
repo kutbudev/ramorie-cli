@@ -1829,6 +1829,9 @@ type RecallInput struct {
 	// Temporal query support
 	ValidAt        string `json:"valid_at,omitempty"`        // RFC3339 timestamp - query memories valid at this time (default: now)
 	IncludeExpired bool   `json:"include_expired,omitempty"` // Include TTL-expired memories (default: false)
+
+	// Cross-entity search
+	IncludeDecisions bool `json:"include_decisions,omitempty"` // Include architectural decisions in results (default: true)
 }
 
 func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, any, error) {
@@ -1841,10 +1844,11 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	if limit == 0 {
 		limit = 20
 	}
-	minScore := int(input.MinScore)
-	includeRelations := true
-	if !input.IncludeRelations && input.Limit > 0 {
-		includeRelations = input.IncludeRelations
+
+	// Default: include decisions unless explicitly disabled
+	includeDecisions := true
+	if !input.IncludeDecisions && input.Limit > 0 {
+		includeDecisions = input.IncludeDecisions
 	}
 
 	projectID := ""
@@ -1859,46 +1863,76 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		}
 	}
 
-	// Check if entity_hops is enabled for knowledge graph traversal
-	entityHops := int(input.EntityHops)
-	if entityHops < 0 {
-		entityHops = 0
-	}
-	if entityHops > 3 {
-		entityHops = 3
-	}
+	// Try backend FTS search first (fast, server-side scoring with entity graph)
+	searchResp, err := apiClient.SearchMemories(term, projectID, limit, includeDecisions)
+	if err == nil && searchResp != nil {
+		// Backend search succeeded — format results
+		var results []interface{}
+		for _, m := range searchResp.Memories {
+			result := map[string]interface{}{
+				"id":      m.ID,
+				"title":   m.Title,
+				"content": m.Content,
+				"score":   m.Score,
+			}
+			if m.Tags != nil && len(m.Tags) > 0 {
+				result["tags"] = m.Tags
+			}
+			if m.Importance > 0 {
+				result["importance"] = m.Importance
+			}
+			if m.AccessCount > 0 {
+				result["access_count"] = m.AccessCount
+			}
+			if m.CreatedAt != "" {
+				result["created_at"] = m.CreatedAt
+			}
+			results = append(results, result)
+		}
 
-	// Collect memory IDs to fetch via entity graph traversal
-	var entityMemoryIDs map[string]int // memory ID -> hop distance
-	var matchedEntities []map[string]interface{}
-
-	if entityHops > 0 {
-		entityMemoryIDs = make(map[string]int)
-
-		// Search for entities matching the term
-		entityResp, err := apiClient.ListEntities("", projectID, term, 20, 0)
-		if err == nil && len(entityResp.Entities) > 0 {
-			for _, entity := range entityResp.Entities {
-				matchedEntities = append(matchedEntities, map[string]interface{}{
-					"id":   entity.ID.String(),
-					"name": entity.Name,
-					"type": entity.Type,
+		// Add decision results
+		var decisionResults []interface{}
+		if searchResp.Decisions != nil {
+			for _, d := range searchResp.Decisions {
+				decisionResults = append(decisionResults, map[string]interface{}{
+					"id":          d.ID,
+					"adr_number":  d.ADRNumber,
+					"title":       d.Title,
+					"description": d.Description,
+					"status":      d.Status,
+					"area":        d.Area,
+					"score":       d.Score,
+					"created_at":  d.CreatedAt,
 				})
-
-				// Get memories for this entity with hops
-				memResp, err := apiClient.GetEntityMemories(entity.ID.String(), entityHops, 50)
-				if err == nil {
-					for _, mid := range memResp.MemoryIDs {
-						// Track hop distance (direct=0, related=hops)
-						if _, exists := entityMemoryIDs[mid]; !exists {
-							entityMemoryIDs[mid] = entityHops
-						}
-					}
-				}
 			}
 		}
+
+		response := map[string]interface{}{
+			"term":          term,
+			"search_mode":   "FTS",
+			"count":         len(results),
+			"total_found":   searchResp.Total,
+			"query_time_ms": searchResp.QueryTimeMs,
+			"results":       results,
+		}
+		if len(decisionResults) > 0 {
+			response["decisions"] = decisionResults
+			response["decisions_count"] = len(decisionResults)
+		}
+		if projectWarning != "" {
+			response["warning"] = projectWarning
+		}
+		if len(results) == 0 && len(decisionResults) == 0 {
+			response["suggestions"] = []string{
+				"Try broader search terms",
+				"Try without project filter to search all projects",
+			}
+		}
+
+		return mustTextResult(response), nil, nil
 	}
 
+	// Fallback: client-side search if backend FTS unavailable
 	memories, err := apiClient.ListMemories(projectID, "")
 	if err != nil {
 		return nil, nil, err
@@ -1922,6 +1956,8 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		}
 	}
 
+	minScore := int(input.MinScore)
+
 	type scoredMemory struct {
 		memory interface{}
 		score  int
@@ -1933,25 +1969,6 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 			continue
 		}
 
-		if input.Tag != "" {
-			hasTag := false
-			if tags, ok := m.Tags.([]interface{}); ok {
-				for _, tag := range tags {
-					if tagStr, ok := tag.(string); ok {
-						if strings.EqualFold(tagStr, input.Tag) {
-							hasTag = true
-							break
-						}
-					}
-				}
-			}
-			if !hasTag {
-				continue
-			}
-		}
-
-		// CRITICAL: Decrypt memory content if encrypted
-		// Without this, encrypted memories search against "[Encrypted]" and never match
 		decryptedContent := decryptMemoryContent(&m)
 		contentLower := strings.ToLower(decryptedContent)
 		score := 0
@@ -1966,10 +1983,6 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 					strings.HasSuffix(contentLower, " "+t) {
 					score += 10
 				}
-				if strings.Contains(contentLower, "## "+t) ||
-					strings.Contains(contentLower, "### "+t) {
-					score += 15
-				}
 				occurrences := strings.Count(contentLower, t)
 				if occurrences > 1 {
 					score += min(occurrences*5, 25)
@@ -1977,37 +1990,11 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 			}
 		}
 
-		// Check if memory is linked to an entity (knowledge graph boost)
-		memoryIDStr := m.ID.String()
-		entityBoost := 0
-		fromEntity := false
-		if entityMemoryIDs != nil {
-			if hopDistance, exists := entityMemoryIDs[memoryIDStr]; exists {
-				fromEntity = true
-				// Boost based on hop distance (closer = higher boost)
-				// Direct (0 hops) = +30, 1 hop = +20, 2 hops = +10, 3 hops = +5
-				entityBoost = max(30-hopDistance*10, 5)
-			}
-		}
-
 		if isAndSearch && matchCount < len(searchTerms) {
-			// If entity_hops is enabled and memory is from entity graph, still include it
-			if !fromEntity {
-				continue
-			}
+			continue
 		}
 		if !isAndSearch && matchCount == 0 {
-			// If entity_hops is enabled and memory is from entity graph, still include it
-			if !fromEntity {
-				continue
-			}
-		}
-
-		// Apply entity boost
-		score += entityBoost
-
-		if m.LinkedTaskID != nil {
-			score += 5
+			continue
 		}
 
 		if score < minScore {
@@ -2015,33 +2002,9 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		}
 
 		result := map[string]interface{}{
-			"id":           m.ID.String(),
-			"content":      decryptedContent, // Use decrypted content in result
-			"score":        score,
-			"access_count": m.AccessCount,
-			"created_at":   m.CreatedAt,
-		}
-		if m.Importance != nil {
-			result["importance"] = *m.Importance
-		}
-		if fromEntity {
-			result["from_entity"] = true
-			result["entity_boost"] = entityBoost
-		}
-
-		if includeRelations {
-			if m.Project != nil {
-				result["project"] = map[string]interface{}{
-					"id":   m.Project.ID.String(),
-					"name": m.Project.Name,
-				}
-			}
-			if m.LinkedTaskID != nil {
-				result["linked_task_id"] = m.LinkedTaskID.String()
-			}
-			if m.Tags != nil {
-				result["tags"] = m.Tags
-			}
+			"id":      m.ID.String(),
+			"content": decryptedContent,
+			"score":   score,
 		}
 
 		scored = append(scored, scoredMemory{memory: result, score: score})
@@ -2051,7 +2014,6 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		return scored[i].score > scored[j].score
 	})
 
-	// Apply cursor-based pagination to scored results
 	paginatedScored, nextCursor, totalFound := paginateSlice(scored, input.Cursor, limit)
 
 	var results []interface{}
@@ -2069,26 +2031,11 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	if nextCursor != "" {
 		response["nextCursor"] = nextCursor
 	}
-	if entityHops > 0 {
-		response["entity_hops"] = entityHops
-		response["matched_entities"] = matchedEntities
-	}
-
-	// Add project resolution warning if applicable
 	if projectWarning != "" {
 		response["warning"] = projectWarning
 	}
-
-	// Add suggestions when no results found
 	if len(results) == 0 {
-		suggestions := []string{"Try broader search terms"}
-		if projectID != "" {
-			suggestions = append(suggestions, "Try without project filter to search all projects")
-		}
-		if entityHops == 0 {
-			suggestions = append(suggestions, "Try entity_hops=1 to find related memories via knowledge graph")
-		}
-		response["suggestions"] = suggestions
+		response["suggestions"] = []string{"Try broader search terms"}
 	}
 
 	return mustTextResult(response), nil, nil

@@ -883,6 +883,69 @@ type MemoriesListResponse struct {
 	Offset   int             `json:"offset"`
 }
 
+// MemorySearchResult represents a single memory search result from backend FTS
+type MemorySearchResult struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Content     string   `json:"content"`
+	SourceType  string   `json:"source_type"`
+	SourceID    string   `json:"source_id"`
+	Tags        []string `json:"tags"`
+	Confidence  float64  `json:"confidence"`
+	Importance  float64  `json:"importance"`
+	AccessCount int      `json:"access_count"`
+	Score       float64  `json:"score"`
+	Rank        float64  `json:"rank"`
+	CreatedAt   string   `json:"created_at"`
+}
+
+// DecisionSearchResult represents a single decision search result from backend FTS
+type DecisionSearchResult struct {
+	ID          string  `json:"id"`
+	ADRNumber   string  `json:"adr_number"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"`
+	Area        string  `json:"area"`
+	Score       float64 `json:"score"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+// SearchMemoryResponse is the API response from GET /v1/memory/search
+type SearchMemoryResponse struct {
+	Memories    []MemorySearchResult   `json:"memories"`
+	Decisions   []DecisionSearchResult `json:"decisions,omitempty"`
+	Total       int                    `json:"total"`
+	QueryTimeMs int64                  `json:"query_time_ms"`
+}
+
+// SearchMemories calls backend FTS endpoint GET /v1/memory/search
+func (c *Client) SearchMemories(query string, projectID string, limit int, includeDecisions bool) (*SearchMemoryResponse, error) {
+	params := url.Values{}
+	params.Add("q", query)
+	if limit > 0 {
+		params.Add("limit", fmt.Sprintf("%d", limit))
+	}
+	if includeDecisions {
+		params.Add("include_decisions", "true")
+	}
+	params.Add("enable_entities", "true")
+	params.Add("entity_hops", "1")
+
+	endpoint := "/memory/search?" + params.Encode()
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response SearchMemoryResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal search response: %w", err)
+	}
+
+	return &response, nil
+}
+
 func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error) {
 	endpoint := "/memories"
 	params := url.Values{}

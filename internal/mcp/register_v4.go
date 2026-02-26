@@ -62,19 +62,20 @@ Example: remember(content: "API uses JWT authentication", project: "my-project")
 		},
 	}, handleRemember)
 
-	// 4. recall - Search memories (KEEP)
+	// 4. recall - Search memories AND decisions (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "recall",
-		Description: `🔴 ESSENTIAL | Search memories BEFORE answering ANY question.
+		Description: `🔴 ESSENTIAL | Search memories AND architectural decisions using full-text search with relevance scoring.
 
 REQUIRED: term
-Supports OR (space-separated) and AND (comma-separated) search.
+Returns ranked results from both memories and decisions.
 
-Optional: project, tag, type, entity_hops (0-3), min_score, limit
+Optional: project, tag, type, min_score, limit, include_decisions (default: true)
 
-When entity_hops > 0, recall will traverse the knowledge graph to find related memories.
+Uses backend PostgreSQL full-text search with ts_rank scoring.
+Falls back to client-side search if backend unavailable.
 
-Example: recall(term: "authentication") - finds auth-related memories`,
+Example: recall(term: "authentication") - finds auth-related memories and decisions`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Recall",
 			ReadOnlyHint:  true,
@@ -117,13 +118,13 @@ Examples:
 	// 6. memory - Unified memory operations (NEW - replaces 2 tools)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "memory",
-		Description: `🟡 COMMON | Get memory details.
+		Description: `🟡 COMMON | Get memory details with related entities.
 
 REQUIRED: action (list|get)
 
 Actions:
 - list: List memories. Requires: project. Optional: term, limit
-- get: Get memory details. Requires: memoryId
+- get: Get memory details with related decisions, tasks, and memories. Requires: memoryId
 
 Examples:
 - memory(action: "list", project: "my-project")
@@ -138,13 +139,15 @@ Examples:
 	// 7. decision - Unified decision management (NEW - replaces 2 tools)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "decision",
-		Description: `🟡 COMMON | Record architectural decisions (ADRs).
+		Description: `🟡 COMMON | Record architectural decisions (ADRs). Searchable via recall().
 
 REQUIRED: action (create|list)
 
 Actions:
 - create: Record decision. Requires: title. Optional: project, description, status, area, context, consequences
 - list: List decisions. Optional: project, status, area, limit
+
+Decisions are indexed with full-text search. Use recall(term) to find relevant decisions by keyword.
 
 Examples:
 - decision(action: "create", title: "Use PostgreSQL", project: "my-project")
