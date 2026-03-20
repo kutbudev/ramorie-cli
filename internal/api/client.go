@@ -919,18 +919,44 @@ type SearchMemoryResponse struct {
 	QueryTimeMs int64                  `json:"query_time_ms"`
 }
 
+type SearchMemoriesOptions struct {
+	ProjectID        string
+	Limit            int
+	IncludeDecisions bool
+	EnableEntities   bool
+	EntityHops       int
+	MinConfidence    float64
+	MinScore         float64
+}
+
 // SearchMemories calls backend FTS endpoint GET /v1/memory/search
-func (c *Client) SearchMemories(query string, projectID string, limit int, includeDecisions bool) (*SearchMemoryResponse, error) {
+func (c *Client) SearchMemories(query string, opts SearchMemoriesOptions) (*SearchMemoryResponse, error) {
 	params := url.Values{}
 	params.Add("q", query)
-	if limit > 0 {
-		params.Add("limit", fmt.Sprintf("%d", limit))
+	if opts.ProjectID != "" {
+		params.Add("project_id", strings.TrimSpace(opts.ProjectID))
 	}
-	if includeDecisions {
+	if opts.Limit > 0 {
+		params.Add("limit", fmt.Sprintf("%d", opts.Limit))
+	}
+	if opts.IncludeDecisions {
 		params.Add("include_decisions", "true")
 	}
-	params.Add("enable_entities", "true")
-	params.Add("entity_hops", "1")
+	if opts.MinConfidence > 0 {
+		params.Add("min_confidence", fmt.Sprintf("%.2f", opts.MinConfidence))
+	}
+	if opts.MinScore > 0 {
+		params.Add("min_score", fmt.Sprintf("%.2f", opts.MinScore))
+	}
+	if opts.EnableEntities {
+		params.Add("enable_entities", "true")
+		if opts.EntityHops > 0 {
+			params.Add("entity_hops", fmt.Sprintf("%d", opts.EntityHops))
+		}
+	} else {
+		params.Add("enable_entities", "false")
+		params.Add("entity_hops", "0")
+	}
 
 	endpoint := "/memory/search?" + params.Encode()
 	respBody, err := c.makeRequest("GET", endpoint, nil)
@@ -2139,42 +2165,42 @@ func (c *Client) CompleteSubtask(subtaskID string) (*models.Subtask, error) {
 
 // Plan represents a plan run
 type Plan struct {
-	ID                  string       `json:"id"`
-	UserID              string       `json:"user_id"`
-	OrganizationID      *string      `json:"organization_id,omitempty"`
-	ProjectID           *string      `json:"project_id,omitempty"`
-	Title               string       `json:"title"`
-	Requirements        string       `json:"requirements"`
-	Type                string       `json:"type"`
-	Status              string       `json:"status"`
-	CurrentPhase        string       `json:"current_phase"`
-	Progress            int          `json:"progress"`
-	MaxBudgetUSD        *float64     `json:"max_budget_usd,omitempty"`
-	SpentBudgetUSD      float64      `json:"spent_budget_usd"`
-	TokensUsed          int64        `json:"tokens_used"`
-	FinalConsensusScore *float64     `json:"final_consensus_score,omitempty"`
-	TaskCount           int          `json:"task_count"`
-	ADRCount            int          `json:"adr_count"`
-	RiskCount           int          `json:"risk_count"`
-	Error               string       `json:"error,omitempty"`
-	CreatedAt           time.Time    `json:"created_at"`
-	StartedAt           *time.Time   `json:"started_at,omitempty"`
-	CompletedAt         *time.Time   `json:"completed_at,omitempty"`
-	Phases              []PlanPhase  `json:"phases,omitempty"`
+	ID                  string      `json:"id"`
+	UserID              string      `json:"user_id"`
+	OrganizationID      *string     `json:"organization_id,omitempty"`
+	ProjectID           *string     `json:"project_id,omitempty"`
+	Title               string      `json:"title"`
+	Requirements        string      `json:"requirements"`
+	Type                string      `json:"type"`
+	Status              string      `json:"status"`
+	CurrentPhase        string      `json:"current_phase"`
+	Progress            int         `json:"progress"`
+	MaxBudgetUSD        *float64    `json:"max_budget_usd,omitempty"`
+	SpentBudgetUSD      float64     `json:"spent_budget_usd"`
+	TokensUsed          int64       `json:"tokens_used"`
+	FinalConsensusScore *float64    `json:"final_consensus_score,omitempty"`
+	TaskCount           int         `json:"task_count"`
+	ADRCount            int         `json:"adr_count"`
+	RiskCount           int         `json:"risk_count"`
+	Error               string      `json:"error,omitempty"`
+	CreatedAt           time.Time   `json:"created_at"`
+	StartedAt           *time.Time  `json:"started_at,omitempty"`
+	CompletedAt         *time.Time  `json:"completed_at,omitempty"`
+	Phases              []PlanPhase `json:"phases,omitempty"`
 }
 
 // PlanPhase represents a phase in a plan run
 type PlanPhase struct {
-	ID              string    `json:"id"`
-	PlanRunID       string    `json:"plan_run_id"`
-	Phase           string    `json:"phase"`
-	Status          string    `json:"status"`
-	Sequence        int       `json:"sequence"`
-	ConsensusScore  *float64  `json:"consensus_score,omitempty"`
-	WinningProposal *string   `json:"winning_proposal,omitempty"`
-	TokensUsed      int64     `json:"tokens_used"`
-	DurationMs      int64     `json:"duration_ms"`
-	CostUSD         float64   `json:"cost_usd"`
+	ID              string     `json:"id"`
+	PlanRunID       string     `json:"plan_run_id"`
+	Phase           string     `json:"phase"`
+	Status          string     `json:"status"`
+	Sequence        int        `json:"sequence"`
+	ConsensusScore  *float64   `json:"consensus_score,omitempty"`
+	WinningProposal *string    `json:"winning_proposal,omitempty"`
+	TokensUsed      int64      `json:"tokens_used"`
+	DurationMs      int64      `json:"duration_ms"`
+	CostUSD         float64    `json:"cost_usd"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
@@ -2215,11 +2241,11 @@ type PlanConfiguration struct {
 
 // CreatePlanRequest is the request body for creating a plan
 type CreatePlanRequest struct {
-	Title         string             `json:"title"`
-	Requirements  string             `json:"requirements"`
-	ProjectID     string             `json:"project_id,omitempty"`
-	Type          string             `json:"type,omitempty"`
-	Configuration *PlanConfiguration `json:"configuration,omitempty"`
+	Title         string                 `json:"title"`
+	Requirements  string                 `json:"requirements"`
+	ProjectID     string                 `json:"project_id,omitempty"`
+	Type          string                 `json:"type,omitempty"`
+	Configuration *PlanConfiguration     `json:"configuration,omitempty"`
 	ContextBundle map[string]interface{} `json:"context_bundle,omitempty"`
 }
 
@@ -2812,7 +2838,7 @@ func (c *Client) ListSkills(projectID string, limit int) ([]models.Memory, error
 
 	// Backend returns: { "success": true, "data": { "skills": [], "total": N } }
 	var response struct {
-		Success bool   `json:"success"`
+		Success bool `json:"success"`
 		Data    struct {
 			Skills []models.Memory `json:"skills"`
 			Total  int             `json:"total"`
@@ -2833,11 +2859,11 @@ func (c *Client) ListSkills(projectID string, limit int) ([]models.Memory, error
 // CreateSkill creates a new procedural skill
 func (c *Client) CreateSkill(projectID, trigger, description string, steps []string, validation string, tags []string) (*models.Memory, error) {
 	body := map[string]interface{}{
-		"project_id":  projectID,
-		"content":     description,
-		"type":        "skill",
-		"trigger":     trigger,
-		"steps":       steps,
+		"project_id": projectID,
+		"content":    description,
+		"type":       "skill",
+		"trigger":    trigger,
+		"steps":      steps,
 	}
 
 	if validation != "" {
@@ -2865,9 +2891,9 @@ func (c *Client) CreateSkill(projectID, trigger, description string, steps []str
 	}
 
 	var response struct {
-		Success bool           `json:"success"`
-		Data    models.Memory  `json:"data"`
-		Error   string         `json:"error"`
+		Success bool          `json:"success"`
+		Data    models.Memory `json:"data"`
+		Error   string        `json:"error"`
 	}
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal skill: %w", err)
@@ -2950,9 +2976,9 @@ func (c *Client) StartSkillExecution(skillID, context string, agentName, agentMo
 	}
 
 	var response struct {
-		Success bool                   `json:"success"`
-		Data    models.SkillExecution  `json:"data"`
-		Error   string                 `json:"error"`
+		Success bool                  `json:"success"`
+		Data    models.SkillExecution `json:"data"`
+		Error   string                `json:"error"`
 	}
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal execution: %w", err)
@@ -2981,9 +3007,9 @@ func (c *Client) CompleteSkillExecution(executionID string, success bool, notes 
 	}
 
 	var response struct {
-		Success bool                   `json:"success"`
-		Data    models.SkillExecution  `json:"data"`
-		Error   string                 `json:"error"`
+		Success bool                  `json:"success"`
+		Data    models.SkillExecution `json:"data"`
+		Error   string                `json:"error"`
 	}
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal execution: %w", err)

@@ -873,7 +873,6 @@ func paginateSlice[T any](items []T, cursor string, limit int) ([]T, string, int
 
 type EmptyInput struct{}
 
-
 type SetupAgentInput struct {
 	AgentName  string `json:"agent_name,omitempty"`
 	AgentModel string `json:"agent_model,omitempty"`
@@ -1040,7 +1039,7 @@ func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input Emp
 type CreateProjectInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Force       bool   `json:"force,omitempty"` // Set true to bypass similarity check
+	Force       bool   `json:"force,omitempty"`  // Set true to bypass similarity check
 	OrgID       string `json:"org_id,omitempty"` // Organization ID for scoping
 }
 
@@ -1057,10 +1056,10 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 			// If exact match exists, don't create duplicate
 			if suggestions.ExactMatch != nil {
 				return mustTextResult(map[string]interface{}{
-					"status":        "exists",
-					"exact_match":   suggestions.ExactMatch,
-					"_message":      "✅ Project already exists with this name. Use existing project instead of creating a duplicate.",
-					"_action":       "Use remember(content) for memories or create_task(project, description) for tasks.",
+					"status":      "exists",
+					"exact_match": suggestions.ExactMatch,
+					"_message":    "✅ Project already exists with this name. Use existing project instead of creating a duplicate.",
+					"_action":     "Use remember(content) for memories or create_task(project, description) for tasks.",
 				}), nil, nil
 			}
 
@@ -1107,10 +1106,10 @@ func handleCreateProject(ctx context.Context, req *mcp.CallToolRequest, input Cr
 type ListTasksInput struct {
 	Status       string  `json:"status,omitempty"`
 	Project      string  `json:"project"`                 // REQUIRED - project name or ID
-	Query        string  `json:"query,omitempty"`          // Optional keyword search
-	NextPriority bool    `json:"next_priority,omitempty"`  // If true, return top TODO tasks by priority
+	Query        string  `json:"query,omitempty"`         // Optional keyword search
+	NextPriority bool    `json:"next_priority,omitempty"` // If true, return top TODO tasks by priority
 	Limit        float64 `json:"limit,omitempty"`
-	Cursor       string  `json:"cursor,omitempty"`         // Pagination cursor from previous response
+	Cursor       string  `json:"cursor,omitempty"` // Pagination cursor from previous response
 }
 
 func handleListTasks(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, any, error) {
@@ -1386,7 +1385,6 @@ func handleGetTask(ctx context.Context, req *mcp.CallToolRequest, input TaskIDIn
 	return mustTextResult(result), nil, nil
 }
 
-
 type MoveTaskInput struct {
 	TaskID    string `json:"taskId"`
 	ProjectID string `json:"projectId"`
@@ -1428,7 +1426,6 @@ func handleMoveTask(ctx context.Context, req *mcp.CallToolRequest, input MoveTas
 
 	return mustTextResult(result), nil, nil
 }
-
 
 type AddTaskNoteInput struct {
 	TaskID string `json:"taskId"`
@@ -1541,14 +1538,14 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 			if err == nil && len(similarMemories) > 0 {
 				// Found similar memories - return warning with existing memories
 				return mustTextResult(map[string]interface{}{
-					"status":           "similar_exists",
-					"similar_memories": similarMemories,
+					"status":            "similar_exists",
+					"similar_memories":  similarMemories,
 					"requested_content": truncateContent(content, 200),
 					"_message": fmt.Sprintf("⚠️ Found %d similar memory(ies) already saved. To avoid duplicates:\n"+
 						"1. Use the existing memory if it covers the same knowledge, OR\n"+
 						"2. Call remember(..., force=true) to save anyway", len(similarMemories)),
-					"_action":   "Either skip saving (duplicate) or use force=true to save anyway",
-					"_hint":     "💡 Best practice: Always call recall(term) BEFORE remember() to check existing knowledge",
+					"_action": "Either skip saving (duplicate) or use force=true to save anyway",
+					"_hint":   "💡 Best practice: Always call recall(term) BEFORE remember() to check existing knowledge",
 				}), nil, nil
 			}
 		}
@@ -1631,13 +1628,13 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 				return nil, nil, err
 			}
 			return mustTextResult(map[string]interface{}{
-				"action":         "memory_saved",
-				"message":        fmt.Sprintf("💾 Remembered as %s (encrypted)", memoryType),
-				"memory":         memory,
-				"type":           memoryType,
-				"auto_detected":  true,
-				"encrypted":      true,
-				"project_id":     projectID,
+				"action":        "memory_saved",
+				"message":       fmt.Sprintf("💾 Remembered as %s (encrypted)", memoryType),
+				"memory":        memory,
+				"type":          memoryType,
+				"auto_detected": true,
+				"encrypted":     true,
+				"project_id":    projectID,
 			}), nil, nil
 		}
 	}
@@ -1831,7 +1828,7 @@ type RecallInput struct {
 	IncludeExpired bool   `json:"include_expired,omitempty"` // Include TTL-expired memories (default: false)
 
 	// Cross-entity search
-	IncludeDecisions bool `json:"include_decisions,omitempty"` // Include architectural decisions in results (default: true)
+	IncludeDecisions *bool `json:"include_decisions,omitempty"` // Include architectural decisions in results (default: true)
 }
 
 func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, any, error) {
@@ -1842,14 +1839,28 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 
 	limit := int(input.Limit)
 	if limit == 0 {
-		limit = 20
+		limit = 10
 	}
 
 	// Default: include decisions unless explicitly disabled
 	includeDecisions := true
-	if !input.IncludeDecisions && input.Limit > 0 {
-		includeDecisions = input.IncludeDecisions
+	if input.IncludeDecisions != nil {
+		includeDecisions = *input.IncludeDecisions
 	}
+
+	minScore := input.MinScore
+	if minScore <= 0 {
+		minScore = 0.18
+	}
+
+	entityHops := int(input.EntityHops)
+	if entityHops < 0 {
+		entityHops = 0
+	}
+	if entityHops > 3 {
+		entityHops = 3
+	}
+	enableEntities := entityHops > 0
 
 	projectID := ""
 	projectWarning := ""
@@ -1864,7 +1875,15 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	}
 
 	// Try backend FTS search first (fast, server-side scoring with entity graph)
-	searchResp, err := apiClient.SearchMemories(term, projectID, limit, includeDecisions)
+	searchResp, err := apiClient.SearchMemories(term, api.SearchMemoriesOptions{
+		ProjectID:        projectID,
+		Limit:            limit,
+		IncludeDecisions: includeDecisions,
+		EnableEntities:   enableEntities,
+		EntityHops:       entityHops,
+		MinConfidence:    0.60,
+		MinScore:         minScore,
+	})
 	if err == nil && searchResp != nil {
 		// Backend search succeeded — format results
 		var results []interface{}
@@ -1956,7 +1975,7 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		}
 	}
 
-	minScore := int(input.MinScore)
+	fallbackMinScore := int(minScore)
 
 	type scoredMemory struct {
 		memory interface{}
@@ -1997,7 +2016,7 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 			continue
 		}
 
-		if score < minScore {
+		if score < fallbackMinScore {
 			continue
 		}
 
@@ -2043,7 +2062,7 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 
 // SurfaceSkillsInput for proactive skill surfacing
 type SurfaceSkillsInput struct {
-	Context string `json:"context"`          // Current task/situation description
+	Context string `json:"context"`           // Current task/situation description
 	Project string `json:"project,omitempty"` // Optional: limit to specific project
 	Limit   int    `json:"limit,omitempty"`   // Max skills to return (default 5)
 }
@@ -2166,10 +2185,10 @@ func handleSurfaceSkills(ctx context.Context, req *mcp.CallToolRequest, input Su
 	}
 
 	response := map[string]interface{}{
-		"context":       context,
-		"skills_found":  len(results),
-		"skills":        results,
-		"_message":      fmt.Sprintf("Found %d relevant skills for the given context", len(results)),
+		"context":      context,
+		"skills_found": len(results),
+		"skills":       results,
+		"_message":     fmt.Sprintf("Found %d relevant skills for the given context", len(results)),
 	}
 
 	if len(results) == 0 {
@@ -2222,7 +2241,6 @@ func handleListContextPacks(ctx context.Context, req *mcp.CallToolRequest, input
 
 	return mustTextResult(formatPaginatedResponse(packs, nextCursor, total, getContextString())), nil, nil
 }
-
 
 type GetContextPackInput struct {
 	PackID string `json:"packId"`
@@ -2410,8 +2428,8 @@ func handleConsolidateMemories(ctx context.Context, req *mcp.CallToolRequest, in
 }
 
 type CleanupMemoriesInput struct {
-	Project   string `json:"project,omitempty"`   // Optional: scope to specific project
-	DryRun    bool   `json:"dry_run,omitempty"`   // Preview without deleting
+	Project   string `json:"project,omitempty"`    // Optional: scope to specific project
+	DryRun    bool   `json:"dry_run,omitempty"`    // Preview without deleting
 	BatchSize int    `json:"batch_size,omitempty"` // Batch size for deletion (default 100)
 }
 
@@ -2556,8 +2574,6 @@ func handleGetStats(ctx context.Context, req *mcp.CallToolRequest, input GetStat
 	}
 	return mustTextResult(out), nil, nil
 }
-
-
 
 // ============================================================================
 // LEGACY SUPPORT - ToolDefinitions for CLI tools command
@@ -2964,8 +2980,6 @@ func normalizePriority(s string) string {
 	}
 }
 
-
-
 func setupAgent(client *api.Client) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",
@@ -3120,7 +3134,7 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 // ============================================================================
 
 type GetAgentActivityInput struct {
-	Project   string  `json:"project,omitempty"`   // Optional: filter by project name or ID
+	Project   string  `json:"project,omitempty"`    // Optional: filter by project name or ID
 	AgentName string  `json:"agent_name,omitempty"` // Optional: filter by agent name
 	EventType string  `json:"event_type,omitempty"` // Optional: filter by event type (memory_created, task_created, etc.)
 	Limit     float64 `json:"limit,omitempty"`      // Optional: max results (default 20, max 50)
@@ -3606,13 +3620,13 @@ func handleListSkills(ctx context.Context, req *mcp.CallToolRequest, input ListS
 	var result []map[string]interface{}
 	for _, skill := range skills {
 		item := map[string]interface{}{
-			"id":          skill.ID,
-			"content":     skill.Content,
-			"trigger":     skill.Trigger,
-			"steps":       skill.Steps,
-			"validation":  skill.Validation,
-			"tags":        skill.Tags,
-			"created_at":  skill.CreatedAt,
+			"id":         skill.ID,
+			"content":    skill.Content,
+			"trigger":    skill.Trigger,
+			"steps":      skill.Steps,
+			"validation": skill.Validation,
+			"tags":       skill.Tags,
+			"created_at": skill.CreatedAt,
 		}
 		if skill.Project != nil {
 			item["project_name"] = skill.Project.Name
@@ -4060,4 +4074,3 @@ func handleExtractEntities(ctx context.Context, req *mcp.CallToolRequest, input 
 
 	return mustTextResult(result), nil, nil
 }
-

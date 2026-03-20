@@ -73,6 +73,7 @@ Returns ranked results from both memories and decisions.
 Optional: project, tag, type, min_score, limit, include_decisions (default: true)
 
 Uses backend PostgreSQL full-text search with ts_rank scoring.
+Project filters are applied server-side. Entity expansion is opt-in via entity_hops > 0.
 Falls back to client-side search if backend unavailable.
 
 Example: recall(term: "authentication") - finds auth-related memories and decisions`,
