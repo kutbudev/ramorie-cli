@@ -897,6 +897,7 @@ type MemorySearchResult struct {
 	Score       float64  `json:"score"`
 	Rank        float64  `json:"rank"`
 	CreatedAt   string   `json:"created_at"`
+	Type        string   `json:"type"`
 }
 
 // DecisionSearchResult represents a single decision search result from backend FTS
@@ -927,6 +928,7 @@ type SearchMemoriesOptions struct {
 	EntityHops       int
 	MinConfidence    float64
 	MinScore         float64
+	Purpose          string
 }
 
 // SearchMemories calls backend FTS endpoint GET /v1/memory/search
@@ -957,6 +959,9 @@ func (c *Client) SearchMemories(query string, opts SearchMemoriesOptions) (*Sear
 		params.Add("enable_entities", "false")
 		params.Add("entity_hops", "0")
 	}
+	if opts.Purpose != "" {
+		params.Add("purpose", opts.Purpose)
+	}
 
 	endpoint := "/memory/search?" + params.Encode()
 	respBody, err := c.makeRequest("GET", endpoint, nil)
@@ -967,6 +972,106 @@ func (c *Client) SearchMemories(query string, opts SearchMemoriesOptions) (*Sear
 	var response SearchMemoryResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal search response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// SurfaceContextOptions represents options for the surface context API call
+type SurfaceContextOptions struct {
+	FilePaths    []string
+	Domains      []string
+	CodePatterns []string
+	ProjectID    string
+	Purpose      string
+	Limit        int
+}
+
+// SurfaceContextResponse represents the response from POST /v1/memory/surface-context
+type SurfaceContextResponse struct {
+	Memories    []MemorySearchResult   `json:"memories"`
+	Decisions   []DecisionSearchResult `json:"decisions,omitempty"`
+	Total       int                    `json:"total"`
+	QueryTimeMs int64                  `json:"query_time_ms"`
+	SignalsUsed []string               `json:"signals_used"`
+}
+
+// SurfaceContext calls backend POST /v1/memory/surface-context
+func (c *Client) SurfaceContext(opts SurfaceContextOptions) (*SurfaceContextResponse, error) {
+	body := map[string]interface{}{}
+
+	if len(opts.FilePaths) > 0 {
+		body["file_paths"] = opts.FilePaths
+	}
+	if len(opts.Domains) > 0 {
+		body["domains"] = opts.Domains
+	}
+	if len(opts.CodePatterns) > 0 {
+		body["code_patterns"] = opts.CodePatterns
+	}
+	if opts.ProjectID != "" {
+		body["project_id"] = opts.ProjectID
+	}
+	if opts.Purpose != "" {
+		body["purpose"] = opts.Purpose
+	}
+	if opts.Limit > 0 {
+		body["limit"] = opts.Limit
+	}
+
+	respBody, err := c.makeRequest("POST", "/memory/surface-context", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response SurfaceContextResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal surface context response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// CheckViolationsOptions represents options for the check violations API call
+type CheckViolationsOptions struct {
+	Code      string
+	Language  string
+	ProjectID string
+}
+
+// CheckViolationsResponse represents the response from POST /v1/memory/check-violations
+type CheckViolationsResponse struct {
+	Violations []struct {
+		Memory     *MemorySearchResult   `json:"memory,omitempty"`
+		Decision   *DecisionSearchResult `json:"decision,omitempty"`
+		Pattern    string                `json:"pattern_detected"`
+		Violation  string                `json:"violation_summary"`
+		Confidence float64               `json:"confidence"`
+	} `json:"violations"`
+	Total       int   `json:"total"`
+	QueryTimeMs int64 `json:"query_time_ms"`
+}
+
+// CheckViolations calls backend POST /v1/memory/check-violations
+func (c *Client) CheckViolations(opts CheckViolationsOptions) (*CheckViolationsResponse, error) {
+	body := map[string]interface{}{
+		"code": opts.Code,
+	}
+	if opts.Language != "" {
+		body["language"] = opts.Language
+	}
+	if opts.ProjectID != "" {
+		body["project_id"] = opts.ProjectID
+	}
+
+	respBody, err := c.makeRequest("POST", "/memory/check-violations", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response CheckViolationsResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal check violations response: %w", err)
 	}
 
 	return &response, nil

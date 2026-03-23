@@ -4,7 +4,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerToolsV4 registers 15 simplified MCP tools (down from 49)
+// registerToolsV4 registers 16 simplified MCP tools (down from 49)
 // This is the v4 tool set optimized for agent compliance
 func registerToolsV4(server *mcp.Server) {
 	// ============================================================================
@@ -70,7 +70,7 @@ Example: remember(content: "API uses JWT authentication", project: "my-project")
 REQUIRED: term
 Returns ranked results from both memories and decisions.
 
-Optional: project, tag, type, min_score, limit, include_decisions (default: true)
+Optional: project, tag, type, purpose (coding/research/review), min_score, limit, include_decisions (default: true)
 
 Uses backend PostgreSQL full-text search with ts_rank scoring.
 Project filters are applied server-side. Entity expansion is opt-in via entity_hops > 0.
@@ -221,11 +221,36 @@ With clear=true = clear focus`,
 		},
 	}, handleGetAgentActivity)
 
+	// 12. surface_context - Proactive context surfacing (NEW)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "surface_context",
+		Description: `🟡 COMMON | Proactively surface relevant decisions and memories based on your current work context.
+
+CALL THIS before writing code to see relevant decisions, bug fixes, and patterns.
+
+REQUIRED: At least one of:
+- file_paths: Array of file paths being edited (e.g., ["src/store/api/userApi.ts"])
+- domains: Array of domains/modules (e.g., ["admin", "auth", "api"])
+- code_patterns: Array of code patterns about to be used (e.g., ["fetch(", "useEffect"])
+
+OPTIONAL:
+- project: Project name or ID
+- purpose: "coding" (default), "research", "review"
+- limit: Max results (default 10)
+
+Returns decisions, bug fixes, and patterns relevant to your current work.`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Surface Context",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleSurfaceContext)
+
 	// ============================================================================
 	// 🟢 ADVANCED (4 tools) - Explicit Need
 	// ============================================================================
 
-	// 12. create_project - Create new project (KEEP)
+	// 13. create_project - Create new project (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "create_project",
 		Description: `🟢 ADVANCED | Create a new project.
@@ -241,7 +266,7 @@ Example: create_project(name: "my-project", description: "My awesome project")`,
 		},
 	}, handleCreateProject)
 
-	// 13. subtask - Unified subtask and dependency management (KEEP - uses existing merged handlers)
+	// 14. subtask - Unified subtask and dependency management (KEEP - uses existing merged handlers)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "manage_subtasks",
 		Description: `🟢 ADVANCED | CRUD for subtasks.
@@ -255,7 +280,7 @@ For complete/update: subtask_id required`,
 		},
 	}, handleManageSubtasks)
 
-	// 14. entity - Unified knowledge graph operations (NEW - replaces 10+ tools)
+	// 15. entity - Unified knowledge graph operations (NEW - replaces 10+ tools)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "entity",
 		Description: `🟢 ADVANCED | Knowledge graph entity operations.
@@ -283,7 +308,7 @@ Examples:
 		},
 	}, handleUnifiedEntity)
 
-	// 15. admin - Unified administrative operations (NEW - replaces maintenance tools)
+	// 16. admin - Unified administrative operations (NEW - replaces maintenance tools)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "admin",
 		Description: `🟢 ADVANCED | Administrative and maintenance operations.

@@ -1819,6 +1819,7 @@ type RecallInput struct {
 	Limit            float64 `json:"limit,omitempty"`
 	MinScore         float64 `json:"min_score,omitempty"`
 	Cursor           string  `json:"cursor,omitempty"` // Pagination cursor
+	Purpose          string  `json:"purpose,omitempty"` // coding, research, review
 
 	// Knowledge graph integration
 	EntityHops float64 `json:"entity_hops,omitempty"` // 0-3: Include memories from related entities via knowledge graph
@@ -1883,6 +1884,7 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		EntityHops:       entityHops,
 		MinConfidence:    0.60,
 		MinScore:         minScore,
+		Purpose:          input.Purpose,
 	})
 	if err == nil && searchResp != nil {
 		// Backend search succeeded — format results
@@ -4073,4 +4075,91 @@ func handleExtractEntities(ctx context.Context, req *mcp.CallToolRequest, input 
 	result["_message"] = fmt.Sprintf("🔍 Extracted %d entities and %d relationships (preview only, not saved)", entityCount, relCount)
 
 	return mustTextResult(result), nil, nil
+}
+
+// SurfaceContextInput represents the input for the surface_context MCP tool
+type SurfaceContextInput struct {
+	FilePaths    []string `json:"file_paths,omitempty"`
+	Domains      []string `json:"domains,omitempty"`
+	CodePatterns []string `json:"code_patterns,omitempty"`
+	Project      string   `json:"project,omitempty"`
+	Purpose      string   `json:"purpose,omitempty"`
+	Limit        float64  `json:"limit,omitempty"`
+}
+
+func handleSurfaceContext(ctx context.Context, req *mcp.CallToolRequest, input SurfaceContextInput) (*mcp.CallToolResult, any, error) {
+	if len(input.FilePaths) == 0 && len(input.Domains) == 0 && len(input.CodePatterns) == 0 {
+		return nil, nil, errors.New("at least one of file_paths, domains, or code_patterns is required")
+	}
+
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err == nil {
+			projectID = pid
+		}
+	}
+
+	limit := int(input.Limit)
+	if limit <= 0 {
+		limit = 10
+	}
+
+	resp, err := apiClient.SurfaceContext(api.SurfaceContextOptions{
+		FilePaths:    input.FilePaths,
+		Domains:      input.Domains,
+		CodePatterns: input.CodePatterns,
+		ProjectID:    projectID,
+		Purpose:      input.Purpose,
+		Limit:        limit,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to surface context: %w", err)
+	}
+
+	var memories []interface{}
+	for _, m := range resp.Memories {
+		entry := map[string]interface{}{
+			"id":      m.ID,
+			"title":   m.Title,
+			"content": m.Content,
+			"score":   m.Score,
+		}
+		if m.Type != "" {
+			entry["type"] = m.Type
+		}
+		if m.Tags != nil && len(m.Tags) > 0 {
+			entry["tags"] = m.Tags
+		}
+		if m.CreatedAt != "" {
+			entry["created_at"] = m.CreatedAt
+		}
+		memories = append(memories, entry)
+	}
+
+	var decisions []interface{}
+	for _, d := range resp.Decisions {
+		decisions = append(decisions, map[string]interface{}{
+			"id":          d.ID,
+			"adr_number":  d.ADRNumber,
+			"title":       d.Title,
+			"description": d.Description,
+			"status":      d.Status,
+			"area":        d.Area,
+			"score":       d.Score,
+			"created_at":  d.CreatedAt,
+		})
+	}
+
+	response := map[string]interface{}{
+		"total":         resp.Total,
+		"query_time_ms": resp.QueryTimeMs,
+		"signals_used":  resp.SignalsUsed,
+		"memories":      memories,
+	}
+	if len(decisions) > 0 {
+		response["decisions"] = decisions
+	}
+
+	return mustTextResult(response), nil, nil
 }
