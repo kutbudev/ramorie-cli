@@ -218,7 +218,9 @@ func handleTaskCreate(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToo
 		}
 	}
 
-	task, err := apiClient.CreateTaskWithMeta(projectID, description, "", priority, meta)
+	// Split description into title (first sentence/line) and body
+	title, body := splitTitleDescription(description)
+	task, err := apiClient.CreateTaskWithMeta(projectID, title, body, priority, meta)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1741,4 +1743,36 @@ func sortTasksByPriority(tasks []models.Task) {
 			}
 		}
 	}
+}
+
+// splitTitleDescription splits agent input into a short title and description body.
+// First sentence (up to first ". " or newline, max 120 chars) becomes the title.
+// The rest becomes the description.
+func splitTitleDescription(input string) (title, description string) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", ""
+	}
+
+	// If short enough, it's all title
+	if len(input) <= 120 && !strings.Contains(input, "\n") {
+		return input, ""
+	}
+
+	// Try newline split first
+	if idx := strings.Index(input, "\n"); idx > 0 && idx <= 120 {
+		return strings.TrimSpace(input[:idx]), strings.TrimSpace(input[idx+1:])
+	}
+
+	// Try sentence boundary (". ")
+	if idx := strings.Index(input, ". "); idx > 0 && idx <= 120 {
+		return strings.TrimSpace(input[:idx+1]), strings.TrimSpace(input[idx+2:])
+	}
+
+	// Hard cut at 120 chars on word boundary
+	cutPoint := 120
+	if spaceIdx := strings.LastIndex(input[:cutPoint], " "); spaceIdx > 40 {
+		cutPoint = spaceIdx
+	}
+	return strings.TrimSpace(input[:cutPoint]), strings.TrimSpace(input[cutPoint:])
 }

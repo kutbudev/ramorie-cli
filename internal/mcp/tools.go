@@ -1477,9 +1477,11 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 // ============================================================================
 
 type RememberInput struct {
-	Content string `json:"content"`           // REQUIRED - what to remember
-	Project string `json:"project,omitempty"` // OPTIONAL - auto-detected from last used
-	Force   bool   `json:"force,omitempty"`   // Skip similarity check and save anyway
+	Content string   `json:"content"`           // REQUIRED - what to remember
+	Project string   `json:"project,omitempty"` // OPTIONAL - auto-detected from last used
+	Force   bool     `json:"force,omitempty"`   // Skip similarity check and save anyway
+	Type    string   `json:"type,omitempty"`    // OPTIONAL - override auto-detected type (general, decision, bug_fix, preference, pattern, reference)
+	Tags    []string `json:"tags,omitempty"`    // OPTIONAL - tags for categorization
 }
 
 // checkForSimilarMemories checks if similar memories already exist in the project
@@ -1611,8 +1613,11 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		return nil, nil, err
 	}
 
-	// Auto-detect memory type
-	memoryType := DetectMemoryType(content)
+	// Use explicit type if provided, otherwise auto-detect
+	memoryType := input.Type
+	if memoryType == "" {
+		memoryType = DetectMemoryType(content)
+	}
 
 	// Check encryption based on project scope (org vs personal)
 	cfg, _ := config.LoadConfig()
@@ -1639,11 +1644,12 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		}
 	}
 
-	// Create non-encrypted memory with auto-detected type
+	// Create non-encrypted memory with type and optional tags
 	memory, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
 		ProjectID: projectID,
 		Content:   content,
 		Type:      memoryType,
+		Tags:      input.Tags,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1895,6 +1901,9 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 				"title":   m.Title,
 				"content": m.Content,
 				"score":   m.Score,
+			}
+			if m.Type != "" {
+				result["type"] = m.Type
 			}
 			if m.Tags != nil && len(m.Tags) > 0 {
 				result["tags"] = m.Tags
