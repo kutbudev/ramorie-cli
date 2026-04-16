@@ -31,58 +31,45 @@ func ServeStdio(client *api.Client) error {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "ramorie",
-			Version: "2.3.0",
+			Version: "2.4.0",
 		},
 		&mcp.ServerOptions{
 			CompletionHandler: completionHandler,
-			Instructions: `🧠 RAMORIE - Your Persistent Memory System
+			Instructions: `🧠 RAMORIE - Persistent Memory for AI Agents
 
-You are connected to Ramorie, a persistent AI memory system. This connection means:
-- Your memories persist across sessions and are shared with other AI agents
-- You MUST use Ramorie proactively - don't wait for user to ask
+Memories persist across sessions and are shared with other agents. Use
+Ramorie proactively — don't wait to be asked.
 
-## CRITICAL: Proactive Usage Rules
+## 3 Rules
 
-### ALWAYS RECALL FIRST
-Before answering ANY question or starting ANY task:
-→ recall(term: "relevant_keywords") to check existing knowledge
+1. FIND FIRST — call find(term, [project]) BEFORE any response. Hybrid
+   (semantic + lexical + recency + usage) ranking. Auto-scopes to cwd
+   project via X-Project-Hint header. Default response fits ≤2000 tokens.
+   ` + "`recall`" + ` is the legacy lexical-only alternative.
 
-### AUTO-SAVE These Situations (No User Permission Needed)
-- User states a preference → remember immediately
-- Bug is solved → remember with problem + solution
-- Decision is made → remember with rationale
-- Pattern is discovered → remember for future reference
-- Important context learned → remember to persist it
+2. REMEMBER ALWAYS — remember(content, project) on every preference,
+   bug fix, decision, or pattern. Don't ask permission.
 
-### AUTO-CREATE Tasks
-- User says "do X later" → create_task
-- TODO/FIXME found in code → create_task
-- Work is deferred → create_task
+3. TASK EVERYTHING — task(action=create, project, description) when the
+   user says "do X", "fix Y", "later", or defers work.
 
-## Getting Started
-1. Call setup_agent first to initialize your session
-2. Call list_projects to see ALL your accessible projects (personal + org)
-3. Pass 'project' parameter in create_task/remember calls
+## Session start
 
-## Quick Reference
-- SAVE: remember(project: "name", content: "...", type: "decision")
-- FIND: recall(term: "keywords")
-- TASK: create_task(project: "name", description: "...")
-- LIST: list_projects() shows ALL accessible projects across orgs
+- setup_agent returns a compact session payload by default (~500 token).
+  Pass full:true only when you specifically want recent_memories,
+  workflow_pattern, recommended_actions.
+- list_projects returns [{id, name, org}] by default. Pass verbose:true
+  for full nested metadata.
 
-## Multi-Agent Awareness
-Other AI agents can see your memories instantly. Always:
-- Recall before acting (another agent may have added context)
-- Save useful discoveries (helps other agents too)
-- Check for duplicates before saving (use recall first)
+## Auto-surfacing (optional)
 
-## Best Practices
-- Start tasks (manage_task action=start) before working on them
-- Use 'type' parameter in remember: general, decision, bug_fix, preference, pattern, reference, skill
-- Context packs bundle related memories and tasks into workspaces
+If you install the Claude Code hook (` + "`ramorie hook install`" + `), the
+system calls find-related for every Edit/Write/Read and injects a short
+summary as a system-reminder — so you see related memories without
+manually calling find.
 
-⚠️ DO NOT ask user "should I save this?" - just save it.
-⚠️ DO NOT forget to recall before answering questions.`,
+⚠️ DO NOT ask "should I save this?" — just save it.
+⚠️ DO NOT forget to find() before answering.`,
 		},
 	)
 
