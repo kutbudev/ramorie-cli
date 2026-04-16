@@ -3149,6 +3149,64 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 }
 
 // ============================================================================
+// Find (hybrid search) — v4 preferred alternative to `recall`
+// ============================================================================
+
+type FindInput struct {
+	Term             string   `json:"term"`
+	Project          string   `json:"project,omitempty"`
+	Types            []string `json:"types,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	Limit            int      `json:"limit,omitempty"`
+	BudgetTokens     int      `json:"budget_tokens,omitempty"`
+	MinScore         float64  `json:"min_score,omitempty"`
+	IncludeDecisions *bool    `json:"include_decisions,omitempty"`
+	Purpose          string   `json:"purpose,omitempty"`
+}
+
+// handleFind wraps the backend POST /v1/memory/find hybrid search endpoint.
+// When Project isn't set, we pass a cwd-derived X-Project-Hint so the backend
+// can auto-scope — avoids the agent having to remember projects every call.
+func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) (*mcp.CallToolResult, any, error) {
+	term := strings.TrimSpace(input.Term)
+	if term == "" {
+		return nil, nil, errors.New("term is required")
+	}
+
+	projectHint := ""
+	if input.Project == "" {
+		if detected, _, _ := detectCwdProject(apiClient); detected != nil {
+			projectHint = detected.Name
+		}
+	}
+
+	includeDecisions := true
+	if input.IncludeDecisions != nil {
+		includeDecisions = *input.IncludeDecisions
+	}
+
+	opts := api.FindMemoriesOptions{
+		Term:             term,
+		Project:          strings.TrimSpace(input.Project),
+		ProjectHint:      projectHint,
+		Types:            input.Types,
+		Tags:             input.Tags,
+		Limit:            input.Limit,
+		BudgetTokens:     input.BudgetTokens,
+		MinScore:         input.MinScore,
+		IncludeDecisions: includeDecisions,
+		Purpose:          strings.TrimSpace(input.Purpose),
+	}
+
+	resp, err := apiClient.FindMemories(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return mustTextResult(resp), nil, nil
+}
+
+// ============================================================================
 // Agent Activity Timeline Handlers
 // ============================================================================
 

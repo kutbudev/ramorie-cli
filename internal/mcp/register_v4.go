@@ -75,23 +75,49 @@ Example: remember(content: "API uses JWT authentication", project: "my-project")
 		},
 	}, handleRemember)
 
-	// 4. recall - Search memories AND decisions (KEEP)
+	// 4. find - Hybrid search (semantic + lexical) — preferred in v4.
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "find",
+		Description: `🔴 ESSENTIAL | Hybrid memory + decision search (semantic + lexical + recency + usage).
+
+REQUIRED: term
+
+OPTIONAL:
+- project (name or UUID) — explicit scope. If omitted, cwd-derived X-Project-Hint auto-scopes.
+- types ([]string) — filter by memory.type (general|decision|bug_fix|preference|pattern|reference|skill)
+- tags ([]string) — filter by tag intersection
+- limit (int, default 5, max 50)
+- budget_tokens (int, default 2000) — server trims response to fit
+- min_score (float, default 0.0)
+- include_decisions (bool, default true)
+- purpose (coding|research|review) — small type-based boost
+
+Returns compact items with {id, type, title, preview, score, breakdown, access_count, project}.
+Falls back to lexical-only when embeddings aren't available.
+
+Prefer over recall() — recall is kept for backwards compatibility.
+
+Example: find(term: "RTK query pattern", limit: 3)`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Find",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleFind)
+
+	// 4b. recall - legacy keyword search (KEEP for backwards compat).
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "recall",
-		Description: `🔴 ESSENTIAL | Search memories AND architectural decisions using full-text search with relevance scoring.
+		Description: `🟡 LEGACY | Search memories AND architectural decisions using full-text search only.
+
+Prefer find() — recall is kept for existing agents and will be removed in v5.0.
 
 REQUIRED: term
 Returns ranked results from both memories and decisions.
 
-Optional: project, tag, type, purpose (coding/research/review), min_score, limit, include_decisions (default: true)
-
-Uses backend PostgreSQL full-text search with ts_rank scoring.
-Project filters are applied server-side. Entity expansion is opt-in via entity_hops > 0.
-Falls back to client-side search if backend unavailable.
-
-Example: recall(term: "authentication") - finds auth-related memories and decisions`,
+Optional: project, tag, type, purpose (coding/research/review), min_score, limit, include_decisions (default: true)`,
 		Annotations: &mcp.ToolAnnotations{
-			Title:         "Recall",
+			Title:         "Recall (legacy)",
 			ReadOnlyHint:  true,
 			OpenWorldHint: boolPtr(false),
 		},

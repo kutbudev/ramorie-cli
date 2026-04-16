@@ -997,6 +997,155 @@ type SurfaceContextResponse struct {
 }
 
 // SurfaceContext calls backend POST /v1/memory/surface-context
+// FindMemoriesOptions is the CLI-side input to the new hybrid search endpoint.
+// ProjectHint is passed as X-Project-Hint header so the backend can auto-scope
+// when the agent didn't specify a project explicitly.
+type FindMemoriesOptions struct {
+	Term             string
+	Project          string   // Name or UUID — body field
+	ProjectHint      string   // cwd-derived fallback — header X-Project-Hint
+	Types            []string
+	Tags             []string
+	Limit            int
+	BudgetTokens     int
+	MinScore         float64
+	IncludeDecisions bool
+	Purpose          string
+}
+
+// FindResponse mirrors memoryretrieve.FindResponse on the backend.
+type FindResponse struct {
+	Items []FindItem `json:"items"`
+	Meta  FindMeta   `json:"_meta"`
+}
+
+type FindItem struct {
+	ID             string             `json:"id"`
+	Type           string             `json:"type"`
+	Kind           string             `json:"kind,omitempty"`
+	Title          string             `json:"title"`
+	Preview        string             `json:"preview"`
+	Score          float64            `json:"score"`
+	Breakdown      map[string]float64 `json:"breakdown,omitempty"`
+	AccessCount    int                `json:"access_count,omitempty"`
+	LastAccessedAt *time.Time         `json:"last_accessed_at,omitempty"`
+	Project        string             `json:"project,omitempty"`
+	ProjectID      *string            `json:"project_id,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+}
+
+type FindMeta struct {
+	Total        int    `json:"total"`
+	Returned     int    `json:"returned"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	TokensEst    int    `json:"actual_tokens_est"`
+	AppliedScope string `json:"applied_scope"`
+	RankingMode  string `json:"ranking_mode"`
+	Truncated    bool   `json:"truncated,omitempty"`
+	LatencyMs    int64  `json:"latency_ms"`
+}
+
+// FindMemories calls POST /v1/memory/find. Pass ProjectHint to let the backend
+// auto-scope when no explicit project is set in the body.
+func (c *Client) FindMemories(opts FindMemoriesOptions) (*FindResponse, error) {
+	body := map[string]interface{}{
+		"term": opts.Term,
+	}
+	if opts.Project != "" {
+		body["project"] = opts.Project
+	}
+	if len(opts.Types) > 0 {
+		body["types"] = opts.Types
+	}
+	if len(opts.Tags) > 0 {
+		body["tags"] = opts.Tags
+	}
+	if opts.Limit > 0 {
+		body["limit"] = opts.Limit
+	}
+	if opts.BudgetTokens > 0 {
+		body["budget_tokens"] = opts.BudgetTokens
+	}
+	if opts.MinScore > 0 {
+		body["min_score"] = opts.MinScore
+	}
+	if opts.IncludeDecisions {
+		body["include_decisions"] = true
+	}
+	if opts.Purpose != "" {
+		body["purpose"] = opts.Purpose
+	}
+
+	extraHeaders := map[string]string{}
+	if opts.ProjectHint != "" {
+		extraHeaders["X-Project-Hint"] = opts.ProjectHint
+	}
+
+	respBody, err := c.makeRequestWithHeaders("POST", "/memory/find", body, extraHeaders)
+	if err != nil {
+		return nil, err
+	}
+	var resp FindResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal find response: %w", err)
+	}
+	return &resp, nil
+}
+
+// makeRequestWithHeaders is makeRequest + custom headers. Kept separate so
+// existing call sites aren't touched.
+func (c *Client) makeRequestWithHeaders(method, endpoint string, body interface{}, headers map[string]string) ([]byte, error) {
+	url := c.BaseURL + endpoint
+
+	var reqBody io.Reader
+	if body != nil {
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal body: %w", err)
+		}
+		reqBody = bytes.NewBuffer(jsonBody)
+	}
+
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+	if c.AgentName != "" {
+		req.Header.Set("X-Created-Via", "mcp")
+		req.Header.Set("X-Agent-Name", c.AgentName)
+	}
+	if c.AgentModel != "" {
+		req.Header.Set("X-Agent-Model", c.AgentModel)
+	}
+	if c.AgentSessionID != "" {
+		req.Header.Set("X-Agent-Session-ID", c.AgentSessionID)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+	return respBody, nil
+}
+
 func (c *Client) SurfaceContext(opts SurfaceContextOptions) (*SurfaceContextResponse, error) {
 	body := map[string]interface{}{}
 
