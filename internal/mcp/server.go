@@ -31,7 +31,7 @@ func ServeStdio(client *api.Client) error {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "ramorie",
-			Version: "2.2.0",
+			Version: "2.3.0",
 		},
 		&mcp.ServerOptions{
 			CompletionHandler: completionHandler,

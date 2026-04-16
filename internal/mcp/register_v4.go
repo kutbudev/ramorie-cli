@@ -13,8 +13,17 @@ func registerToolsV4(server *mcp.Server) {
 
 	// 1. setup_agent - Initialize session (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "setup_agent",
-		Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking. Returns current context, pending tasks, recommended actions, agent_directives, and system info.",
+		Name: "setup_agent",
+		Description: `🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST!
+
+Returns a compact session context (~500 token): session info, detected project from cwd, task stats, projects count, and a next_action nudge.
+
+OPTIONAL:
+- agent_name (string) — tracking label
+- agent_model (string) — model identifier
+- full (bool) — return verbose legacy payload with context_injection, recommended_actions, workflow_pattern. Default false.
+
+Directives live in the MCP server instructions block — not duplicated in this response.`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Initialize Agent Session",
 			DestructiveHint: boolPtr(false),
@@ -25,9 +34,13 @@ func registerToolsV4(server *mcp.Server) {
 
 	// 2. list_projects - List accessible projects (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_projects",
-		Description: "🔴 ESSENTIAL | List ALL accessible projects (personal + all organizations you're a member of). No org switch required.",
-		InputSchema: emptyObjectSchema(),
+		Name: "list_projects",
+		Description: `🔴 ESSENTIAL | List ALL accessible projects (personal + organization-scoped).
+
+Returns a compact shape: [{id, name, org?}].
+
+OPTIONAL:
+- verbose (bool) — include full nested organization metadata, timestamps, description. Default false.`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "List Projects",
 			ReadOnlyHint:  true,

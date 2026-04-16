@@ -876,6 +876,43 @@ type EmptyInput struct{}
 type SetupAgentInput struct {
 	AgentName  string `json:"agent_name,omitempty"`
 	AgentModel string `json:"agent_model,omitempty"`
+	Full       bool   `json:"full,omitempty"` // Verbose legacy response; default is compact (~500 token)
+}
+
+type ListProjectsInput struct {
+	Verbose bool `json:"verbose,omitempty"` // Include full nested org metadata; default is compact
+}
+
+// detectCwdProject scans cwd path segments against project names, returns the first match.
+// Also sets session last-project on match.
+func detectCwdProject(client *api.Client) (*models.Project, string, error) {
+	cwd, err := os.Getwd()
+	if err != nil || cwd == "" {
+		return nil, "", err
+	}
+	projects, err := client.ListProjects("")
+	if err != nil {
+		return nil, cwd, err
+	}
+	pathSegments := strings.Split(strings.ToLower(cwd), "/")
+	for i := range projects {
+		p := &projects[i]
+		projectNorm := normalizeForMatch(p.Name)
+		if len(projectNorm) < 4 {
+			continue
+		}
+		for _, segment := range pathSegments {
+			if segment == "" {
+				continue
+			}
+			segmentNorm := normalizeForMatch(segment)
+			if segmentNorm == projectNorm || strings.HasPrefix(segmentNorm, projectNorm) {
+				SetSessionLastProject(p.ID)
+				return p, cwd, nil
+			}
+		}
+	}
+	return nil, cwd, nil
 }
 
 func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input SetupAgentInput) (*mcp.CallToolResult, any, error) {
@@ -886,147 +923,122 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	}
 	agentModel := strings.TrimSpace(input.AgentModel)
 
-	// Initialize the session
 	session := InitializeSession(agentName, agentModel)
 
 	// Set agent info on API client so ALL subsequent requests include agent headers
-	// This enables proper event tracking in the backend timeline
 	apiClient.SetAgentInfo(session.AgentName, session.AgentModel, session.ID)
 
-	result, err := setupAgent(apiClient)
+	// CWD-based project detection runs first so setupAgent can scope queries.
+	detected, cwd, _ := detectCwdProject(apiClient)
+	detectedProjectID := ""
+	if detected != nil {
+		detectedProjectID = detected.ID.String()
+	}
+
+	result, err := setupAgent(apiClient, detectedProjectID, input.Full)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Add session info to result
 	result["session"] = map[string]interface{}{
 		"id":          session.ID,
 		"agent_name":  session.AgentName,
 		"agent_model": session.AgentModel,
-		"initialized": session.Initialized,
 	}
 
-	// Add recommended_actions for structured next steps
+	if detected != nil {
+		result["detected_project"] = map[string]interface{}{
+			"id":     detected.ID.String(),
+			"name":   detected.Name,
+			"source": "cwd",
+			"hint":   fmt.Sprintf("Detected from %s", cwd),
+		}
+	}
+
+	if !input.Full {
+		// Compact mode: one next-action nudge, nothing else. Directives live in the
+		// MCP server instructions block (server.go) — no duplication here.
+		next := "Call recall(term, project) before responding; then remember(content, project) after learning something."
+		if detected != nil {
+			next = fmt.Sprintf("Use project=%q. Call recall(term, project) before responding; remember(content, project) after learning.", detected.Name)
+		}
+		result["next_action"] = next
+		return mustTextResult(result), nil, nil
+	}
+
+	// Legacy verbose mode: full guidance payload (kept for agents that explicitly opt in).
 	result["recommended_actions"] = []map[string]interface{}{
-		{
-			"priority": 1,
-			"action":   "list_projects",
-			"reason":   "Understand available projects before creating tasks/memories",
-		},
-		{
-			"priority": 2,
-			"action":   "recall",
-			"reason":   "ALWAYS recall relevant context before starting work",
-			"example":  "recall(term=\"<topic>\", project=\"<project>\")",
-		},
-		{
-			"priority": 3,
-			"action":   "work",
-			"reason":   "Perform your work using the recalled context",
-		},
-		{
-			"priority": 4,
-			"action":   "remember/create_task",
-			"reason":   "Save learnings or create follow-up tasks",
-			"example":  "remember(content=\"...\", project=\"<project>\")",
-		},
+		{"priority": 1, "action": "list_projects", "reason": "See available projects"},
+		{"priority": 2, "action": "recall", "reason": "Check prior context", "example": "recall(term=\"<topic>\", project=\"<project>\")"},
+		{"priority": 3, "action": "work", "reason": "Do the task using recalled context"},
+		{"priority": 4, "action": "remember/task", "reason": "Persist learnings", "example": "remember(content=\"...\", project=\"<project>\")"},
 	}
-
-	// Add workflow pattern for clear guidance
 	result["workflow_pattern"] = map[string]interface{}{
 		"1_setup":   "setup_agent (DONE)",
-		"2_context": "list_projects - see available projects",
-		"3_recall":  "recall(term) - BEFORE acting on any topic",
-		"4_work":    "Perform your work",
-		"5_save":    "remember/create_task - save learnings",
-		"critical":  "⚠️ ALWAYS recall BEFORE remember to avoid duplicates",
+		"2_context": "list_projects",
+		"3_recall":  "recall(term) BEFORE acting",
+		"4_work":    "do the work",
+		"5_save":    "remember/task",
+		"critical":  "Always recall BEFORE remember to avoid duplicates",
 	}
-
-	// Add last used project if available
 	if lastProject := GetSessionLastProjectID(); lastProject != nil {
-		// Try to get project name from cached projects
-		projects, err := apiClient.ListProjects("")
-		if err == nil {
+		if projects, lerr := apiClient.ListProjects(""); lerr == nil {
 			for _, p := range projects {
 				if p.ID == *lastProject {
 					result["last_used_project"] = map[string]interface{}{
 						"id":   lastProject.String(),
 						"name": p.Name,
-						"hint": "Previously used project - can be used as default",
 					}
 					break
 				}
 			}
 		}
 	}
-
-	// CWD-based project detection
-	if cwd, cwdErr := os.Getwd(); cwdErr == nil && cwd != "" {
-		projects, projErr := apiClient.ListProjects("")
-		if projErr == nil {
-			pathSegments := strings.Split(strings.ToLower(cwd), "/")
-			for _, p := range projects {
-				projectNorm := normalizeForMatch(p.Name)
-				if len(projectNorm) < 4 {
-					continue
-				}
-				for _, segment := range pathSegments {
-					if segment == "" {
-						continue
-					}
-					segmentNorm := normalizeForMatch(segment)
-					if segmentNorm == projectNorm || (len(projectNorm) >= 4 && strings.HasPrefix(segmentNorm, projectNorm)) {
-						result["detected_project"] = map[string]interface{}{
-							"id":     p.ID.String(),
-							"name":   p.Name,
-							"source": "cwd",
-							"hint":   fmt.Sprintf("Detected from working directory: %s", cwd),
-						}
-						// Set as session default for subsequent calls
-						SetSessionLastProject(p.ID)
-						break
-					}
-				}
-				if _, found := result["detected_project"]; found {
-					break
-				}
-			}
-		}
-	}
-
-	// Add clear next steps for workflow enforcement
 	result["workflow_guide"] = map[string]interface{}{
-		"step_1": "✅ setup_agent called - session initialized",
-		"step_2": "📋 Call list_projects to see available projects",
-		"step_3": "🔍 ALWAYS call recall(term) BEFORE remember() to check for existing knowledge",
-		"step_4": "📝 Use remember(content) or create_task(project, description)",
-		"note":   "Always pass the 'project' parameter explicitly when creating tasks or memories",
+		"step_1": "setup_agent called",
+		"step_2": "list_projects",
+		"step_3": "recall(term) BEFORE remember()",
+		"step_4": "remember(content) or task(create, project, description)",
 	}
-
-	// Add agent directives for proactive behavior
-	result["agent_directives"] = GetDirectivesAsMap()
 
 	return mustTextResult(result), nil, nil
 }
 
-func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input EmptyInput) (*mcp.CallToolResult, any, error) {
-	// Get ALL accessible projects (no org filtering) - enables cross-org project access
+func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input ListProjectsInput) (*mcp.CallToolResult, any, error) {
 	projects, err := apiClient.ListProjects("")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Build response with last_used_project hint
-	response := formatMCPResponse(projects, getContextString())
+	var response map[string]interface{}
+	if input.Verbose {
+		response = formatMCPResponse(projects, getContextString())
+	} else {
+		items := make([]map[string]interface{}, 0, len(projects))
+		for _, p := range projects {
+			item := map[string]interface{}{
+				"id":   p.ID.String(),
+				"name": p.Name,
+			}
+			if p.Organization != nil {
+				item["org"] = p.Organization.Name
+			}
+			items = append(items, item)
+		}
+		response = map[string]interface{}{
+			"items":   items,
+			"count":   len(items),
+			"_hint":   "Pass verbose:true for full metadata (org id, description, timestamps)",
+			"_context": getContextString(),
+		}
+	}
 
-	// Add last_used_project if available
 	if lastProjectID := GetSessionLastProjectID(); lastProjectID != nil {
 		for _, p := range projects {
 			if p.ID == *lastProjectID {
 				response["last_used_project"] = map[string]interface{}{
 					"id":   lastProjectID.String(),
 					"name": p.Name,
-					"hint": "Previously used - specify explicitly if intended",
 				}
 				break
 			}
@@ -2991,16 +3003,43 @@ func normalizePriority(s string) string {
 	}
 }
 
-func setupAgent(client *api.Client) (map[string]interface{}, error) {
+// setupAgent builds the session payload. When `full` is true, context injection
+// (recent_memories, in_progress_tasks, last_session) is included. When a
+// detectedProjectID is provided, those queries are scoped to that project to
+// avoid cross-project noise.
+func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",
-		"message": "🧠 Ramorie agent session initialized",
-		"version": "3.19.0",
+		"version": "3.20.0",
 	}
 
-	// Get current focus (active workspace)
-	focus, err := client.GetFocus()
-	if err == nil && focus != nil && focus.ActivePack != nil {
+	// Compact mode always includes task stats (3 numbers — cheap signal).
+	if statsBytes, err := client.Request("GET", "/reports/stats", nil); err == nil {
+		var stats map[string]interface{}
+		if json.Unmarshal(statsBytes, &stats) == nil {
+			result["stats"] = stats
+		}
+	}
+
+	if projects, err := client.ListProjects(getActiveOrgIDString()); err == nil {
+		result["projects_count"] = len(projects)
+	}
+
+	if activeTask, err := client.GetActiveTask(); err == nil && activeTask != nil {
+		result["active_task"] = map[string]interface{}{
+			"id":     activeTask.ID.String(),
+			"title":  activeTask.Title,
+			"status": activeTask.Status,
+		}
+	}
+
+	if !full {
+		// Compact mode: no focus, no context injection, no recommendations.
+		return result, nil
+	}
+
+	// Full mode: include workspace focus and context injection.
+	if focus, err := client.GetFocus(); err == nil && focus != nil && focus.ActivePack != nil {
 		result["active_focus"] = map[string]interface{}{
 			"pack_id":        focus.ActiveContextPackID,
 			"pack_name":      focus.ActivePack.Name,
@@ -3010,37 +3049,11 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		}
 	}
 
-	// List projects (include org-scoped if active)
-	projects, err := client.ListProjects(getActiveOrgIDString())
-	if err == nil {
-		result["projects_count"] = len(projects)
-	}
-
-	// Get active task
-	activeTask, err := client.GetActiveTask()
-	if err == nil && activeTask != nil {
-		result["active_task"] = map[string]interface{}{
-			"id":     activeTask.ID.String(),
-			"title":  activeTask.Title,
-			"status": activeTask.Status,
-		}
-	}
-
-	// Get stats
-	statsBytes, err := client.Request("GET", "/reports/stats", nil)
-	if err == nil {
-		var stats map[string]interface{}
-		if json.Unmarshal(statsBytes, &stats) == nil {
-			result["stats"] = stats
-		}
-	}
-
-	// Context injection: provide recent memories, in-progress tasks, and last session events
 	contextInjection := map[string]interface{}{}
 
-	// Recent memories (max 5, truncated to 200 chars)
-	if memories, err := client.ListMemories("", ""); err == nil && len(memories) > 0 {
-		limit := 5
+	// Recent memories — scoped to detected project when available. 3 items, 120-char preview.
+	if memories, err := client.ListMemories(detectedProjectID, ""); err == nil && len(memories) > 0 {
+		limit := 3
 		if len(memories) < limit {
 			limit = len(memories)
 		}
@@ -3048,12 +3061,12 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		for i := 0; i < limit; i++ {
 			m := memories[i]
 			content := m.Content
-			if len(content) > 200 {
-				content = content[:200] + "..."
+			if len(content) > 120 {
+				content = content[:120] + "..."
 			}
 			entry := map[string]interface{}{
 				"id":         m.ID.String(),
-				"content":    content,
+				"preview":    content,
 				"created_at": m.CreatedAt.Format("2006-01-02 15:04"),
 			}
 			if m.Project != nil {
@@ -3064,8 +3077,8 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		contextInjection["recent_memories"] = truncated
 	}
 
-	// In-progress tasks (max 3, title + description truncated)
-	if tasks, err := client.ListTasks("", "IN_PROGRESS"); err == nil && len(tasks) > 0 {
+	// In-progress tasks — scoped to detected project. 3 items, 120-char desc.
+	if tasks, err := client.ListTasks(detectedProjectID, "IN_PROGRESS"); err == nil && len(tasks) > 0 {
 		limit := 3
 		if len(tasks) < limit {
 			limit = len(tasks)
@@ -3074,13 +3087,12 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		for i := 0; i < limit; i++ {
 			t := tasks[i]
 			desc := t.Description
-			if len(desc) > 150 {
-				desc = desc[:150] + "..."
+			if len(desc) > 120 {
+				desc = desc[:120] + "..."
 			}
 			entry := map[string]interface{}{
-				"id":     t.ID.String(),
-				"title":  t.Title,
-				"status": t.Status,
+				"id":    t.ID.String(),
+				"title": t.Title,
 			}
 			if desc != "" {
 				entry["description"] = desc
@@ -3093,8 +3105,8 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		contextInjection["in_progress_tasks"] = truncated
 	}
 
-	// Last session events (max 5)
-	if events, err := client.GetAgentEvents(api.AgentEventFilter{Limit: 5}); err == nil && len(events.Events) > 0 {
+	// Last session events — scoped to detected project. 2 items, 80-char preview.
+	if events, err := client.GetAgentEvents(api.AgentEventFilter{ProjectID: detectedProjectID, Limit: 2}); err == nil && len(events.Events) > 0 {
 		sessionEvents := make([]map[string]interface{}, 0, len(events.Events))
 		for _, e := range events.Events {
 			entry := map[string]interface{}{
@@ -3103,14 +3115,11 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 				"created_at":  e.CreatedAt,
 			}
 			if e.EntityTitle != nil {
-				entry["title"] = *e.EntityTitle
-			}
-			if e.EntityPreview != nil {
-				preview := *e.EntityPreview
-				if len(preview) > 100 {
-					preview = preview[:100] + "..."
+				title := *e.EntityTitle
+				if len(title) > 80 {
+					title = title[:80] + "..."
 				}
-				entry["preview"] = preview
+				entry["title"] = title
 			}
 			if e.AgentName != "" {
 				entry["agent"] = e.AgentName
@@ -3124,16 +3133,15 @@ func setupAgent(client *api.Client) (map[string]interface{}, error) {
 		result["context_injection"] = contextInjection
 	}
 
-	// Recommendations
 	recommendations := []string{}
 	if result["active_focus"] == nil {
-		recommendations = append(recommendations, "💡 Set an active focus: manage_focus with pack_id (for workspace context)")
+		recommendations = append(recommendations, "Set an active focus: manage_focus with pack_id")
 	}
 	if result["active_task"] == nil {
-		recommendations = append(recommendations, "💡 Start a task for memory auto-linking: manage_task with action=start")
+		recommendations = append(recommendations, "Start a task for memory auto-linking: task(action=start)")
 	}
 	if len(recommendations) == 0 {
-		recommendations = append(recommendations, "✅ Ready to work! Use list_tasks with next_priority=true to see priorities")
+		recommendations = append(recommendations, "Ready — use task(action=list, project, next_priority=true)")
 	}
 	result["next_steps"] = recommendations
 
