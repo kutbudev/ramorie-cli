@@ -58,6 +58,10 @@ func main() {
 			// Subtasks
 			commands.NewSubtaskCommand(),
 
+			// Claude Code integration
+			commands.NewHookCommand(),
+			commands.NewFindRelatedCommand(),
+
 			// Meta
 			commands.NewOverviewCommand(),
 			commands.NewMcpCommand(),
