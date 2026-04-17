@@ -2,11 +2,10 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/constants"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
@@ -224,7 +223,7 @@ func memoriesCmd() *cli.Command {
 			}
 
 			if len(memories) == 0 {
-				fmt.Println("No memories found.")
+				fmt.Println(display.Dim.Render("  no memories — use `ramorie remember` to add one"))
 				return nil
 			}
 
@@ -233,23 +232,40 @@ func memoriesCmd() *cli.Command {
 				memories = memories[:limit]
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tTAGS\tCONTENT")
-			fmt.Fprintln(w, "--\t----\t-------")
-			for _, m := range memories {
-				tagsStr := "-"
-				tags := getTagsAsStrings(m.Tags)
-				if len(tags) > 0 {
-					tagsStr = strings.Join(tags, ",")
-					if len(tagsStr) > 15 {
-						tagsStr = tagsStr[:12] + "..."
-					}
-				}
-				// CRITICAL: Decrypt memory content before displaying
-				displayContent := decryptMemoryForCLI(&m)
-				fmt.Fprintf(w, "%s\t%s\t%s\n", m.ID.String()[:8], tagsStr, truncateString(displayContent, 55))
+			countPart := fmt.Sprintf("🧠 %d memor", len(memories))
+			if len(memories) == 1 {
+				countPart += "y"
+			} else {
+				countPart += "ies"
 			}
-			w.Flush()
+			fmt.Println(display.Header(countPart, ""))
+			fmt.Println()
+
+			// Budget content width: type badge (12) + short id (8) + age (12) +
+			// tag tail (~20) + spaces ≈ 55 reserved.
+			contentWidth := display.TerminalWidth() - 60
+			if contentWidth < 30 {
+				contentWidth = 30
+			}
+
+			for _, m := range memories {
+				// CRITICAL: Decrypt memory content before displaying
+				content := display.SingleLine(decryptMemoryForCLI(&m))
+				content = display.Truncate(content, contentWidth)
+
+				tagLine := ""
+				if tags := getTagsAsStrings(m.Tags); len(tags) > 0 {
+					tagLine = display.Sep() + display.Tags(tags, 3)
+				}
+
+				fmt.Printf(" %s %s  %s%s%s\n",
+					display.TypeBadge(m.Type),
+					display.Dim.Render(m.ID.String()[:8]),
+					content,
+					display.Sep()+display.Dim.Render(display.Relative(m.UpdatedAt)),
+					tagLine,
+				)
+			}
 			return nil
 		},
 	}
@@ -296,20 +312,36 @@ func recallCmd() *cli.Command {
 			}
 
 			if len(memories) == 0 {
-				fmt.Printf("No memories found matching '%s'.\n", query)
+				fmt.Println(display.Dim.Render(fmt.Sprintf("  no matches for %q", query)))
 				return nil
 			}
 
-			fmt.Printf("Found %d memories matching your query:\n", len(memories))
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tCONTENT")
-			fmt.Fprintln(w, "--\t-------")
-			for _, m := range memories {
-				// CRITICAL: Decrypt memory content before displaying
-				displayContent := decryptMemoryForCLI(&m)
-				fmt.Fprintf(w, "%s\t%s\n", m.ID.String()[:8], truncateString(displayContent, 70))
+			countPart := fmt.Sprintf("🔍 %d match", len(memories))
+			if len(memories) != 1 {
+				countPart += "es"
 			}
-			w.Flush()
+			fmt.Println(display.Header(countPart, fmt.Sprintf("query: %q", query)))
+			fmt.Println()
+
+			contentWidth := display.TerminalWidth() - 60
+			if contentWidth < 30 {
+				contentWidth = 30
+			}
+			for _, m := range memories {
+				content := display.SingleLine(decryptMemoryForCLI(&m))
+				content = display.Truncate(content, contentWidth)
+				tagLine := ""
+				if tags := getTagsAsStrings(m.Tags); len(tags) > 0 {
+					tagLine = display.Sep() + display.Tags(tags, 3)
+				}
+				fmt.Printf(" %s %s  %s%s%s\n",
+					display.TypeBadge(m.Type),
+					display.Dim.Render(m.ID.String()[:8]),
+					content,
+					display.Sep()+display.Dim.Render(display.Relative(m.UpdatedAt)),
+					tagLine,
+				)
+			}
 			return nil
 		},
 	}
@@ -336,10 +368,51 @@ func getCmd() *cli.Command {
 
 			// CRITICAL: Decrypt memory content before displaying
 			displayContent := decryptMemoryForCLI(memory)
-			fmt.Printf("Memory %s:\n%s\n", memory.ID.String()[:8], displayContent)
+
+			// Title — use first non-empty line as a banner
+			title, body := splitFirstLine(displayContent)
+			if title == "" {
+				title = "(empty)"
+			}
+			fmt.Println(display.Title.Render(title))
+
+			// Metadata row
+			meta := []string{display.TypeBadge(memory.Type)}
+			if memory.Project != nil && memory.Project.Name != "" {
+				meta = append(meta, display.Dim.Render(memory.Project.Name))
+			}
+			meta = append(meta, display.Dim.Render("updated "+display.Relative(memory.UpdatedAt)))
+			meta = append(meta, display.Dim.Render(memory.ID.String()[:8]))
+			fmt.Println(strings.Join(meta, display.Sep()))
+
+			// Tags
+			if tags := getTagsAsStrings(memory.Tags); len(tags) > 0 {
+				fmt.Println("  " + display.Tags(tags, 15))
+			}
+
+			// Body
+			if strings.TrimSpace(body) != "" {
+				fmt.Println()
+				fmt.Println(body)
+			}
 			return nil
 		},
 	}
+}
+
+// splitFirstLine returns (headingLine, remainingBody). Strips a leading "# "
+// so a markdown-style heading shows cleanly in the banner.
+func splitFirstLine(s string) (head, rest string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", ""
+	}
+	lines := strings.SplitN(s, "\n", 2)
+	head = strings.TrimLeft(lines[0], "# ")
+	if len(lines) > 1 {
+		rest = strings.TrimSpace(lines[1])
+	}
+	return head, rest
 }
 
 // forgetCmd deletes a memory item.

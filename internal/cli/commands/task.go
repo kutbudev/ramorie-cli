@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/kutbudev/ramorie-cli/internal/models"
@@ -84,7 +85,7 @@ func taskListCmd() *cli.Command {
 			}
 
 			if len(tasks) == 0 {
-				fmt.Println("No tasks found for the given criteria.")
+				fmt.Println(display.Dim.Render("  no tasks match — try `ramorie task list` without filters"))
 				return nil
 			}
 
@@ -93,20 +94,51 @@ func taskListCmd() *cli.Command {
 				tasks = tasks[:limit]
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tPRIORITY")
-			fmt.Fprintln(w, "--\t-----\t------\t--------")
+			// Header: count + scope summary.
+			subtitle := ""
+			if projectArg != "" {
+				subtitle = "project: " + projectArg
+			}
+			if status != "" {
+				if subtitle != "" {
+					subtitle += " · "
+				}
+				subtitle += "status: " + status
+			}
+			countPart := fmt.Sprintf("🗂  %d task", len(tasks))
+			if len(tasks) != 1 {
+				countPart += "s"
+			}
+			fmt.Println(display.Header(countPart, subtitle))
+			fmt.Println()
+
+			// Budget title width to the remaining terminal width after the
+			// fixed-width columns: status icon (2) + priority badge (3) +
+			// short id (8) + spaces (6 × " ") + age tail (~12) ≈ 35.
+			titleWidth := display.TerminalWidth() - 40
+			if titleWidth < 30 {
+				titleWidth = 30
+			}
 
 			for _, t := range tasks {
-				// CRITICAL: Decrypt task fields before displaying
 				decryptedTitle, _ := decryptTaskForCLI(&t)
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-					t.ID.String()[:8],
-					truncateString(decryptedTitle, 40),
-					t.Status,
-					t.Priority)
+				title := display.SingleLine(decryptedTitle)
+				title = display.Truncate(title, titleWidth)
+
+				tagLine := ""
+				if tagList := getTagsAsStrings(t.Tags); len(tagList) > 0 {
+					tagLine = display.Sep() + display.Tags(tagList, 3)
+				}
+
+				fmt.Printf(" %s %s %s  %s%s%s\n",
+					display.StatusIcon(t.Status),
+					display.PriorityBadge(t.Priority),
+					display.Dim.Render(t.ID.String()[:8]),
+					title,
+					display.Sep()+display.Dim.Render(display.Relative(t.UpdatedAt)),
+					tagLine,
+				)
 			}
-			w.Flush()
 			return nil
 		},
 	}
@@ -239,22 +271,45 @@ func taskShowCmd() *cli.Command {
 			// CRITICAL: Decrypt task fields before displaying
 			decryptedTitle, decryptedDesc := decryptTaskForCLI(task)
 
-			fmt.Printf("Task Details: %s\n", decryptedTitle)
-			fmt.Println(strings.Repeat("-", 40))
-			fmt.Printf("ID:          %s\n", task.ID.String())
-			fmt.Printf("Title:       %s\n", decryptedTitle)
-			fmt.Printf("Description: %s\n", decryptedDesc)
-			fmt.Printf("Status:      %s\n", task.Status)
-			fmt.Printf("Priority:    %s\n", task.Priority)
-			fmt.Printf("Project ID:  %s\n", task.ProjectID.String())
-			fmt.Printf("Created At:  %s\n", task.CreatedAt.Format("2006-01-02 15:04:05"))
-			fmt.Printf("Updated At:  %s\n", task.UpdatedAt.Format("2006-01-02 15:04:05"))
+			// Title block
+			fmt.Println(display.Title.Render(decryptedTitle))
 
+			// One-line metadata: status · priority · project · updated
+			meta := []string{
+				display.StatusIcon(task.Status) + " " + display.StatusLabel(task.Status),
+				display.PriorityBadge(task.Priority),
+			}
+			if task.Project != nil && task.Project.Name != "" {
+				meta = append(meta, display.Dim.Render(task.Project.Name))
+			}
+			meta = append(meta, display.Dim.Render("updated "+display.Relative(task.UpdatedAt)))
+			meta = append(meta, display.Dim.Render(task.ID.String()[:8]))
+			fmt.Println(strings.Join(meta, display.Sep()))
+
+			// Description block (indented, blank if empty)
+			if strings.TrimSpace(decryptedDesc) != "" {
+				fmt.Println()
+				for _, line := range strings.Split(decryptedDesc, "\n") {
+					fmt.Println("  " + line)
+				}
+			}
+
+			// Tags
+			if tagList := getTagsAsStrings(task.Tags); len(tagList) > 0 {
+				fmt.Println()
+				fmt.Println("  " + display.Tags(tagList, 10))
+			}
+
+			// Annotations / notes
 			if len(task.Annotations) > 0 {
-				fmt.Println(strings.Repeat("-", 40))
-				fmt.Println("Annotations:")
+				fmt.Println()
+				fmt.Println(display.Label.Render("  Notes"))
 				for _, an := range task.Annotations {
-					fmt.Printf("  - [%s] %s\n", an.CreatedAt.Format("2006-01-02 15:04"), an.Content)
+					age := display.Relative(an.CreatedAt)
+					fmt.Printf("  %s  %s\n",
+						display.Dim.Render(fmt.Sprintf("%-8s", age)),
+						display.SingleLine(an.Content),
+					)
 				}
 			}
 			return nil
