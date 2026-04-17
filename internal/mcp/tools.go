@@ -3010,7 +3010,7 @@ func normalizePriority(s string) string {
 func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",
-		"version": "3.21.0",
+		"version": "3.22.0",
 	}
 
 	// Compact mode always includes task stats (3 numbers — cheap signal).

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/mcp"
+	"github.com/kutbudev/ramorie-cli/internal/mcpinstall"
 	"github.com/urfave/cli/v2"
 )
 
@@ -53,6 +54,20 @@ func NewMcpCommand() *cli.Command {
 					os.Stdout.Write(b)
 					os.Stdout.Write([]byte("\n"))
 					return nil
+				},
+			},
+			{
+				Name:  "install",
+				Usage: "Interactive installer — add Ramorie MCP to Claude Code, Claude Desktop, Cursor, Windsurf, VS Code, Zed",
+				Action: func(c *cli.Context) error {
+					return mcpinstall.Run(mcpinstall.BinaryPath(), []string{"mcp", "serve"})
+				},
+			},
+			{
+				Name:  "uninstall",
+				Usage: "Remove Ramorie MCP entry from one or more clients (interactive)",
+				Action: func(c *cli.Context) error {
+					return mcpinstall.RunUninstall()
 				},
 			},
 		},
