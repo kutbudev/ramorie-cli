@@ -9,7 +9,7 @@ import (
 )
 
 // Version will be set during build with ldflags
-var Version = "4.3.1"
+var Version = "4.3.2"
 
 func main() {
 	app := &cli.App{
