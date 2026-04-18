@@ -246,28 +246,19 @@ Examples:
 		},
 	}, handleUnifiedDecision)
 
-	// 8. skill - Unified procedural skill management (NEW - replaces 8 tools)
+	// 8. skill - DEPRECATED: delegates to memory tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "skill",
-		Description: `🟡 COMMON | Manage procedural skills (how-to knowledge).
+		Description: `[DEPRECATED] Use the memory tool instead. This tool will be removed in the next release.
 
-REQUIRED: action (list|create|surface|execute|complete|stats|generate|update)
+Migrate:
+- To generate a skill: memory(goal: "description of skill", project: "my-project", auto_context: true)
+- To list skills:      memory(action: "list", project: "my-project")
+- To get a skill:      memory(action: "get", memoryId: "<skill-id>")
 
-Actions:
-- list: List skills. Optional: project, limit
-- create: Create skill. Requires: project, trigger, description, steps[]. Optional: validation, tags[]
-- surface: Find relevant skills. Requires: context. Optional: project, limit
-- execute: Start skill execution. Requires: skill_id. Optional: context
-- complete: Complete execution. Requires: execution_id, success. Optional: notes
-- stats: Get skill stats. Requires: skill_id
-- generate: AI-generate skill. Requires: description. Optional: project, auto_save
-- update: Update skill. Requires: skill_id. Optional: trigger, description, steps[], validation, tags[]
-
-Examples:
-- skill(action: "surface", context: "deploying to production")
-- skill(action: "create", project: "my-project", trigger: "When deploying", description: "Deploy procedure", steps: ["Build", "Test", "Deploy"])`,
+All calls to this tool emit a deprecation warning to stderr and delegate to the memory tool.`,
 		Annotations: &mcp.ToolAnnotations{
-			Title:         "Skill",
+			Title:         "Skill (Deprecated)",
 			OpenWorldHint: boolPtr(false),
 		},
 	}, handleUnifiedSkill)

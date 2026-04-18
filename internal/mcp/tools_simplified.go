@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -628,7 +629,46 @@ type UnifiedSkillInput struct {
 	Limit       int      `json:"limit,omitempty"`
 }
 
+// translateSkillInputToMemoryInput converts the legacy UnifiedSkillInput params
+// into UnifiedMemoryInput so that handleUnifiedMemory can serve the request.
+// Skill-specific fields that have no direct equivalent in the memory model
+// (skill_id, execution_id, trigger, steps, validation, success, notes, auto_save)
+// are silently dropped — callers should migrate to the memory tool directly.
+func translateSkillInputToMemoryInput(in UnifiedSkillInput) UnifiedMemoryInput {
+	out := UnifiedMemoryInput{
+		Project: in.Project,
+		Limit:   float64(in.Limit),
+	}
+
+	// Map action: "generate" → set Goal so handleUnifiedMemory uses the skill-gen chain.
+	// All other actions map to their memory equivalents where possible.
+	switch strings.TrimSpace(strings.ToLower(in.Action)) {
+	case "generate":
+		out.Goal = in.Description
+		out.AutoContext = in.AutoSave // auto_save re-purposed as auto_context hint
+	case "list":
+		out.Action = "list"
+	case "get":
+		out.Action = "get"
+		out.MemoryID = in.SkillID
+	default:
+		// surface, create, execute, complete, stats, update — no memory equivalent.
+		// Return a list action so the caller gets a sensible response and the
+		// deprecation message guides them to the correct approach.
+		out.Action = "list"
+	}
+
+	return out
+}
+
 func handleUnifiedSkill(ctx context.Context, req *mcp.CallToolRequest, input UnifiedSkillInput) (*mcp.CallToolResult, interface{}, error) {
+	fmt.Fprintln(os.Stderr, "[DEPRECATED] The `skill` MCP tool is deprecated. Use `memory` with goal= to generate skills, or type=\"skill\" filter in recall. Scheduled for removal in the next release.")
+	memoryInput := translateSkillInputToMemoryInput(input)
+	return handleUnifiedMemory(ctx, req, memoryInput)
+}
+
+// --- skill (legacy body preserved below for reference only — unreachable) ---
+func _legacyHandleUnifiedSkillBody(ctx context.Context, req *mcp.CallToolRequest, input UnifiedSkillInput) (*mcp.CallToolResult, interface{}, error) {
 	action := strings.TrimSpace(strings.ToLower(input.Action))
 	if action == "" {
 		action = "list"
