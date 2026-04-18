@@ -342,18 +342,36 @@ func handleTaskMove(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToolR
 	}), nil, nil
 }
 
-// --- unified_memory: list/get ---
+// --- unified_memory: list/get/generate_skill ---
 
 type UnifiedMemoryInput struct {
-	Action   string  `json:"action"`           // list, get
-	Project  string  `json:"project"`          // For list
-	MemoryID string  `json:"memoryId"`         // For get
-	Term     string  `json:"term,omitempty"`   // For list filter
-	Limit    float64 `json:"limit,omitempty"`
-	Cursor   string  `json:"cursor,omitempty"`
+	Action      string  `json:"action"`              // list, get, generate_skill
+	Project     string  `json:"project"`             // For list, generate_skill
+	MemoryID    string  `json:"memoryId"`            // For get
+	Term        string  `json:"term,omitempty"`      // For list filter
+	Limit       float64 `json:"limit,omitempty"`
+	Cursor      string  `json:"cursor,omitempty"`
+	Goal        string  `json:"goal,omitempty"`        // For generate_skill: what skill to create
+	AutoContext bool    `json:"auto_context,omitempty"` // For generate_skill: fetch suggested context automatically
+}
+
+// serializeSkillMarkdown formats frontmatter + body into a markdown string
+// suitable for storing as a memory with type=skill.
+func serializeSkillMarkdown(fm api.SkillFrontmatter, body string) string {
+	tagsLine := "[]"
+	if len(fm.Tags) > 0 {
+		tagsLine = "[" + strings.Join(fm.Tags, ", ") + "]"
+	}
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\nwhen_to_use: %s\ntags: %s\n---\n\n%s",
+		fm.Name, fm.Description, fm.WhenToUse, tagsLine, body)
 }
 
 func handleUnifiedMemory(ctx context.Context, req *mcp.CallToolRequest, input UnifiedMemoryInput) (*mcp.CallToolResult, interface{}, error) {
+	// Skill-generation branch: when goal is set, run the generate-skill chain.
+	if strings.TrimSpace(input.Goal) != "" {
+		return handleMemoryGenerateSkill(ctx, input)
+	}
+
 	action := strings.TrimSpace(strings.ToLower(input.Action))
 	if action == "" {
 		action = "list"
@@ -442,8 +460,69 @@ func handleUnifiedMemory(ctx context.Context, req *mcp.CallToolRequest, input Un
 		return mustTextResult(result), nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: list or get", action)
+		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: list, get, or set goal to generate a skill", action)
 	}
+}
+
+// handleMemoryGenerateSkill runs the skill-generation chain:
+//  1. (optional) POST /memories/suggest-context to collect context item IDs
+//  2. POST /memories/generate-skill to generate frontmatter + body
+//  3. Serialize frontmatter + body into markdown
+//  4. POST /memories with type=skill to save
+func handleMemoryGenerateSkill(ctx context.Context, input UnifiedMemoryInput) (*mcp.CallToolResult, interface{}, error) {
+	goal := strings.TrimSpace(input.Goal)
+
+	// Resolve project ID if a project name was given.
+	projectID := ""
+	if strings.TrimSpace(input.Project) != "" {
+		pid, err := resolveProjectID(apiClient, input.Project)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not resolve project: %w", err)
+		}
+		projectID = pid
+	}
+
+	// Step 1: optionally suggest context items.
+	var selectedIDs []string
+	if input.AutoContext {
+		suggest, err := apiClient.SuggestContextForSkill(goal, projectID, false, 1_000_000)
+		if err != nil {
+			return nil, nil, fmt.Errorf("suggest-context failed: %w", err)
+		}
+		for _, item := range suggest.Items {
+			selectedIDs = append(selectedIDs, item.ID)
+		}
+	}
+
+	// Step 2: generate the skill.
+	gen, err := apiClient.GenerateSkillMarkdown(goal, selectedIDs, projectID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate-skill failed: %w", err)
+	}
+
+	// Step 3: serialize into markdown.
+	content := serializeSkillMarkdown(gen.Skill.Frontmatter, gen.Skill.Body)
+
+	// Step 4: save as a memory with type=skill.
+	saved, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
+		ProjectID: projectID,
+		Content:   content,
+		Type:      "skill",
+		Tags:      gen.Skill.Frontmatter.Tags,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to save skill memory: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"id":         saved.ID.String(),
+		"model":      gen.AIModel,
+		"latency_ms": gen.LatencyMs,
+		"content":    content,
+		"tags":       gen.Skill.Frontmatter.Tags,
+		"message":    fmt.Sprintf("✅ Skill '%s' generated and saved as memory (type=skill)", gen.Skill.Frontmatter.Name),
+	}
+	return mustTextResult(result), nil, nil
 }
 
 // --- unified_decision: create/list ---

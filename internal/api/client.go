@@ -3449,6 +3449,99 @@ func (c *Client) BootstrapProject(projectID string, req models.BootstrapProjectR
 }
 
 // ============================================================================
+// Skill Generation via Memories Endpoints
+// ============================================================================
+
+// SuggestContextItem represents one ranked context item returned by
+// POST /v1/memories/suggest-context.
+type SuggestContextItem struct {
+	ID        string  `json:"id"`
+	Type      string  `json:"type"` // "memory" | "task" | "decision"
+	Title     string  `json:"title"`
+	Snippet   string  `json:"snippet"`
+	Score     float64 `json:"score"`
+	EstTokens int     `json:"est_tokens"`
+}
+
+// SuggestContextResponse is the response body for POST /v1/memories/suggest-context.
+type SuggestContextResponse struct {
+	Items       []SuggestContextItem `json:"items"`
+	TotalTokens int                  `json:"total_tokens"`
+}
+
+// SuggestContextForSkill calls POST /v1/memories/suggest-context and returns
+// the ranked list of context items that best match the given goal.
+func (c *Client) SuggestContextForSkill(goal, projectID string, includeAllProjects bool, maxTokens int) (*SuggestContextResponse, error) {
+	body := map[string]interface{}{
+		"goal":                 goal,
+		"include_all_projects": includeAllProjects,
+		"max_tokens":           maxTokens,
+	}
+	if projectID != "" {
+		body["project_id"] = projectID
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories/suggest-context", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp SuggestContextResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal suggest-context response: %w", err)
+	}
+	return &resp, nil
+}
+
+// SkillFrontmatter is the frontmatter block of a generated skill.
+type SkillFrontmatter struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	WhenToUse   string   `json:"when_to_use"`
+	Tags        []string `json:"tags"`
+}
+
+// GeneratedSkillMarkdown holds the full generated skill (frontmatter + body).
+type GeneratedSkillMarkdown struct {
+	Frontmatter SkillFrontmatter `json:"frontmatter"`
+	Body        string           `json:"body"`
+}
+
+// GenerateSkillMarkdownResponse is the response body for POST /v1/memories/generate-skill.
+type GenerateSkillMarkdownResponse struct {
+	Skill      GeneratedSkillMarkdown `json:"skill"`
+	AIModel    string                 `json:"ai_model"`
+	LatencyMs  int                    `json:"latency_ms"`
+	TokenUsage struct {
+		Input  int `json:"input"`
+		Output int `json:"output"`
+	} `json:"token_usage"`
+}
+
+// GenerateSkillMarkdown calls POST /v1/memories/generate-skill with the
+// supplied goal, selected context item IDs, and optional project ID.
+func (c *Client) GenerateSkillMarkdown(goal string, selectedIDs []string, projectID string) (*GenerateSkillMarkdownResponse, error) {
+	body := map[string]interface{}{
+		"goal":         goal,
+		"selected_ids": selectedIDs,
+	}
+	if projectID != "" {
+		body["project_id"] = projectID
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories/generate-skill", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp GenerateSkillMarkdownResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal generate-skill response: %w", err)
+	}
+	return &resp, nil
+}
+
+// ============================================================================
 // Type Aliases for Project Analysis (for use in MCP handlers)
 // ============================================================================
 

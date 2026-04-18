@@ -198,20 +198,28 @@ Examples:
 	// 6. memory - Unified memory operations (NEW - replaces 2 tools)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "memory",
-		Description: `🟡 COMMON | Get memory details with related entities.
+		Description: `🟡 COMMON | Get memory details with related entities, or generate a skill from a goal.
 
-REQUIRED: action (list|get)
+REQUIRED: action (list|get) — OR set goal to trigger skill generation (action not needed).
 
 Actions:
 - list: List memories. Requires: project. Optional: term, limit
 - get: Get memory details with related decisions, tasks, and memories. Requires: memoryId
 
+Skill Generation (when goal is set):
+- Provide goal (string): what the skill should teach.
+- Optional auto_context (bool): if true, automatically fetch relevant context items from the project.
+- Optional project: scope the skill to a project.
+- Runs: suggest-context (if auto_context) → generate-skill → save as memory(type=skill).
+- Returns: id, model, latency_ms, content, tags.
+
 Examples:
 - memory(action: "list", project: "my-project")
-- memory(action: "get", memoryId: "uuid")`,
+- memory(action: "get", memoryId: "uuid")
+- memory(goal: "add OAuth2 login", project: "my-project", auto_context: true)
+- memory(goal: "deploy with Railway", project: "my-project")`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Memory",
-			ReadOnlyHint:  true,
 			OpenWorldHint: boolPtr(false),
 		},
 	}, handleUnifiedMemory)
