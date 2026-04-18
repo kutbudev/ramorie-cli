@@ -198,6 +198,42 @@ func (c *Client) ListProjects(orgID ...string) ([]models.Project, error) {
 	return projects, nil
 }
 
+// ActivePreference is one item in the top-5 preferences surfaced by
+// GET /memory/preferences. Server-side fields are limited on purpose — CLI
+// only needs enough to print them into the setup_agent payload.
+type ActivePreference struct {
+	ID          string    `json:"id"`
+	Content     string    `json:"content"`
+	AccessCount int       `json:"access_count"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ActivePreferencesResponse mirrors the backend shape.
+type ActivePreferencesResponse struct {
+	Preferences []ActivePreference `json:"preferences"`
+	Count       int                `json:"count"`
+}
+
+// GetActivePreferences fetches the user's top-N preference memories
+// ordered by access_count DESC. Called from setup_agent so Claude / Cursor
+// see active preferences at session start without having to find() them.
+// limit is bounded server-side (1-20); pass 5 for the default surface.
+func (c *Client) GetActivePreferences(limit int) (*ActivePreferencesResponse, error) {
+	endpoint := "/memory/preferences"
+	if limit > 0 {
+		endpoint += fmt.Sprintf("?limit=%d", limit)
+	}
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp ActivePreferencesResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal active preferences: %w", err)
+	}
+	return &resp, nil
+}
+
 func (c *Client) GetProject(id string) (*models.Project, error) {
 	respBody, err := c.makeRequest("GET", "/projects/"+id, nil)
 	if err != nil {

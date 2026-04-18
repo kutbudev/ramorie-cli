@@ -208,6 +208,106 @@ func TestHandleSetupAgent_FullModeAddsLegacyFields(t *testing.T) {
 	}
 }
 
+// handleSetupAgent active preferences injection -------------------------------
+
+// setup_agent must surface the user's top-5 preferences so Claude / Cursor see
+// durable rules ("always yarn", "never push without approval") before any
+// tool call. The endpoint is new (backend /v1/memory/preferences) — these
+// tests lock the wire-up so a future refactor doesn't silently drop it.
+
+func TestHandleSetupAgent_CompactIncludesActivePreferences(t *testing.T) {
+	projectID := uuid.New()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/projects"):
+			stubProjectsEndpoint([]stubProject{{ID: projectID, Name: "HandlersTest"}})(w, r)
+		case strings.HasPrefix(r.URL.Path, "/reports/stats"):
+			_, _ = w.Write([]byte(`{"todo":0,"in_progress":0,"completed":0,"total":0}`))
+		case strings.HasPrefix(r.URL.Path, "/memory/preferences"):
+			// Three preferences, descending access_count — matches backend's
+			// ORDER BY access_count DESC ordering.
+			_, _ = w.Write([]byte(`{
+				"preferences": [
+					{"id":"p1","content":"Always use yarn, never npm","access_count":42,"updated_at":"2026-04-18T12:00:00Z"},
+					{"id":"p2","content":"Never push without explicit approval","access_count":30,"updated_at":"2026-04-18T12:00:00Z"},
+					{"id":"p3","content":"Spec belliyken direkt devam","access_count":15,"updated_at":"2026-04-18T12:00:00Z"}
+				],
+				"count": 3
+			}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	res, _, err := handleSetupAgent(context.Background(), nil, SetupAgentInput{AgentName: "pref-test"})
+	if err != nil {
+		t.Fatalf("handleSetupAgent: %v", err)
+	}
+	got := decodeToolResult(t, res)
+
+	prefsAny, ok := got["active_preferences"]
+	if !ok {
+		t.Fatalf("compact response missing active_preferences; payload=%v", got)
+	}
+	prefs, ok := prefsAny.([]any)
+	if !ok {
+		t.Fatalf("active_preferences should be []; got %T", prefsAny)
+	}
+	if len(prefs) != 3 {
+		t.Fatalf("expected 3 preferences; got %d", len(prefs))
+	}
+	first, _ := prefs[0].(map[string]any)
+	if first["content"] != "Always use yarn, never npm" {
+		t.Errorf("top preference by access_count wrong; got %v", first["content"])
+	}
+	// access_count must survive round-trip (json numbers → float64).
+	if ac, _ := first["access_count"].(float64); ac != 42 {
+		t.Errorf("access_count not preserved; got %v", first["access_count"])
+	}
+}
+
+func TestHandleSetupAgent_PreferencesFailureIsNonFatal(t *testing.T) {
+	// Contract: if /memory/preferences is down, session still opens cleanly —
+	// we must NOT fail the whole setup_agent call just because preferences
+	// aren't available.
+	projectID := uuid.New()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/projects"):
+			stubProjectsEndpoint([]stubProject{{ID: projectID, Name: "HandlersTest"}})(w, r)
+		case strings.HasPrefix(r.URL.Path, "/reports/stats"):
+			_, _ = w.Write([]byte(`{"todo":0,"in_progress":0,"completed":0,"total":0}`))
+		case strings.HasPrefix(r.URL.Path, "/memory/preferences"):
+			// Simulate backend outage — 500 with a plausible error body.
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"database error"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	res, _, err := handleSetupAgent(context.Background(), nil, SetupAgentInput{AgentName: "pref-fail-test"})
+	if err != nil {
+		t.Fatalf("handleSetupAgent must not fail on preferences outage; got %v", err)
+	}
+	got := decodeToolResult(t, res)
+
+	// No active_preferences key when the endpoint failed.
+	if _, ok := got["active_preferences"]; ok {
+		t.Errorf("failed preferences call must NOT populate active_preferences; got %v", got["active_preferences"])
+	}
+	// Rest of the session payload must still be intact.
+	for _, k := range []string{"session", "status", "stats", "projects_count"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("failure on preferences broke field %q; payload=%v", k, got)
+		}
+	}
+}
+
 // handleListProjects shape tests ---------------------------------------------
 
 func TestHandleListProjects_CompactDefaultShape(t *testing.T) {

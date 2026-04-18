@@ -3045,6 +3045,22 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 		}
 	}
 
+	// Top-5 active preferences — surface at session start so agents see
+	// durable user rules ("always yarn", "never push without approval") without
+	// needing a find() call on their first turn. Non-fatal: an endpoint outage
+	// just means preferences are absent from this payload; the rest of the
+	// session still opens normally.
+	if prefs, err := client.GetActivePreferences(5); err == nil && prefs != nil && len(prefs.Preferences) > 0 {
+		compact := make([]map[string]interface{}, 0, len(prefs.Preferences))
+		for _, p := range prefs.Preferences {
+			compact = append(compact, map[string]interface{}{
+				"content":      p.Content,
+				"access_count": p.AccessCount,
+			})
+		}
+		result["active_preferences"] = compact
+	}
+
 	if !full {
 		// Compact mode: no focus, no context injection, no recommendations.
 		return result, nil
