@@ -1677,43 +1677,55 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 	}), nil, nil
 }
 
-// shouldBeTask checks if the content looks like a TODO/task rather than a memory
+// shouldBeTask checks if the content is an explicit task rather than a memory.
+//
+// Rules:
+//   - Match ONLY at the start of the trimmed content. Middle-matches used to
+//     trip on documentation / changelogs that merely mentioned "todo" in passing.
+//   - Use narrow, unambiguous prefixes. "should", "must", "need to" are too
+//     common in regular prose to be reliable task markers.
+//
+// To force task creation, the caller must explicitly prefix the content with
+// one of the markers below (e.g. `remember("todo: fix auth")`).
 func shouldBeTask(content string) bool {
-	lower := strings.ToLower(content)
-	taskIndicators := []string{
-		"todo:", "todo ", "later:", "later ",
-		"need to ", "should ", "must ", "reminder:",
-		"task:", "action:", "followup:", "follow-up:",
+	lower := strings.ToLower(strings.TrimSpace(content))
+	if lower == "" {
+		return false
 	}
-	for _, indicator := range taskIndicators {
-		if strings.HasPrefix(lower, indicator) || strings.Contains(lower, " "+indicator) {
+	prefixes := []string{
+		"todo:", "todo ",
+		"later:", "later ",
+		"task:", "action:",
+		"reminder:", "followup:", "follow-up:",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
 			return true
 		}
 	}
 	return false
 }
 
-// extractTaskDescription extracts the task description from TODO-like content
+// extractTaskDescription extracts the task body after the prefix. Mirrors
+// shouldBeTask's prefix list so any content shouldBeTask accepts yields a
+// non-empty body here; otherwise returns the original content untouched.
 func extractTaskDescription(content string) string {
-	lower := strings.ToLower(content)
+	trimmed := strings.TrimSpace(content)
+	lower := strings.ToLower(trimmed)
 	prefixes := []string{
-		"todo:", "todo ", "later:", "later ",
-		"need to ", "should ", "must ", "reminder:",
-		"task:", "action:", "followup:", "follow-up:",
+		"todo:", "todo ",
+		"later:", "later ",
+		"task:", "action:",
+		"reminder:", "followup:", "follow-up:",
 	}
-
-	for _, prefix := range prefixes {
-		idx := strings.Index(lower, prefix)
-		if idx != -1 {
-			// Return everything after the prefix
-			result := strings.TrimSpace(content[idx+len(prefix):])
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
+			result := strings.TrimSpace(trimmed[len(p):])
 			if result != "" {
 				return result
 			}
 		}
 	}
-
-	// Fallback: return original content
 	return content
 }
 
@@ -3162,6 +3174,13 @@ type FindInput struct {
 	MinScore         float64  `json:"min_score,omitempty"`
 	IncludeDecisions *bool    `json:"include_decisions,omitempty"`
 	Purpose          string   `json:"purpose,omitempty"`
+
+	// Phase A-D knobs. All optional — server has sensible defaults.
+	HyDE              string `json:"hyde,omitempty"`               // "default" | "on" | "off"
+	Rerank            string `json:"rerank,omitempty"`             // "default" | "on" | "off"
+	Intent            string `json:"intent,omitempty"`             // "auto" (default) | "how_to" | "why" | "recent" | "owner" | "generic"
+	EntityHops        int    `json:"entity_hops,omitempty"`        // 0 = direct-match only; 1-3 = multi-hop entity expansion
+	IncludeSuperseded bool   `json:"include_superseded,omitempty"` // default false — omit memories marked superseded
 }
 
 // handleFind wraps the backend POST /v1/memory/find hybrid search endpoint.
@@ -3186,15 +3205,20 @@ func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) 
 	}
 
 	opts := api.FindMemoriesOptions{
-		Term:             term,
-		Project:          strings.TrimSpace(input.Project),
-		ProjectHint:      projectHint,
-		Types:            input.Types,
-		Tags:             input.Tags,
-		Limit:            input.Limit,
-		BudgetTokens:     input.BudgetTokens,
-		MinScore:         input.MinScore,
-		IncludeDecisions: includeDecisions,
+		Term:              term,
+		Project:           strings.TrimSpace(input.Project),
+		ProjectHint:       projectHint,
+		Types:             input.Types,
+		Tags:              input.Tags,
+		Limit:             input.Limit,
+		BudgetTokens:      input.BudgetTokens,
+		MinScore:          input.MinScore,
+		IncludeDecisions:  includeDecisions,
+		HyDE:              input.HyDE,
+		Rerank:            input.Rerank,
+		Intent:            input.Intent,
+		EntityHops:        input.EntityHops,
+		IncludeSuperseded: input.IncludeSuperseded,
 		Purpose:          strings.TrimSpace(input.Purpose),
 	}
 

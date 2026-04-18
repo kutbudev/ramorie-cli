@@ -14,16 +14,21 @@ func registerToolsV4(server *mcp.Server) {
 	// 1. setup_agent - Initialize session (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "setup_agent",
-		Description: `🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST!
+		Description: `🔴 ESSENTIAL | Initialize the agent session. ⚠️ CALL THIS FIRST every conversation.
 
-Returns a compact session context (~500 token): session info, detected project from cwd, task stats, projects count, and a next_action nudge.
+Returns a compact session context (~500 tokens):
+- session info + agent tracking identity
+- project auto-detected from cwd (git remote / dir name)
+- top-5 active user preferences (surfaced so you don't have to remember them)
+- task stats + project count
+- next_action nudge based on current state
 
 OPTIONAL:
-- agent_name (string) — tracking label
+- agent_name (string) — tracking label (e.g. "claude-code", "cursor")
 - agent_model (string) — model identifier
-- full (bool) — return verbose legacy payload with context_injection, recommended_actions, workflow_pattern. Default false.
+- full (bool) — verbose payload with context_injection + recommended_actions. Default false.
 
-Directives live in the MCP server instructions block — not duplicated in this response.`,
+Durable operating directives live in the server's instructions block (loaded once per session).`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Initialize Agent Session",
 			DestructiveHint: boolPtr(false),
@@ -51,23 +56,33 @@ OPTIONAL:
 	// 3. remember - Store memories (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "remember",
-		Description: `🔴 ESSENTIAL | Ultra-simple memory storage with duplicate prevention.
+		Description: `🔴 ESSENTIAL | Store a memory (durable fact / decision / pattern / preference).
 
-REQUIRED: content (what to remember), project (name or ID)
-OPTIONAL: force (bool) - Skip similarity check and save anyway
+REQUIRED: content, project (name or ID)
+OPTIONAL: force (bool) — skip similarity check and save anyway
 
-⚠️ DUPLICATE PREVENTION: By default, remember() checks for similar existing memories.
-If similar content exists (>80% match), you'll get a warning with the existing memory.
+Type is auto-detected from content words:
+- "decided X" / "chose X"  → decision
+- "fixed bug" / "root cause" → bug_fix
+- "prefer X" / "always" / "never" → preference
+- "skill:" / "how to"      → skill
 
-The type is auto-detected from content:
-- "decided X" → decision
-- "fixed bug" → bug_fix
-- "prefer X" → preference
-- "todo: X" / "later: X" → auto-creates TASK instead of memory
+TASK vs MEMORY promotion:
+Content that STARTS with one of these prefixes is promoted to a task instead:
+  todo: | TODO: | later: | task: | action: | reminder: | followup:
+Middle-of-sentence mentions do NOT promote ("fixed 2 TODOs" stays as memory).
+To force task creation, explicitly open the content with "todo:" (or call task(action=create)).
 
-💡 Best Practice: Always call recall(term) BEFORE remember() to check existing knowledge.
+Duplicate prevention: if cosine similarity to an existing memory is >0.9, a warning
+is returned with the existing memory instead of creating a duplicate. Override with force=true.
 
-Example: remember(content: "API uses JWT authentication", project: "my-project")`,
+Best practice: find(term) BEFORE remember() to check existing knowledge. The backend also
+runs a post-write contradiction check — if your new memory supersedes an older one, the
+older is marked superseded and hidden from default searches.
+
+Example:
+  remember(content: "API uses JWT auth stored in httpOnly cookie", project: "my-project")
+  remember(content: "todo: document the retry policy", project: "my-project")   // → task`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Remember",
 			DestructiveHint: boolPtr(false),
@@ -78,26 +93,47 @@ Example: remember(content: "API uses JWT authentication", project: "my-project")
 	// 4. find - Hybrid search (semantic + lexical) — preferred in v4.
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "find",
-		Description: `🔴 ESSENTIAL | Hybrid memory + decision search (semantic + lexical + recency + usage).
+		Description: `🔴 ESSENTIAL | Hybrid memory + decision retrieval — preferred over recall().
+
+Under the hood the server runs a multi-stage pipeline and picks what to apply per query:
+  1. HyDE — query is rewritten into a hypothetical answer first, then embedded (catches queries that share no keywords with the memory)
+  2. Hybrid scan — pgvector cosine + PostgreSQL FTS + recency + access_count, weighted
+  3. Entity graph bonus — memories linked to entities matching your query get a small lift
+  4. Propositional boost — long memories are split into atomic claims; the best-matching claim boosts its parent
+  5. Intent routing — "how do I X" narrows to skill/pattern; "why did we X" auto-includes decisions; "recent X" favors fresh content
+  6. Gemini rerank — top candidates are re-scored by an LLM for pair-wise relevance
+  7. Supersede filter — memories marked as out-of-date by a newer contradicting memory are hidden by default
+
+All of the above are ON by default with graceful fallback if a stage fails — agents
+rarely need to tune these flags. Override only when you have a specific reason.
 
 REQUIRED: term
 
-OPTIONAL:
-- project (name or UUID) — explicit scope. If omitted, cwd-derived X-Project-Hint auto-scopes.
-- types ([]string) — filter by memory.type (general|decision|bug_fix|preference|pattern|reference|skill)
-- tags ([]string) — filter by tag intersection
-- limit (int, default 5, max 50)
-- budget_tokens (int, default 2000) — server trims response to fit
-- min_score (float, default 0.0)
+OPTIONAL (common):
+- project — name or UUID. Omit to auto-scope via cwd.
+- types ([]string) — general | decision | bug_fix | preference | pattern | reference | skill
+- tags ([]string)
+- limit (default 5, max 50)
+- budget_tokens (default 2000) — response trimmed to fit
 - include_decisions (bool, default true)
-- purpose (coding|research|review) — small type-based boost
+- purpose ("coding" | "research" | "review") — type-preference nudge
 
-Returns compact items with {id, type, title, preview, score, breakdown, access_count, project}.
-Falls back to lexical-only when embeddings aren't available.
+OPTIONAL (tuning):
+- hyde ("on" | "off" | "default") — query expansion. Off = benchmark raw embedding.
+- rerank ("on" | "off" | "default") — LLM reranker. Off = keep hybrid order.
+- intent ("auto" | "how_to" | "why" | "recent" | "owner" | "generic") — pin intent.
+- entity_hops (0-3) — multi-hop entity expansion. 0 = direct matches only.
+- include_superseded (bool) — show memories marked superseded (audit/debug).
 
-Prefer over recall() — recall is kept for backwards compatibility.
+Returns: {items[], _meta: {total, intent, hyde_used, rerank_used, ranking_mode, latency_ms, ...}}
+Each item: {id, type, title, preview, score, breakdown, access_count, project}
 
-Example: find(term: "RTK query pattern", limit: 3)`,
+Examples:
+  find(term: "RTK query cache invalidation")
+  find(term: "why did we migrate from Material UI", include_decisions: true)
+  find(term: "yarn rule", types: ["preference"])
+  find(term: "ui framework", include_superseded: true)   // see history
+  find(term: "bootstrap auth flow", hyde: "off", rerank: "off")  // raw hybrid`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Find",
 			ReadOnlyHint:  true,
@@ -108,16 +144,20 @@ Example: find(term: "RTK query pattern", limit: 3)`,
 	// 4b. recall - legacy keyword search (KEEP for backwards compat).
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "recall",
-		Description: `🟡 LEGACY | Search memories AND architectural decisions using full-text search only.
+		Description: `🟡 LEGACY | Full-text ts_rank search — kept for backwards compatibility, will be removed in v5.
 
-Prefer find() — recall is kept for existing agents and will be removed in v5.0.
+⚠️ Prefer find(): find() wraps the same query set but adds HyDE expansion, Gemini rerank,
+propositional boost, entity-graph bonus, intent routing, and supersede filtering on top.
+recall() only does lexical ts_rank — you will miss results that don't share keywords with
+your query even when they're semantically spot-on.
+
+Use recall() only when (a) you need to replicate exact pre-v4 agent behavior, or
+(b) you're benchmarking search quality and want a lexical-only baseline.
 
 REQUIRED: term
-Returns ranked results from both memories and decisions.
-
-Optional: project, tag, type, purpose (coding/research/review), min_score, limit, include_decisions (default: true)`,
+Optional: project, tag, type, purpose, min_score, limit, include_decisions (default true)`,
 		Annotations: &mcp.ToolAnnotations{
-			Title:         "Recall (legacy)",
+			Title:         "Recall (legacy — prefer find)",
 			ReadOnlyHint:  true,
 			OpenWorldHint: boolPtr(false),
 		},
@@ -260,24 +300,32 @@ With clear=true = clear focus`,
 		},
 	}, handleGetAgentActivity)
 
-	// 12. surface_context - Proactive context surfacing (NEW)
+	// 12. surface_context - File/domain/pattern-scoped context surfacing
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "surface_context",
-		Description: `🟡 COMMON | Proactively surface relevant decisions and memories based on your current work context.
+		Description: `🟡 COMMON | Pull relevant decisions + memories based on which FILES you're about to edit
+(not a natural-language query — that's find()).
 
-CALL THIS before writing code to see relevant decisions, bug fixes, and patterns.
+When to use which:
+- find(term) — when you have a concrete question or topic ("how do I invalidate the RTK cache")
+- surface_context — when you're opening a file and want to see what's been decided/learned
+  about that module, even before you know what to ask
 
-REQUIRED: At least one of:
-- file_paths: Array of file paths being edited (e.g., ["src/store/api/userApi.ts"])
-- domains: Array of domains/modules (e.g., ["admin", "auth", "api"])
-- code_patterns: Array of code patterns about to be used (e.g., ["fetch(", "useEffect"])
+The call signature accepts file paths, directory/domain names, or code patterns you're about
+to use. The server maps those to search terms, finds matching decisions + bug_fix + pattern
+memories, and returns a compact list of "things you should know before editing here".
+
+REQUIRED (at least one):
+- file_paths ([]string) — "src/store/api/userApi.ts"
+- domains ([]string)    — "admin", "auth", "api"
+- code_patterns ([]string) — "fetch(", "useEffect", "dangerouslySetInnerHTML"
 
 OPTIONAL:
-- project: Project name or ID
-- purpose: "coding" (default), "research", "review"
-- limit: Max results (default 10)
+- project — scope override (cwd auto-detect otherwise)
+- purpose ("coding" | "research" | "review") — type-boost nudge
+- limit (default 10)
 
-Returns decisions, bug fixes, and patterns relevant to your current work.`,
+Returns memories and decisions ranked by relevance to the current work scope.`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Surface Context",
 			ReadOnlyHint:  true,
@@ -350,23 +398,28 @@ Examples:
 	// 16. admin - Unified administrative operations (NEW - replaces maintenance tools)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "admin",
-		Description: `🟢 ADVANCED | Administrative and maintenance operations.
+		Description: `🟢 ADVANCED | Administrative + maintenance operations.
 
 REQUIRED: action (consolidate|cleanup|orgs|switch_org|export|import|plan|analyze)
 
 Actions:
-- consolidate: Memory consolidation. Requires: project. Optional: stale_days, promote_threshold, archive_threshold
-- cleanup: Clean expired memories. Optional: project, dry_run, batch_size
-- orgs: List organizations
-- switch_org: Switch organization. Requires: orgId
+- consolidate: Run memory consolidation. Requires: project.
+  Optional: stale_days, promote_threshold, archive_threshold,
+            mode ("score" default | "merge" | "both"), dry_run (preview merge clusters),
+            cluster_threshold (default 0.92 cosine).
+  "merge" requires FEATURE_MERGE_ENABLED=true on the server — it's off-by-default because
+  merging is irreversible. Use dry_run first to preview.
+- cleanup: Clean expired / TTL'd memories. Optional: project, dry_run, batch_size
+- orgs: List accessible organizations
+- switch_org: Switch active organization. Requires: orgId
 - export: Export context pack. Requires: pack_id
-- import: Import context pack. Requires: bundle, project, conflict_mode
-- plan: Multi-agent planning. Requires for create: requirements. Requires for status/apply/cancel: plan_id
+- import: Import context pack. Requires: bundle, project, conflict_mode (skip|overwrite|rename)
+- plan: Multi-agent planning. For create: requirements. For status/apply/cancel: plan_id
 - analyze: Analyze project files. Requires: project, files[]. Optional: auto_apply
 
 Examples:
-- admin(action: "orgs")
-- admin(action: "consolidate", project: "my-project")`,
+  admin(action: "orgs")
+  admin(action: "consolidate", project: "my-project", mode: "merge", dry_run: true)`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Admin",
 			OpenWorldHint: boolPtr(false),

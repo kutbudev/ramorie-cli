@@ -1011,6 +1011,13 @@ type FindMemoriesOptions struct {
 	MinScore         float64
 	IncludeDecisions bool
 	Purpose          string
+
+	// Phase A-D knobs. All optional; defaults are set server-side.
+	HyDE              string // "default" | "on" | "off"
+	Rerank            string // "default" | "on" | "off"
+	Intent            string // "auto" (default) | "how_to" | "why" | "recent" | "owner" | "generic"
+	EntityHops        int    // 0 = direct only; 1-3 = multi-hop entity expansion
+	IncludeSuperseded bool   // default false — include memories marked superseded
 }
 
 // FindResponse mirrors memoryretrieve.FindResponse on the backend.
@@ -1043,6 +1050,13 @@ type FindMeta struct {
 	RankingMode  string `json:"ranking_mode"`
 	Truncated    bool   `json:"truncated,omitempty"`
 	LatencyMs    int64  `json:"latency_ms"`
+
+	// Phase A-D observability fields. All optional; present when the feature ran.
+	HyDEUsed        bool   `json:"hyde_used,omitempty"`
+	HyDELatencyMs   int64  `json:"hyde_latency_ms,omitempty"`
+	RerankUsed      bool   `json:"rerank_used,omitempty"`
+	RerankLatencyMs int64  `json:"rerank_latency_ms,omitempty"`
+	Intent          string `json:"intent,omitempty"`
 }
 
 // FindMemories calls POST /v1/memory/find. Pass ProjectHint to let the backend
@@ -1074,6 +1088,23 @@ func (c *Client) FindMemories(opts FindMemoriesOptions) (*FindResponse, error) {
 	}
 	if opts.Purpose != "" {
 		body["purpose"] = opts.Purpose
+	}
+	// Phase A-D knobs — passed through verbatim. Backend treats empty string
+	// as "default" so we only send when the caller explicitly opted out/in.
+	if opts.HyDE != "" {
+		body["hyde"] = opts.HyDE
+	}
+	if opts.Rerank != "" {
+		body["rerank"] = opts.Rerank
+	}
+	if opts.Intent != "" {
+		body["intent"] = opts.Intent
+	}
+	if opts.EntityHops > 0 {
+		body["entity_hops"] = opts.EntityHops
+	}
+	if opts.IncludeSuperseded {
+		body["include_superseded"] = true
 	}
 
 	extraHeaders := map[string]string{}
