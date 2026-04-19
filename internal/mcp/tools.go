@@ -2500,8 +2500,10 @@ func handleCleanupMemories(ctx context.Context, req *mcp.CallToolRequest, input 
 	return mustTextResult(result), nil, nil
 }
 
+// CreateDecisionInput and handleCreateDecision are legacy stubs.
+// The /v1/decisions backend routes were removed. Use remember() with type=decision instead.
 type CreateDecisionInput struct {
-	Project      string `json:"project,omitempty"` // Project name or ID (optional)
+	Project      string `json:"project,omitempty"`
 	Title        string `json:"title"`
 	Description  string `json:"description,omitempty"`
 	Status       string `json:"status,omitempty"`
@@ -2511,76 +2513,21 @@ type CreateDecisionInput struct {
 }
 
 func handleCreateDecision(ctx context.Context, req *mcp.CallToolRequest, input CreateDecisionInput) (*mcp.CallToolResult, interface{}, error) {
-	title := strings.TrimSpace(input.Title)
-	if title == "" {
-		return nil, nil, errors.New("title is required")
-	}
-
-	// REQUIRED: project parameter must be specified
-	if strings.TrimSpace(input.Project) == "" {
-		return nil, nil, errors.New("❌ 'project' parameter is REQUIRED. Specify which project this decision belongs to.\n\nUse list_projects to see available projects.\nExample: create_decision(title=\"...\", project=\"my-project\")")
-	}
-
-	// Resolve project
-	projectID, err := resolveProjectID(apiClient, input.Project)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// AGENT ENFORCEMENT: Force draft status and agent source
-	// Agents can only create drafts - users must approve them
-	status := "draft"
-	source := "agent"
-
-	decision, err := apiClient.CreateDecision(
-		projectID, // Project ID (optional)
-		title,
-		strings.TrimSpace(input.Description),
-		status, // Always "draft" for agent-created decisions
-		strings.TrimSpace(input.Area),
-		strings.TrimSpace(input.Context),
-		strings.TrimSpace(input.Consequences),
-		source, // Always "agent" for MCP-created decisions
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	return mustTextResult(decision), nil, nil
+	return nil, nil, errors.New("[DEPRECATED] decision create endpoint removed. Use remember() with type=decision instead")
 }
 
+// ListDecisionsInput and handleListDecisions are legacy stubs.
+// The /v1/decisions backend routes were removed. Use memory(action=list) with type=decision instead.
 type ListDecisionsInput struct {
-	Project string  `json:"project,omitempty"` // Filter by project name or ID (optional)
+	Project string  `json:"project,omitempty"`
 	Status  string  `json:"status,omitempty"`
 	Area    string  `json:"area,omitempty"`
 	Limit   float64 `json:"limit,omitempty"`
-	Cursor  string  `json:"cursor,omitempty"` // Pagination cursor
+	Cursor  string  `json:"cursor,omitempty"`
 }
 
 func handleListDecisions(ctx context.Context, req *mcp.CallToolRequest, input ListDecisionsInput) (*mcp.CallToolResult, any, error) {
-	// Resolve project if provided (optional)
-	var projectID string
-	if project := strings.TrimSpace(input.Project); project != "" {
-		var err error
-		projectID, err = resolveProjectID(apiClient, project)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	// Fetch all matching decisions from API
-	decisions, err := apiClient.ListDecisions(projectID, strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), 0)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Apply cursor-based pagination
-	limit := int(input.Limit)
-	if limit <= 0 {
-		limit = 20
-	}
-
-	paginated, nextCursor, total := paginateSlice(decisions, input.Cursor, limit)
-	return mustTextResult(formatPaginatedResponse(paginated, nextCursor, total, getContextString())), nil, nil
+	return nil, nil, errors.New("[DEPRECATED] decision list endpoint removed. Use memory(action=list) with type=decision instead")
 }
 
 type GetStatsInput struct {

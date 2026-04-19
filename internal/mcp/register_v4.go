@@ -224,24 +224,12 @@ Examples:
 		},
 	}, handleUnifiedMemory)
 
-	// 7. decision - Unified decision management (NEW - replaces 2 tools)
+	// 7. decision - DEPRECATED: delegates to memory tool
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "decision",
-		Description: `🟡 COMMON | Record architectural decisions (ADRs). Searchable via recall().
-
-REQUIRED: action (create|list)
-
-Actions:
-- create: Record decision. Requires: title. Optional: project, description, status, area, context, consequences
-- list: List decisions. Optional: project, status, area, limit
-
-Decisions are indexed with full-text search. Use recall(term) to find relevant decisions by keyword.
-
-Examples:
-- decision(action: "create", title: "Use PostgreSQL", project: "my-project")
-- decision(action: "list", project: "my-project")`,
+		Name:        "decision",
+		Description: `[DEPRECATED] Use ` + "`remember()`" + ` (auto-detects type=decision) or ` + "`memory`" + ` tool with type="decision" instead. This tool will be removed in the next release.`,
 		Annotations: &mcp.ToolAnnotations{
-			Title:         "Decision",
+			Title:         "Decision (deprecated)",
 			OpenWorldHint: boolPtr(false),
 		},
 	}, handleUnifiedDecision)

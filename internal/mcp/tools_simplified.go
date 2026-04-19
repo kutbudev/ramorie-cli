@@ -346,14 +346,17 @@ func handleTaskMove(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToolR
 // --- unified_memory: list/get/generate_skill ---
 
 type UnifiedMemoryInput struct {
-	Action      string  `json:"action"`              // list, get, generate_skill
-	Project     string  `json:"project"`             // For list, generate_skill
+	Action      string  `json:"action"`              // list, get, create, generate_skill
+	Project     string  `json:"project"`             // For list, create, generate_skill
 	MemoryID    string  `json:"memoryId"`            // For get
 	Term        string  `json:"term,omitempty"`      // For list filter
 	Limit       float64 `json:"limit,omitempty"`
 	Cursor      string  `json:"cursor,omitempty"`
-	Goal        string  `json:"goal,omitempty"`        // For generate_skill: what skill to create
+	Goal        string  `json:"goal,omitempty"`         // For generate_skill: what skill to create
 	AutoContext bool    `json:"auto_context,omitempty"` // For generate_skill: fetch suggested context automatically
+	// Fields used by decision→memory delegation (translateDecisionInputToMemoryInput)
+	Content string `json:"content,omitempty"` // For create: memory content
+	Type    string `json:"type,omitempty"`    // For create: memory type (decision, bug_fix, etc.)
 }
 
 // serializeSkillMarkdown formats frontmatter + body into a markdown string
@@ -460,8 +463,35 @@ func handleUnifiedMemory(ctx context.Context, req *mcp.CallToolRequest, input Un
 
 		return mustTextResult(result), nil, nil
 
+	case "create":
+		content := strings.TrimSpace(input.Content)
+		if content == "" {
+			return nil, nil, errors.New("content is required for create action")
+		}
+		if strings.TrimSpace(input.Project) == "" {
+			return nil, nil, errors.New("'project' parameter is REQUIRED for create action")
+		}
+		projectID, err := resolveProjectID(apiClient, input.Project)
+		if err != nil {
+			return nil, nil, err
+		}
+		saved, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
+			ProjectID: projectID,
+			Content:   content,
+			Type:      strings.TrimSpace(input.Type),
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return mustTextResult(map[string]interface{}{
+			"action":  "created",
+			"id":      saved.ID.String(),
+			"content": content,
+			"type":    input.Type,
+		}), nil, nil
+
 	default:
-		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: list, get, or set goal to generate a skill", action)
+		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: list, get, create, or set goal to generate a skill", action)
 	}
 }
 
@@ -541,7 +571,63 @@ type UnifiedDecisionInput struct {
 	Cursor       string  `json:"cursor,omitempty"`
 }
 
+// translateDecisionInputToMemoryInput converts the legacy UnifiedDecisionInput params
+// into UnifiedMemoryInput so that handleUnifiedMemory can serve the request.
+// Decision-specific ADR fields (title, description, status, area, context, consequences)
+// are flattened into the content string so no information is lost.
+func translateDecisionInputToMemoryInput(in UnifiedDecisionInput) UnifiedMemoryInput {
+	out := UnifiedMemoryInput{
+		Project: in.Project,
+		Limit:   in.Limit,
+		Cursor:  in.Cursor,
+		Type:    "decision",
+	}
+
+	action := strings.TrimSpace(strings.ToLower(in.Action))
+	if action == "" {
+		action = "list"
+	}
+
+	switch action {
+	case "create":
+		// Build a rich content string from all ADR fields.
+		var parts []string
+		if t := strings.TrimSpace(in.Title); t != "" {
+			parts = append(parts, t)
+		}
+		if d := strings.TrimSpace(in.Description); d != "" {
+			parts = append(parts, d)
+		}
+		if s := strings.TrimSpace(in.Status); s != "" {
+			parts = append(parts, "Status: "+s)
+		}
+		if a := strings.TrimSpace(in.Area); a != "" {
+			parts = append(parts, "Area: "+a)
+		}
+		if c := strings.TrimSpace(in.Context); c != "" {
+			parts = append(parts, "Context: "+c)
+		}
+		if q := strings.TrimSpace(in.Consequences); q != "" {
+			parts = append(parts, "Consequences: "+q)
+		}
+		out.Content = strings.Join(parts, "\n")
+		out.Action = "create"
+	default:
+		// list and any unrecognised action → list memories of type=decision.
+		out.Action = "list"
+	}
+
+	return out
+}
+
 func handleUnifiedDecision(ctx context.Context, req *mcp.CallToolRequest, input UnifiedDecisionInput) (*mcp.CallToolResult, interface{}, error) {
+	fmt.Fprintln(os.Stderr, "[DEPRECATED] The `decision` MCP tool is deprecated. Use `remember()` (auto-detects type=decision) or `memory` tool with type=\"decision\" instead. Scheduled for removal in the next release.")
+	memoryInput := translateDecisionInputToMemoryInput(input)
+	return handleUnifiedMemory(ctx, req, memoryInput)
+}
+
+// --- decision (legacy body preserved below for reference only — unreachable) ---
+func _legacyHandleUnifiedDecisionBody(ctx context.Context, req *mcp.CallToolRequest, input UnifiedDecisionInput) (*mcp.CallToolResult, interface{}, error) {
 	action := strings.TrimSpace(strings.ToLower(input.Action))
 	if action == "" {
 		action = "list"
@@ -563,47 +649,11 @@ func handleUnifiedDecision(ctx context.Context, req *mcp.CallToolRequest, input 
 			return nil, nil, err
 		}
 
-		decision, err := apiClient.CreateDecision(
-			projectID,
-			title,
-			strings.TrimSpace(input.Description),
-			"draft", // Agent-created decisions are always drafts
-			strings.TrimSpace(input.Area),
-			strings.TrimSpace(input.Context),
-			strings.TrimSpace(input.Consequences),
-			"agent",
-		)
-		if err != nil {
-			return nil, nil, err
-		}
-		return mustTextResult(map[string]interface{}{
-			"action":   "created",
-			"decision": decision,
-			"_message": "Decision created as draft",
-		}), nil, nil
+		_ = projectID // backend route /v1/decisions removed — kept for reference only
+		return nil, nil, errors.New("decision create endpoint removed from backend")
 
 	case "list":
-		var projectID string
-		if project := strings.TrimSpace(input.Project); project != "" {
-			var err error
-			projectID, err = resolveProjectID(apiClient, project)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-
-		decisions, err := apiClient.ListDecisions(projectID, strings.TrimSpace(input.Status), strings.TrimSpace(input.Area), 0)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		limit := int(input.Limit)
-		if limit <= 0 {
-			limit = 20
-		}
-
-		paginated, nextCursor, total := paginateSlice(decisions, input.Cursor, limit)
-		return mustTextResult(formatPaginatedResponse(paginated, nextCursor, total, getContextString())), nil, nil
+		return nil, nil, errors.New("decision list endpoint removed from backend")
 
 	default:
 		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: create or list", action)
