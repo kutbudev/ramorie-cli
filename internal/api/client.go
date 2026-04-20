@@ -756,37 +756,91 @@ type CreateMemoryOptions struct {
 	Writers    []string // Optional: user IDs with explicit write access
 }
 
-// CreateMemoryWithOptions creates a memory with full options including TTL, temporal, and procedural fields
-func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memory, error) {
+// SimilarMemory is a soft-duplicate suggestion returned alongside a
+// successful CreateMemory call when the new content falls in the 0.7-0.9
+// cosine-similarity band with an existing memory. Agents should surface
+// these as "do you want to merge?" prompts rather than ignoring them.
+type SimilarMemory struct {
+	ID             string  `json:"id"`
+	Title          string  `json:"title"`
+	ContentPreview string  `json:"content_preview"`
+	Similarity     float32 `json:"similarity"`
+}
+
+// RecentInProjectMemory is an auto-link "work unit" suggestion returned
+// alongside a successful CreateMemory call when the same project saw
+// another memory in the last 10 minutes. Lets the agent treat adjacent
+// saves as one logical work unit without explicit grouping.
+type RecentInProjectMemory struct {
+	ID             string    `json:"id"`
+	Title          string    `json:"title"`
+	ContentPreview string    `json:"content_preview"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// CreateMemoryResponse mirrors the backend CreateMemory response. The
+// embedded Memory carries the usual fields (id, content, tags, ...); the
+// three optional top-level slices surface agent-facing signals that the
+// backend attaches when the sync indexing path produced an embedding and
+// the soft-dupe / recent-in-project finders returned hits.
+//
+// Keep omitempty on the optional fields so the wire shape stays identical
+// to a plain models.Memory response for legacy callers deserializing into
+// the old struct directly.
+type CreateMemoryResponse struct {
+	models.Memory
+	SimilarMemories []SimilarMemory         `json:"similar_memories,omitempty"`
+	RecentInProject []RecentInProjectMemory `json:"recent_in_project,omitempty"`
+	LinkedTaskID    *string                 `json:"linked_task_id,omitempty"`
+	AutoLinked      bool                    `json:"auto_linked,omitempty"`
+}
+
+// CreateMemoryWithOptionsFull is the preferred entry point when the caller
+// wants the full backend response (soft-dupe candidates + recent-in-project
+// suggestions). CreateMemoryWithOptions wraps this and drops the extras
+// for backward compatibility.
+func (c *Client) CreateMemoryWithOptionsFull(opts CreateMemoryOptions) (*CreateMemoryResponse, error) {
+	respBody, err := c.postCreateMemory(opts)
+	if err != nil {
+		return nil, err
+	}
+	var resp CreateMemoryResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	return &resp, nil
+}
+
+// postCreateMemory is the shared request-building helper so Full and the
+// legacy wrapper never drift.
+func (c *Client) postCreateMemory(opts CreateMemoryOptions) ([]byte, error) {
+	reqBody := buildCreateMemoryReqBody(opts)
+	return c.makeRequest("POST", "/memories", reqBody)
+}
+
+// buildCreateMemoryReqBody constructs the POST /v1/memories body from the
+// Options struct. Isolated from the HTTP call so Full and legacy share
+// identical serialization.
+func buildCreateMemoryReqBody(opts CreateMemoryOptions) map[string]interface{} {
 	reqBody := map[string]interface{}{
 		"project_id": opts.ProjectID,
 		"content":    opts.Content,
 	}
-
-	// Add type if provided
 	if opts.Type != "" {
 		reqBody["type"] = opts.Type
 	}
-
-	// Add tags if provided
 	if len(opts.Tags) > 0 {
 		reqBody["tags"] = opts.Tags
 	}
-
-	// Add TTL if provided (for memory decay)
 	if opts.TTL > 0 {
 		reqBody["ttl"] = opts.TTL
 	}
-
-	// Add temporal validity if provided
 	if opts.ValidFrom != "" {
 		reqBody["valid_from"] = opts.ValidFrom
 	}
 	if opts.ValidUntil != "" {
 		reqBody["valid_until"] = opts.ValidUntil
 	}
-
-	// Add procedural memory fields if provided (for skill type)
 	if opts.Trigger != "" {
 		reqBody["trigger"] = opts.Trigger
 	}
@@ -796,8 +850,6 @@ func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memo
 	if opts.Validation != "" {
 		reqBody["validation"] = opts.Validation
 	}
-
-	// Add access control fields if provided
 	if opts.Visibility != "" {
 		reqBody["visibility"] = opts.Visibility
 	}
@@ -807,18 +859,19 @@ func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memo
 	if len(opts.Writers) > 0 {
 		reqBody["writers"] = opts.Writers
 	}
+	return reqBody
+}
 
-	respBody, err := c.makeRequest("POST", "/memories", reqBody)
+// CreateMemoryWithOptions creates a memory with full options including TTL, temporal, and procedural fields.
+// Returns *models.Memory only; callers that want the soft-dupe warnings or recent-in-project
+// suggestions must call CreateMemoryWithOptionsFull instead.
+func (c *Client) CreateMemoryWithOptions(opts CreateMemoryOptions) (*models.Memory, error) {
+	resp, err := c.CreateMemoryWithOptionsFull(opts)
 	if err != nil {
 		return nil, err
 	}
-
-	var memory models.Memory
-	if err := json.Unmarshal(respBody, &memory); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &memory, nil
+	mem := resp.Memory
+	return &mem, nil
 }
 
 // CreateEncryptedMemoryOptions contains options for creating an encrypted memory

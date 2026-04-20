@@ -1656,8 +1656,11 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		}
 	}
 
-	// Create non-encrypted memory with type and optional tags
-	memory, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
+	// Create non-encrypted memory with type and optional tags.
+	// CreateMemoryWithOptionsFull returns the full backend response so we can
+	// pass through similar_memories (soft-dupe merge candidates) and
+	// recent_in_project (work-unit suggestions) to the agent.
+	resp, err := apiClient.CreateMemoryWithOptionsFull(api.CreateMemoryOptions{
 		ProjectID: projectID,
 		Content:   content,
 		Type:      memoryType,
@@ -1667,14 +1670,23 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		return nil, nil, err
 	}
 
-	return mustTextResult(map[string]interface{}{
+	result := map[string]interface{}{
 		"action":        "memory_saved",
 		"message":       fmt.Sprintf("💾 Remembered as %s", memoryType),
-		"memory":        memory,
+		"memory":        resp.Memory,
 		"type":          memoryType,
 		"auto_detected": true,
 		"project_id":    projectID,
-	}), nil, nil
+	}
+	if len(resp.SimilarMemories) > 0 {
+		result["similar_memories"] = resp.SimilarMemories
+		result["_hint_similar"] = "⚠️ Near-duplicate memories exist (0.7-0.9 similarity). Consider merging rather than creating parallel records."
+	}
+	if len(resp.RecentInProject) > 0 {
+		result["recent_in_project"] = resp.RecentInProject
+		result["_hint_recent"] = "💡 This project saw another memory in the last 10 minutes — these may be part of the same work unit."
+	}
+	return mustTextResult(result), nil, nil
 }
 
 // shouldBeTask checks if the content is an explicit task rather than a memory.
