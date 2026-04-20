@@ -3144,6 +3144,15 @@ type FindInput struct {
 	Intent            string `json:"intent,omitempty"`             // "auto" (default) | "how_to" | "why" | "recent" | "owner" | "generic"
 	EntityHops        int    `json:"entity_hops,omitempty"`        // 0 = direct-match only; 1-3 = multi-hop entity expansion
 	IncludeSuperseded bool   `json:"include_superseded,omitempty"` // default false — omit memories marked superseded
+
+	// FastMode forces HyDE + rerank off for this request (beats HyDE/Rerank
+	// string knobs). Use for UUIDs, error codes, symbol names — anything
+	// where HyDE expansion wastes the ~5s cold-call latency. The backend
+	// also auto-routes literal-looking terms even when this is false.
+	FastMode bool `json:"fast_mode,omitempty"`
+	// Debug opts into the `_meta._debug.hyde_query` block in the response
+	// so you can see exactly what HyDE embedded. Default false.
+	Debug bool `json:"debug,omitempty"`
 }
 
 // handleFind wraps the backend POST /v1/memory/find hybrid search endpoint.
@@ -3182,7 +3191,9 @@ func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) 
 		Intent:            input.Intent,
 		EntityHops:        input.EntityHops,
 		IncludeSuperseded: input.IncludeSuperseded,
-		Purpose:          strings.TrimSpace(input.Purpose),
+		Purpose:           strings.TrimSpace(input.Purpose),
+		FastMode:          input.FastMode,
+		Debug:             input.Debug,
 	}
 
 	resp, err := apiClient.FindMemories(opts)

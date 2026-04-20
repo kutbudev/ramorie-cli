@@ -1054,6 +1054,12 @@ type FindMemoriesOptions struct {
 	Intent            string // "auto" (default) | "how_to" | "why" | "recent" | "owner" | "generic"
 	EntityHops        int    // 0 = direct only; 1-3 = multi-hop entity expansion
 	IncludeSuperseded bool   // default false — include memories marked superseded
+
+	// FastMode forces HyDE + rerank off. Beats HyDE/Rerank knobs. Use for
+	// literal queries (UUIDs, error codes) where HyDE expansion wastes ~5s.
+	FastMode bool
+	// Debug opts into the `_debug.hyde_query` block in the response Meta.
+	Debug bool
 }
 
 // FindResponse mirrors memoryretrieve.FindResponse on the backend.
@@ -1093,6 +1099,22 @@ type FindMeta struct {
 	RerankUsed      bool   `json:"rerank_used,omitempty"`
 	RerankLatencyMs int64  `json:"rerank_latency_ms,omitempty"`
 	Intent          string `json:"intent,omitempty"`
+
+	// AutoRouted: the backend's ShouldAutoFastMode heuristic skipped HyDE
+	// because the term looked literal (UUID, SHOUT_CASE, <3 words). Lets
+	// agents see why the cheap path was chosen vs. an explicit FastMode.
+	AutoRouted bool `json:"auto_routed,omitempty"`
+
+	// Debug is populated only when FindMemoriesOptions.Debug == true. Nil
+	// on the default path so wire format stays byte-identical for callers
+	// who didn't opt in.
+	Debug *FindDebug `json:"_debug,omitempty"`
+}
+
+// FindDebug bundles prompt-tuning signals returned when Debug=true.
+type FindDebug struct {
+	HyDEQuery    string                 `json:"hyde_query,omitempty"`
+	RerankScores []map[string]any       `json:"rerank_scores,omitempty"`
 }
 
 // FindMemories calls POST /v1/memory/find. Pass ProjectHint to let the backend
@@ -1141,6 +1163,12 @@ func (c *Client) FindMemories(opts FindMemoriesOptions) (*FindResponse, error) {
 	}
 	if opts.IncludeSuperseded {
 		body["include_superseded"] = true
+	}
+	if opts.FastMode {
+		body["fast_mode"] = true
+	}
+	if opts.Debug {
+		body["debug"] = true
 	}
 
 	extraHeaders := map[string]string{}
