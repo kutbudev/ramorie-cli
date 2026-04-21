@@ -1,29 +1,50 @@
 # Procedural Memory / Skills System
 
-Ramorie supports **procedural memory** (skills) through the existing `add_memory` and `recall` tools. A skill is a special memory type that stores reusable procedures, patterns, or workflows that the agent has learned.
+Ramorie supports **procedural memory** (skills) through the `remember`,
+`memory`, `find`, and `recall` tools. A skill is a memory whose content
+captures a reusable procedure, pattern, or workflow the agent has learned.
 
 Unlike regular memories (which store facts), skills store **HOW to do things**.
+
+> **v5.0.0:** The old top-level `skill` tool has been removed. Create skills
+> with `remember` (auto type detection) or generate them from prior activity
+> with `memory(action="generate", goal="...")`.
 
 ## Overview
 
 | Aspect | Regular Memory | Skill Memory |
 |--------|---------------|--------------|
-| Purpose | Store facts, decisions, preferences | Store procedures, workflows, patterns |
-| Type | `general`, `decision`, `bug_fix`, etc. | `skill` |
+| Purpose | Facts, decisions, preferences | Procedures, workflows, patterns |
+| Type | `general`, `bug_fix`, etc. (auto-detected) | `skill` (auto-detected from step-like content) |
 | Content | What happened, what was decided | How to do something step-by-step |
-| Retrieval | `recall` with any term | `recall` with `type=skill` filter |
+| Retrieval | `recall` / `find` with any term | `find` with topic, or `memory(action="list", type="skill")` |
 
 ## Creating Skills
 
-Use `add_memory` with `type=skill`:
+### Option A — `remember` (preferred for ad-hoc capture)
 
 ```json
 {
-  "tool": "add_memory",
+  "tool": "remember",
   "arguments": {
     "project": "my-project",
-    "content": "When deploying to production: 1) Run full test suite with `yarn test` 2) Check for pending migrations with `yarn migrate:status` 3) Build production bundle with `yarn build` 4) Deploy with `yarn deploy:prod` 5) Verify health endpoint responds 200",
-    "type": "skill"
+    "content": "When deploying to production: 1) Run full test suite with `yarn test` 2) Check for pending migrations with `yarn migrate:status` 3) Build production bundle with `yarn build` 4) Deploy with `yarn deploy:prod` 5) Verify health endpoint responds 200"
+  }
+}
+```
+
+The server auto-detects step-like content and tags it as a `skill`.
+
+### Option B — `memory(action="generate")` (synthesize from activity)
+
+Ask the server to distill a skill from recent task notes + memories:
+
+```json
+{
+  "tool": "memory",
+  "arguments": {
+    "action": "generate",
+    "goal": "How to deploy this project to production safely"
   }
 }
 ```
@@ -32,11 +53,11 @@ Use `add_memory` with `type=skill`:
 
 Write skills as clear, actionable procedures:
 
-1. **Start with a trigger condition** - When should this skill be applied?
-2. **List steps in order** - What actions to take, in sequence
-3. **Include specific commands** - Exact commands, paths, or code patterns
-4. **Note edge cases** - What to watch for or avoid
-5. **End with verification** - How to confirm success
+1. **Start with a trigger condition** — When should this skill be applied?
+2. **List steps in order** — What actions to take, in sequence
+3. **Include specific commands** — Exact commands, paths, or code patterns
+4. **Note edge cases** — What to watch for or avoid
+5. **End with verification** — How to confirm success
 
 ### Good Skill Examples
 
@@ -62,97 +83,94 @@ When creating a feature branch: 1) Pull latest main: `git checkout main && git p
 
 ## Retrieving Skills
 
-### List All Skills for a Project
+### List all skills for a project
 
 ```json
 {
-  "tool": "recall",
+  "tool": "memory",
   "arguments": {
-    "term": "*",
+    "action": "list",
     "project": "my-project",
     "type": "skill"
   }
 }
 ```
 
-### Search Skills by Topic
+### Search skills by topic (fuzzy)
 
 ```json
 {
-  "tool": "recall",
+  "tool": "find",
   "arguments": {
-    "term": "deploy production",
+    "query": "deploy production",
     "type": "skill"
   }
 }
 ```
 
-### Search Skills with Minimum Relevance
+### Search skills with minimum relevance
 
 ```json
 {
-  "tool": "recall",
+  "tool": "find",
   "arguments": {
-    "term": "database migration",
+    "query": "database migration",
     "type": "skill",
     "min_score": 0.7
   }
 }
 ```
 
-## Agent Usage Patterns
-
-### Learning a New Skill
-
-When an agent completes a multi-step procedure successfully, it should store the procedure as a skill:
-
-```
-Agent completes deployment successfully
-  -> Stores: add_memory(type="skill", content="When deploying: 1) ... 2) ... 3) ...")
-```
-
-### Applying a Learned Skill
-
-Before starting a known procedure, the agent should check for relevant skills:
-
-```
-User asks: "Deploy to production"
-  -> Agent: recall(term="deploy production", type="skill")
-  -> If found: Follow the stored procedure
-  -> If not found: Ask user for steps, then store as skill
-```
-
-### Evolving Skills
-
-When a procedure changes (e.g., new step added, tool changed), create a new skill memory with the updated content. The old one remains in history but the newer one will be returned first by `recall` (sorted by recency).
-
-## Integration with Context Packs
-
-Skills can be added to context packs for organized retrieval:
+### Exact/lexical search
 
 ```json
 {
-  "tool": "manage_context_pack",
+  "tool": "recall",
   "arguments": {
-    "action": "add_memory",
-    "packId": "pack-uuid",
-    "memoryId": "skill-memory-uuid"
+    "term": "yarn deploy:prod",
+    "type": "skill"
   }
 }
 ```
 
-This allows grouping related skills (e.g., all deployment skills, all debugging skills) into a single context pack.
+## Agent Usage Patterns
+
+### Learning a new skill
+
+When the agent completes a multi-step procedure successfully, store it:
+
+```
+Agent completes deployment successfully
+  → remember("When deploying: 1) ... 2) ... 3) ...")
+```
+
+### Applying a learned skill
+
+Before starting a known procedure, check for relevant skills:
+
+```
+User asks: "Deploy to production"
+  → find(query="deploy production", type="skill")
+  → If found: follow the stored procedure
+  → If not found: ask the user for steps, then remember() the result
+```
+
+### Evolving skills
+
+When a procedure changes (new step, tool swap), create a new memory with
+the updated content. The older one remains in history; `find` / `recall`
+return the most recent match first by default.
 
 ## FAQ
 
 **Q: How is a skill different from a regular memory with type=pattern?**
-A: A `pattern` describes a recurring observation or code pattern. A `skill` describes an actionable procedure - specific steps to follow. Use `pattern` for "I noticed X tends to happen" and `skill` for "When X happens, do Y then Z."
+A: A `pattern` describes a recurring observation ("X tends to happen when..."). A `skill` describes an actionable procedure ("When X happens, do Y then Z"). The server auto-tags step-numbered content as `skill`.
 
 **Q: Should I store every successful procedure as a skill?**
 A: Store procedures that are likely to be repeated and have more than 2-3 steps. Simple one-liners don't need to be skills.
 
 **Q: What about skills that apply across projects?**
-A: Currently skills are project-scoped. If a skill applies broadly, store it in each relevant project or in a shared/common project.
+A: Skills are project-scoped by default. For cross-project skills, store them in a shared/common project or omit the `project` argument to save them against the user's default scope.
 
 **Q: Can skills reference other skills?**
-A: Not directly (no memory-to-memory relations yet). Use descriptive content that mentions related procedures by name so `recall` can find them together.
+A: Not directly in content. Use the knowledge graph via the `entity` tool (`action="link"`) to connect related skills.

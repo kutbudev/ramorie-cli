@@ -1,10 +1,11 @@
-# Ramorie MCP - Windsurf Rules
+# Ramorie MCP — Windsurf Rules
 
-> Bu dosyayı `.windsurfrules` olarak projenize kopyalayın.
+> Save this file as `.windsurfrules` in the root of your project.
 
-## MCP Server Yapılandırması
+## MCP Server Config
 
-Ramorie MCP server'ı Windsurf'te kullanmak için `~/.windsurf/settings.json` veya proje `.windsurf/mcp.json` dosyasına ekleyin:
+Add to `~/.codeium/windsurf/mcp_config.json` (or the project-level
+`.windsurf/mcp.json`):
 
 ```json
 {
@@ -18,144 +19,138 @@ Ramorie MCP server'ı Windsurf'te kullanmak için `~/.windsurf/settings.json` ve
 }
 ```
 
----
+Then authenticate the CLI (MCP reuses the same credentials):
 
-## Agent Kuralları
+```bash
+ramorie setup login    # writes ~/.ramorie/config.json
+```
 
-### 🎯 Temel Prensipler
-
-1. **Her oturumda bağlamı kontrol et**
-   - İlk iş: `get_active_context_pack` çağır
-   - Aktif context yoksa: `list_context_packs` → `activate_context_pack`
-
-2. **Görev odaklı çalış**
-   - Yeni iş = Yeni task: `create_task` + `start_task`
-   - İlerlemeyi kaydet: `add_task_note`
-   - Bitince: `complete_task`
-
-3. **Bilgiyi sakla**
-   - Öğrenilenleri kaydet: `add_memory`
-   - Mevcut bilgiyi ara: `recall`
-
-4. **Kararları belgele**
-   - Önemli teknik kararlar: `create_decision`
-   - ADR formatı kullan (context, consequences)
+> **v5.0.0:** 14 unified tools. Legacy tools (`create_task`, `add_memory`,
+> `search_memories`, `create_decision`, `activate_context_pack`, `skill`,
+> `decision`, `get_active_task`, `manage_focus`) have been removed. Restart
+> Windsurf after upgrading the CLI.
 
 ---
 
-## 📋 Görev Yönetimi Kuralları
+## Agent Rules
 
-### Yeni Görev Başlatma
-```
-1. get_active_context_pack    → Bağlamı kontrol et
-2. create_task                → Görevi oluştur
-   - description: "Net ve açıklayıcı başlık"
-   - priority: H/M/L
-3. start_task                 → Görevi başlat
-4. add_task_note              → İlk planı kaydet
-```
+### Core Principles
 
-### Çalışma Sırasında
-```
-- Her anlamlı ilerleme → add_task_note
-- Her 25% ilerleme → update_progress
-- Öğrenilen bilgi → add_memory
-- Alınan karar → create_decision
-```
+1. **Initialize context each session**
+   - First call: `setup_agent` (auto-detects project from cwd)
 
-### Görev Tamamlama
-```
-1. add_task_note              → Son durumu kaydet
-2. complete_task              → Görevi tamamla
-3. add_memory                 → Öğrenilenleri sakla (opsiyonel)
-```
+2. **Task-driven work**
+   - New work → `task(action="create")` + `task(action="start")`
+   - Track progress → `task(action="note")`
+   - When done → `task(action="complete")`
+
+3. **Persist knowledge**
+   - Save learnings → `remember("...")`
+   - Search before asking → `find("...")` or `recall("...")`
+
+4. **Record decisions as memories**
+   - `remember("chose X over Y because ...")` — auto-tagged by server
+   - No separate `create_decision` tool in v5.0.0
 
 ---
 
-## 🧠 Bilgi Yönetimi Kuralları
+## Task Management
 
-### Memory Kullanımı
-- **Kaydet**: Tekrar kullanılabilir her bilgiyi `add_memory` ile sakla
-- **Ara**: Soru sormadan önce `recall` ile mevcut bilgiyi kontrol et
-- **Bağla**: İlgili görevlerle `create_memory_task_link` kullan
-
-### Memory İçerik Formatı
+### Starting a task
 ```
-✅ İyi:
-"PostgreSQL connection pooling: max_connections=100,
-pool_size=20. Performans için pgbouncer önerilir."
+1. setup_agent                    → confirm context
+2. task(action="create",
+        description="clear title",
+        priority="H"|"M"|"L")
+3. task(action="start", id=...)
+4. task(action="note",  id=..., note="initial plan")
+```
 
-❌ Kötü:
-"db ayarları"
+### While working
+```
+- Each meaningful step  → task(action="note", ...)
+- Every ~25% milestone  → task(action="progress", progress=N)
+- Learned something     → remember("...")
+- Made a decision       → remember("chose ... because ...")
+```
+
+### Completing
+```
+1. task(action="note",     id=..., note="summary")
+2. task(action="complete", id=...)
+3. remember("...")            → optional key learning
 ```
 
 ---
 
-## 📝 Karar Kayıt Kuralları
+## Memory
 
-### Ne Zaman Karar Kaydı Oluştur?
-- Mimari değişiklikler
-- Teknoloji seçimleri
-- API tasarım kararları
-- Güvenlik politikaları
-- Performans trade-off'ları
+### Use `remember` for
+- Reusable technical info
+- Error solutions
+- Architectural decisions
+- Performance notes
 
-### Karar Formatı
-```json
-{
-  "title": "JWT yerine Session-based Auth",
-  "description": "Kullanıcı oturumları için session tabanlı auth",
-  "area": "Architecture",
-  "status": "approved",
-  "context": "Mobile app desteği için stateless gerekli değil,
-              server-side session yönetimi daha güvenli",
-  "consequences": "Redis session store gerekecek,
-                   horizontal scaling için sticky sessions"
-}
+### Memory format
+```
+Good:
+"PostgreSQL connection pooling: max_connections=100, pool_size=20. Use pgbouncer for throughput > 2k rps."
+
+Bad:
+"db settings"
+```
+
+### Search before asking the user
+```
+find("pg connection pool")     → hybrid semantic + lexical
+recall("pool_size")            → FTS for exact terms
 ```
 
 ---
 
-## 🔄 Bağlam Yönetimi Kuralları
+## Context Packs
 
-### Context Pack Kullanımı
-- Her proje/özellik için ayrı context pack
-- Konu değiştiğinde `activate_context_pack`
-- Aktif context = Agent'ın odak noktası
+Context packs group related memories + tasks. Managed via the CLI only
+(no MCP tool to activate them in v5.0.0 — pass `project` on tool args to
+scope):
 
-### Context Değişikliği
-```
-1. stop_task                  → Mevcut görevi duraklat
-2. activate_context_pack      → Yeni bağlamı aktifle
-3. get_next_tasks             → Yeni görevleri al
-4. start_task                 → Yeni göreve başla
+```bash
+ramorie context-pack list
+ramorie context-pack create "feature-auth"
+ramorie context-pack delete <id>
 ```
 
 ---
 
-## ⚡ Hızlı Referans
+## Quick Reference (14 tools)
 
-| İşlem | Tool |
-|-------|------|
-| Görev oluştur | `create_task` |
-| Görevi başlat | `start_task` |
-| Not ekle | `add_task_note` |
-| İlerleme güncelle | `update_progress` |
-| Görevi tamamla | `complete_task` |
-| Bilgi sakla | `add_memory` |
-| Bilgi ara | `recall` |
-| Karar kaydet | `create_decision` |
-
----
-
-## 🚫 Yapılmaması Gerekenler
-
-1. ❌ Görev oluşturmadan çalışmaya başlama
-2. ❌ İlerlemeyi kaydetmeden uzun süre çalışma
-3. ❌ Önemli kararları belgelemeden geçme
-4. ❌ Memory'leri etiketsiz bırakma
-5. ❌ Bağlamı kontrol etmeden yeni işe başlama
+| Action | Tool |
+|--------|------|
+| Initialize | `setup_agent` |
+| Projects | `list_projects`, `create_project` |
+| Task ops | `task(action=list/get/create/start/complete/stop/progress/note/move)` |
+| Subtasks | `manage_subtasks` |
+| Save memory | `remember` |
+| List memories | `memory(action="list")` |
+| Generate skill | `memory(action="generate", goal="...")` |
+| Search (fuzzy) | `find` |
+| Search (exact) | `recall` |
+| Stats | `get_stats` |
+| Timeline | `get_agent_activity` |
+| Context | `surface_context` |
+| Graph | `entity` |
+| Admin | `admin` |
 
 ---
 
-*Ramorie MCP v1.7.0 - 57 tool desteklenmektedir*
+## Anti-Patterns
+
+1. Starting work without `setup_agent`
+2. Long stretches without `task(action="note", ...)`
+3. Skipping decisions — just `remember("chose ...")` it
+4. Using `remember` for actionable work (use `task(action="create")`)
+5. Inventing tool names — 14 tools are the complete set
+
+---
+
+*Ramorie MCP v5.0.0 — 14 tools.*

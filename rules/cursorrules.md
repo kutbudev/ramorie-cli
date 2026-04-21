@@ -1,10 +1,10 @@
-# Ramorie MCP - Cursor Rules
+# Ramorie MCP — Cursor Rules
 
-> Bu dosyayı `.cursorrules` olarak projenize kopyalayın.
+> Save this file as `.cursorrules` in the root of your project.
 
-## MCP Server Yapılandırması
+## MCP Server Config
 
-Ramorie MCP server'ı Cursor'da kullanmak için `.cursor/mcp.json` dosyasına ekleyin:
+Add to `.cursor/mcp.json`:
 
 ```json
 {
@@ -17,33 +17,47 @@ Ramorie MCP server'ı Cursor'da kullanmak için `.cursor/mcp.json` dosyasına ek
 }
 ```
 
+Then authenticate the CLI (MCP reuses the same credentials):
+
+```bash
+ramorie setup login    # writes ~/.ramorie/config.json
+```
+
+> **v5.0.0:** 14 unified tools. Legacy tools (`create_task`, `add_memory`,
+> `search_memories`, `create_decision`, `activate_context_pack`, `skill`,
+> `decision`, `get_active_task`, `manage_focus`) no longer exist. Restart
+> Cursor after upgrading the CLI.
+
 ---
 
 ## Core Principles
 
-### 1. Context-First Approach
+### 1. Context-First
 Always start by initializing the session:
 ```
-setup_agent → Initialize session and get project context
-task(action="list") → See pending work
+setup_agent                → initialize session, auto-detect project from cwd
+task(action="list")        → see pending work
 ```
 
 ### 2. Task-Driven Development
-Every piece of work should be tracked:
+Every piece of work should be tracked via the unified `task` tool:
 ```
-create_task → Start new work
-start_task → Begin working
-add_task_note → Log progress
-complete_task → Finish work
+task(action="create", description="...")  → start new work
+task(action="start",  id="...")           → begin working
+task(action="note",   id="...", note="...")→ log progress
+task(action="complete", id="...")         → finish work
 ```
 
 ### 3. Knowledge Persistence
 Save everything valuable:
 ```
-add_memory → Store learnings
-recall → Search existing knowledge
-create_decision → Record important decisions
+remember("content")        → store a memory (type auto-detected)
+find("query")              → hybrid semantic + lexical search
+recall("term")             → FTS search (pass precision:true for find backend)
 ```
+
+Decisions are just memories — `remember` auto-tags them. There is no
+`create_decision` tool in v5.0.0.
 
 ---
 
@@ -51,170 +65,143 @@ create_decision → Record important decisions
 
 ### Starting New Work
 ```
-1. Check context: get_active_context_pack
-2. Create task: create_task with clear description
-3. Start task: start_task (sets as active)
-4. Plan: add_task_note with initial approach
+1. setup_agent                     → confirm project context
+2. task(action="create", ...)      → create task with clear description
+3. task(action="start", id=...)    → mark active
+4. task(action="note", id=..., note="initial plan: ...")
 ```
 
 ### During Development
 ```
-- Log progress: add_task_note after each milestone
-- Update progress: update_progress (0-100%)
-- Save learnings: add_memory for reusable info
-- Record decisions: create_decision for architectural choices
+- task(action="note", ...)              → log progress at each milestone
+- task(action="progress", progress=N)   → 0-100 percentage
+- remember("...")                       → save reusable info
+- remember("chose X over Y because ...")→ architectural decisions
 ```
 
 ### Completing Work
 ```
-1. Final note: add_task_note with summary
-2. Complete: complete_task
-3. Optional: add_memory for key learnings
+1. task(action="note", id=..., note="summary")
+2. task(action="complete", id=...)
+3. remember("...")                → (optional) capture key learnings
 ```
 
 ---
 
 ## Memory Bank Usage
 
-### When to Save Memory
-- Code patterns that work well
-- Configuration snippets
-- API endpoints and their usage
+### When to save memory
+- Code patterns that work
+- Config snippets
+- API endpoint usage
 - Error solutions
 - Performance optimizations
+- Architectural decisions (just `remember` — no separate tool)
 
-### Memory Format
+### Memory format
 ```
-Good: "PostgreSQL JSONB indexing: CREATE INDEX idx_data ON table USING GIN (data jsonb_path_ops); Improves query performance 10x for JSON searches."
-
-Bad: "db index stuff"
+Good: "PostgreSQL JSONB indexing: CREATE INDEX idx_data ON table USING GIN (data jsonb_path_ops); improves query performance ~10x for JSON searches."
+Bad:  "db index stuff"
 ```
 
-### Searching Memory
+### Searching
 Before asking the user:
 ```
-recall "relevant keywords" → Check if answer exists
+find("relevant keywords")  → hybrid search (preferred for fuzzy)
+recall("exact term")       → FTS (fast, lexical)
 ```
 
 ---
 
-## Decision Recording (ADR)
+## Context Packs
 
-### When to Record
-- Architecture changes
-- Technology choices
-- API design decisions
-- Security policies
-- Performance trade-offs
+Context packs group related memories + tasks. Manage them via the CLI
+(no MCP tool for activation in v5.0.0 — pass `project` field on tool args
+to scope queries):
 
-### Decision Format
-```json
-{
-  "title": "Clear, descriptive title",
-  "description": "Brief summary",
-  "area": "Frontend|Backend|Architecture|DevOps|Security",
-  "status": "draft|proposed|approved|deprecated",
-  "context": "Why this decision was made",
-  "consequences": "Impact and trade-offs"
-}
+```bash
+ramorie context-pack list
+ramorie context-pack create <name>
+ramorie context-pack delete <id>
 ```
 
 ---
 
-## Context Management
+## Quick Reference (14 tools)
 
-### Active Context = Current Focus
-- Each project/feature should have its own context pack
-- Switch context when changing focus
-- Context helps filter relevant tasks and memories
-
-### Switching Context
-```
-1. stop_task → Pause current work
-2. activate_context_pack → Switch to new context
-3. get_next_tasks → See pending tasks
-4. start_task → Begin new task
-```
-
----
-
-## Quick Reference
-
-| Action | Tool | Required Params |
-|--------|------|-----------------|
-| New task | `create_task` | description |
-| Start work | `start_task` | taskId |
-| Log progress | `add_task_note` | taskId, note |
-| Update % | `update_progress` | taskId, progress |
-| Complete | `complete_task` | taskId |
-| Save info | `add_memory` | content |
-| Search info | `recall` | term |
-| Record decision | `create_decision` | title |
-| Switch context | `activate_context_pack` | packId |
+| Goal | Tool + Args |
+|------|-------------|
+| Initialize session | `setup_agent` |
+| List projects | `list_projects` |
+| Create project | `create_project(name="...")` |
+| List tasks | `task(action="list")` |
+| Create task | `task(action="create", description="...")` |
+| Start task | `task(action="start", id="...")` |
+| Note progress | `task(action="note", id="...", note="...")` |
+| Update progress | `task(action="progress", id="...", progress=N)` |
+| Complete task | `task(action="complete", id="...")` |
+| Save info | `remember("...")` |
+| Search (fuzzy) | `find("...")` |
+| Search (exact) | `recall("...")` |
+| List memories | `memory(action="list")` |
+| Generate skill | `memory(action="generate", goal="...")` |
+| Subtasks | `manage_subtasks(action="...", ...)` |
+| Task stats | `get_stats()` |
+| Agent timeline | `get_agent_activity()` |
+| Context surface | `surface_context(file="...")` |
+| Graph ops | `entity(action="...", ...)` |
+| Admin ops | `admin(action="consolidate" / "cleanup" / ...)` |
 
 ---
 
 ## Anti-Patterns
 
-### Don't Do This
-1. ❌ Working without creating a task
-2. ❌ Long sessions without logging progress
-3. ❌ Skipping decision documentation
-4. ❌ Leaving memories without tags
-5. ❌ Starting work without checking context
-
-### Do This Instead
-1. ✅ Always create_task before starting
-2. ✅ add_task_note after each milestone
-3. ✅ create_decision for important choices
-4. ✅ add_memory with descriptive content
-5. ✅ get_active_context_pack at session start
+- Don't work without calling `setup_agent` first.
+- Don't go long stretches without `task(action="note", ...)`.
+- Don't use `remember` for actionable work — use `task(action="create")` (or prefix remember content with `todo:`).
+- Don't invent tool names. The 14 above are the complete set.
+- Don't store implementation details as memories — attach them to the task via `task(action="note", ...)`.
 
 ---
 
 ## Progress Tracking
 
-| Percentage | Stage |
-|------------|-------|
-| 0% | Not started |
-| 25% | Planning/Research |
-| 50% | Implementation started |
-| 75% | Testing phase |
-| 100% | Completed |
+| % | Stage |
+|---|-------|
+| 0 | Not started |
+| 25 | Planning / research |
+| 50 | Implementation |
+| 75 | Testing |
+| 100 | Complete |
 
 ---
 
 ## Example Session
 
 ```
-// Session start
-setup_agent → session ready, project auto-detected
-task(action="list") → no pending work
+# Start
+setup_agent                          → session ready, project auto-detected
+task(action="list")                  → no pending work
 
-// New work
-create_task "Implement password reset flow"
-start_task "abc123"
-add_task_note "abc123" "Plan: 1. Email service 2. Token generation 3. Reset endpoint"
+# New work
+task(action="create", description="Implement password reset flow", priority="H")
+task(action="start", id="abc123")
+task(action="note", id="abc123", note="Plan: 1) email service 2) token gen 3) reset endpoint")
 
-// Progress
-add_task_note "abc123" "Email service integrated with SendGrid"
-update_progress "abc123" 25
-add_memory "SendGrid API: Use v3/mail/send endpoint, requires API key in Authorization header"
+# Progress
+task(action="note", id="abc123", note="SendGrid integration done")
+task(action="progress", id="abc123", progress=25)
+remember("SendGrid: POST /v3/mail/send with API key in Authorization: Bearer header")
 
-// Decision
-create_decision {
-  title: "SendGrid for transactional emails",
-  area: "Backend",
-  context: "Need reliable email delivery, SendGrid has good deliverability",
-  consequences: "Monthly cost ~$15, vendor lock-in for email templates"
-}
+# Decision (just a memory)
+remember("Chose SendGrid for transactional email: best deliverability, ~$15/mo, trade-off: vendor lock-in on templates")
 
-// Complete
-add_task_note "abc123" "Password reset flow complete with tests"
-update_progress "abc123" 100
-complete_task "abc123"
+# Finish
+task(action="note", id="abc123", note="Password reset shipped with tests")
+task(action="progress", id="abc123", progress=100)
+task(action="complete", id="abc123")
 ```
 
 ---
 
-*Ramorie MCP v1.7.0 - 57 tools available*
+*Ramorie MCP v5.0.0 — 14 tools.*

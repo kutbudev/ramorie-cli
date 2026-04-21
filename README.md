@@ -89,17 +89,23 @@ go build -o ramorie ./cmd/jbraincli
 
 ## 🏁 Quick Start
 
-### 1. Create an Account
+### 1. Authenticate
+
+Run the interactive setup menu (it can register a new account or log in to an existing one):
 
 ```bash
-ramorie setup register
+ramorie setup            # interactive: Login / Register / API key / status
+# or directly:
+ramorie setup login      # email + password
 ```
+
+Credentials are written to `~/.ramorie/config.json`.
 
 ### 2. Create Your First Project
 
 ```bash
-ramorie project init "My Project"
-ramorie project use "My Project"
+ramorie project create "My Project"
+ramorie project list
 ```
 
 ### 3. Start Managing Tasks
@@ -115,7 +121,7 @@ ramorie kanban
 ramorie task start <task-id>
 
 # Mark it complete
-ramorie task done <task-id>
+ramorie task complete <task-id>
 ```
 
 ### 4. Store Knowledge
@@ -167,16 +173,16 @@ ramorie memory recall "password"
 The CLI connects to a hosted PostgreSQL service automatically. No database setup required! Simply register for an account and start using the tool.
 
 ### Account Setup
-After installation, create your account:
+After installation, authenticate:
 ```bash
-# Register new account
-ramorie setup register
+# Interactive menu (includes register, login, API key, status)
+ramorie setup
 
-# Or login with existing account
+# Or directly log in with an existing account
 ramorie setup login
 ```
 
-Your API key will be stored securely in `~/.ramorie/config.json`.
+Your API key will be stored in `~/.ramorie/config.json`.
 
 ### Gemini API Key Setup
 
@@ -213,13 +219,15 @@ If you prefer, you can set the `GEMINI_API_KEY` environment variable instead of 
 ### **Project Commands**
 ```bash
 # Project lifecycle
-ramorie project init <name>              # Create new project
+ramorie project create <name>            # Create new project
 ramorie project list                     # List all projects
-ramorie project delete <name>            # Delete project
+ramorie project show <name-or-id>        # Show project details
+ramorie project update <id>              # Update a project
+ramorie project delete <name-or-id>      # Delete project
 
 # Examples
-ramorie project init "orkai-backend"
-ramorie project use orkai-backend
+ramorie project create "orkai-backend"
+ramorie project show orkai-backend
 ```
 
 ### **Task Commands**
@@ -227,21 +235,23 @@ ramorie project use orkai-backend
 # Task creation & management
 ramorie task create <description>         # Create task
 ramorie task list                        # List tasks
-ramorie task info <id>                   # Show detailed task information
+ramorie task show <id>                   # Show detailed task information
 ramorie task start <id>                  # Start working on task
-ramorie task done <id>                   # Mark task complete
-
-# Coming soon:
-# ramorie task progress <id> <0-100>     # Update progress
-# ramorie task modify <id> [flags]       # Modify task properties
-# ramorie task delete <id>               # Delete task
+ramorie task progress <id> <0-100>       # Update progress percentage
+ramorie task stop <id>                   # Stop (pause) a task
+ramorie task complete <id>               # Mark task complete
+ramorie task update <id> [flags]         # Modify task properties
+ramorie task move <id> <status>          # Move task to a status
+ramorie task delete <id>                 # Delete task
+ramorie task elaborate <id>              # AI-assisted task elaboration
+ramorie task duplicate <id>              # Duplicate a task
+ramorie task next [count]                # Show next prioritized tasks
 
 # Examples
 ramorie task create "Implement user authentication"
-ramorie task create "Write unit tests"
 ramorie task start a1b2c3d4              # Using partial task ID
-ramorie task info a1b2c3d4               # View full details
-ramorie task done a1b2c3d4               # Mark complete
+ramorie task show a1b2c3d4               # View full details
+ramorie task complete a1b2c3d4           # Mark complete
 ```
 
 ### **Annotation Commands**
@@ -300,7 +310,7 @@ ramorie kanban                               # Display kanban board
 
 ```bash
 # Examples of GOOD task create usage:
-ramorie task create "Fix authentication bug in login endpoint"
+ramorie task create "Fix authentication bug in login endpoint" --priority H
 ramorie task create "Implement user profile editing feature"
 ramorie task create "Write unit tests for payment module"
 ramorie task create "Deploy version 2.1 to production"
@@ -338,11 +348,11 @@ ramorie annotate a1b2c3d4 "Performance improved 3x after adding database indexes
 
 ### **Starting a New Feature**
 ```bash
-# 1. Create or switch to project
-ramorie project use "my-app"
+# 1. Make sure the project exists (projects are passed per-command via --project)
+ramorie project list
 
 # 2. Create high-priority task
-ramorie task create "Implement OAuth integration" --priority H --tags "auth,api"
+ramorie task create "Implement OAuth integration" --project my-app --priority H --tags "auth,api"
 
 # 3. Start working
 ramorie task start <task-id>
@@ -357,7 +367,7 @@ ramorie task progress <task-id> 50
 ramorie remember "OAuth requires redirect_uri to match exactly - case sensitive"
 
 # 7. Complete task
-ramorie task done <task-id>
+ramorie task complete <task-id>
 ```
 
 ### **Daily Standup Prep**
@@ -499,18 +509,30 @@ Add to your MCP configuration:
 }
 ```
 
-### Available MCP Tools
+### Available MCP Tools (v5.0.0 — 14 tools)
 
-| Tool | Description |
-|------|-------------|
-| `create_task` | Create a new task |
-| `list_tasks` | List tasks with filters |
-| `complete_task` | Mark task as complete |
-| `add_memory` | Store a memory/insight |
-| `search_memories` | Semantic search memories |
-| `get_next_tasks` | Get prioritized next tasks |
-| `analyze_task_risks` | AI risk analysis |
-| `analyze_task_dependencies` | Dependency analysis |
+| Tool | Tier | Description |
+|------|------|-------------|
+| `setup_agent` | Core | Initialize session, auto-detect project from cwd |
+| `list_projects` | Core | List personal + org projects |
+| `remember` | Core | Store memory (auto type detection; `todo:` prefix → task) |
+| `find` | Core | Hybrid semantic + lexical search (HyDE + rerank) |
+| `recall` | Core | FTS search; `precision: true` routes to `find` |
+| `task` | Core | Unified task ops: list/get/create/start/complete/stop/progress/note/move |
+| `memory` | Common | Unified memory ops + skill generation via `goal` |
+| `get_stats` | Common | Task statistics |
+| `get_agent_activity` | Common | Agent timeline query |
+| `surface_context` | Common | File/domain-scoped context surfacing |
+| `create_project` | Advanced | Create project |
+| `manage_subtasks` | Advanced | Subtask CRUD |
+| `entity` | Advanced | Knowledge graph ops (10 actions) |
+| `admin` | Advanced | consolidate/cleanup/orgs/export/import/plan/analyze |
+
+> **v5.0.0 upgrade note:** Legacy tools (`create_task`, `add_memory`,
+> `search_memories`, `create_decision`, `activate_context_pack`, `skill`,
+> `decision`, `get_active_task`, `manage_focus`) have been removed. Restart
+> your MCP client (Claude Code / Cursor / Windsurf) after upgrading.
+> Run `ramorie mcp tools` for the live list.
 
 ---
 
@@ -633,19 +655,11 @@ Restart Codex CLI (or the Codex app) after editing so it reloads the MCP setting
 
 ### Available MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `create_task` | Create a new task |
-| `list_tasks` | List tasks with filtering |
-| `get_next_tasks` | Get prioritized tasks for workflow |
-| `start_task` | Start working on a task |
-| `complete_task` | Mark task as completed |
-| `add_task_note` | Add annotation to a task |
-| `create_project` | Create a new project |
-| `list_projects` | List all projects |
-| `add_memory` | Store knowledge/insights |
-| `recall` | Search memories |
-| `get_stats` | Get task statistics |
+See the full 14-tool table above (v5.0.0). For a live list straight from the binary:
+
+```bash
+ramorie mcp tools
+```
 
 ### Verify MCP Server
 
@@ -663,14 +677,15 @@ ramorie mcp serve
 
 ```bash
 # Essential Commands
+ramorie setup login                      # Authenticate (email + password)
 ramorie project list                     # List all projects
 ramorie kanban                           # Visual task board
 ramorie task create "Description"        # New task
-ramorie task info <id>                   # Task details
+ramorie task show <id>                   # Task details
 ramorie task start <id>                  # Begin working
 ramorie annotate <id> "Note"             # Add progress note
 ramorie remember "Insight"               # Store knowledge
-ramorie task done <id>                   # Complete task
+ramorie task complete <id>               # Complete task
 
 # Decision Guide
 # Need to do work?      → task create
