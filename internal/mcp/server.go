@@ -111,7 +111,8 @@ find manually.
 }
 
 // wrapResultAsObject ensures the result is always an object (not array or null)
-// This fixes the MCP "expected record, received array" error
+// This fixes the MCP "expected record, received array, path: structuredContent" error
+// where clients validate structuredContent as a JSON object per MCP spec.
 func wrapResultAsObject(result interface{}) map[string]interface{} {
 	if result == nil {
 		return map[string]interface{}{"items": []interface{}{}, "count": 0, "message": "No results"}
@@ -128,14 +129,19 @@ func wrapResultAsObject(result interface{}) map[string]interface{} {
 			return map[string]interface{}{"data": result}
 		}
 
-		if len(b) > 0 && b[0] == '[' {
+		// Typed nil slice marshals to "null" — treat as empty list for shape consistency.
+		if len(b) == 0 || string(b) == "null" {
+			return map[string]interface{}{"items": []interface{}{}, "count": 0}
+		}
+
+		if b[0] == '[' {
 			var arr []interface{}
 			if err := json.Unmarshal(b, &arr); err == nil {
 				return map[string]interface{}{"items": arr, "count": len(arr)}
 			}
 		}
 
-		if len(b) > 0 && b[0] == '{' {
+		if b[0] == '{' {
 			var obj map[string]interface{}
 			if err := json.Unmarshal(b, &obj); err == nil {
 				return obj

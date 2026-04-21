@@ -18,8 +18,6 @@ func NewContextPackCommand() *cli.Command {
 		Subcommands: []*cli.Command{
 			contextPackListCmd(),
 			contextPackCreateCmd(),
-			contextPackUseCmd(),
-			contextPackActiveCmd(),
 			contextPackDeleteCmd(),
 		},
 	}
@@ -114,63 +112,6 @@ func contextPackCreateCmd() *cli.Command {
 			fmt.Printf("   ID: %s\n", pack.ID[:8])
 			fmt.Printf("   Type: %s\n", pack.Type)
 			fmt.Printf("   Status: %s\n", pack.Status)
-			return nil
-		},
-	}
-}
-
-// contextPackUseCmd activates a context pack.
-func contextPackUseCmd() *cli.Command {
-	return &cli.Command{
-		Name:      "use",
-		Usage:     "Activate a context pack (and all its contexts)",
-		ArgsUsage: "[pack-id or name]",
-		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
-				return fmt.Errorf("context pack ID or name is required")
-			}
-			identifier := c.Args().First()
-
-			client := api.NewClient()
-			pack, err := client.UseContextPack(identifier)
-			if err != nil {
-				fmt.Printf("Error activating context pack: %v\n", err)
-				return err
-			}
-
-			fmt.Printf("✅ Context pack '%s' activated!\n", pack.Name)
-			fmt.Printf("   All contexts in this pack are now active.\n")
-			return nil
-		},
-	}
-}
-
-// contextPackActiveCmd shows the currently active context pack.
-func contextPackActiveCmd() *cli.Command {
-	return &cli.Command{
-		Name:    "active",
-		Aliases: []string{"current"},
-		Usage:   "Show the currently active context pack",
-		Action: func(c *cli.Context) error {
-			client := api.NewClient()
-			pack, err := client.GetActiveContextPack()
-			if err != nil {
-				fmt.Printf("Error getting active context pack: %v\n", err)
-				return err
-			}
-
-			if pack == nil {
-				fmt.Println("No active context pack. Use 'ramorie context-pack use <id>' to activate one.")
-				return nil
-			}
-
-			fmt.Printf("📦 Active Context Pack:\n")
-			fmt.Printf("   Name: %s\n", pack.Name)
-			fmt.Printf("   ID: %s\n", pack.ID[:8])
-			fmt.Printf("   Type: %s\n", pack.Type)
-			if pack.Description != nil {
-				fmt.Printf("   Description: %s\n", *pack.Description)
-			}
 			return nil
 		},
 	}

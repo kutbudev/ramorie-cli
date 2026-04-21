@@ -4,8 +4,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerToolsV4 registers 16 simplified MCP tools (down from 49)
-// This is the v4 tool set optimized for agent compliance
+// registerToolsV4 registers 14 simplified MCP tools (down from 49)
+// This is the v4 tool set optimized for agent compliance.
+// Removed in this revision (active-state concepts not part of user workflow):
+//   - decision (deprecated stub) → use remember()/memory
+//   - skill (deprecated stub) → use remember()/memory
+//   - manage_focus → focus/active context concept eliminated
+// Removed admin actions: switch_org (active organization concept eliminated)
 func registerToolsV4(server *mcp.Server) {
 	// ============================================================================
 	// 🔴 CORE (5 tools) - Every Session
@@ -155,7 +160,17 @@ Use recall() only when (a) you need to replicate exact pre-v4 agent behavior, or
 (b) you're benchmarking search quality and want a lexical-only baseline.
 
 REQUIRED: term
-Optional: project, tag, type, purpose, min_score, limit, include_decisions (default true)`,
+Optional: project, tag, type, purpose, min_score, limit, include_decisions (default true)
+
+Routing (precision controls which backend endpoint is called):
+- precision: false (default) → GET /memory/search : pure FTS, <500ms, no LLM involvement.
+  Keyword overlap only — agent MUST share lexical tokens with the stored memory.
+- precision: true  → POST /memory/find  : full hybrid pipeline (HyDE query expansion +
+  Gemini rerank + propositional boost + entity graph + intent routing). Latency
+  ~5-10s cold, <2s warm with rerank cache. Use when the agent needs semantic
+  understanding beyond surface keywords, or when precision=false returned nothing
+  useful. Response shape is normalized to match the FTS path so agent code doesn't
+  branch on the routing choice.`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Recall (legacy — prefer find)",
 			ReadOnlyHint:  true,
@@ -223,47 +238,6 @@ Examples:
 			OpenWorldHint: boolPtr(false),
 		},
 	}, handleUnifiedMemory)
-
-	// 7. decision - DEPRECATED: delegates to memory tool
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "decision",
-		Description: `[DEPRECATED] Use ` + "`remember()`" + ` (auto-detects type=decision) or ` + "`memory`" + ` tool with type="decision" instead. This tool will be removed in the next release.`,
-		Annotations: &mcp.ToolAnnotations{
-			Title:         "Decision (deprecated)",
-			OpenWorldHint: boolPtr(false),
-		},
-	}, handleUnifiedDecision)
-
-	// 8. skill - DEPRECATED: delegates to memory tool
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "skill",
-		Description: `[DEPRECATED] Use the memory tool instead. This tool will be removed in the next release.
-
-Migrate:
-- To generate a skill: memory(goal: "description of skill", project: "my-project", auto_context: true)
-- To list skills:      memory(action: "list", project: "my-project")
-- To get a skill:      memory(action: "get", memoryId: "<skill-id>")
-
-All calls to this tool emit a deprecation warning to stderr and delegate to the memory tool.`,
-		Annotations: &mcp.ToolAnnotations{
-			Title:         "Skill (Deprecated)",
-			OpenWorldHint: boolPtr(false),
-		},
-	}, handleUnifiedSkill)
-
-	// 9. manage_focus - Workspace focus management (KEEP - already unified)
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "manage_focus",
-		Description: `🟡 COMMON | Get, set, or clear active workspace focus.
-
-No params = get current focus
-With pack_id = set focus
-With clear=true = clear focus`,
-		Annotations: &mcp.ToolAnnotations{
-			Title:         "Manage Focus",
-			OpenWorldHint: boolPtr(false),
-		},
-	}, handleManageFocus)
 
 	// 10. get_stats - Task statistics (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
@@ -387,7 +361,7 @@ Examples:
 		Name: "admin",
 		Description: `🟢 ADVANCED | Administrative + maintenance operations.
 
-REQUIRED: action (consolidate|cleanup|orgs|switch_org|export|import|plan|analyze)
+REQUIRED: action (consolidate|cleanup|orgs|export|import|plan|analyze)
 
 Actions:
 - consolidate: Run memory consolidation. Requires: project.
@@ -398,7 +372,6 @@ Actions:
   merging is irreversible. Use dry_run first to preview.
 - cleanup: Clean expired / TTL'd memories. Optional: project, dry_run, batch_size
 - orgs: List accessible organizations
-- switch_org: Switch active organization. Requires: orgId
 - export: Export context pack. Requires: pack_id
 - import: Import context pack. Requires: bundle, project, conflict_mode (skip|overwrite|rename)
 - plan: Multi-agent planning. For create: requirements. For status/apply/cancel: plan_id

@@ -190,6 +190,16 @@ func (c *Client) ListProjects(orgID ...string) ([]models.Project, error) {
 		return nil, err
 	}
 
+	// Backend returns {projects: [...], total: N} (object).
+	// Fall back to raw array for backward compat with older servers.
+	var envelope struct {
+		Projects []models.Project `json:"projects"`
+		Total    int              `json:"total"`
+	}
+	if err := json.Unmarshal(respBody, &envelope); err == nil && envelope.Projects != nil {
+		return envelope.Projects, nil
+	}
+
 	var projects []models.Project
 	if err := json.Unmarshal(respBody, &projects); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal projects: %w", err)
@@ -585,28 +595,6 @@ func (c *Client) CompleteTask(taskID string) error {
 func (c *Client) StopTask(taskID string) error {
 	_, err := c.makeRequest("POST", "/tasks/"+taskID+"/stop", nil)
 	return err
-}
-
-func (c *Client) GetActiveTask() (*models.Task, error) {
-	respBody, err := c.makeRequest("GET", "/tasks/active", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check for empty response (no active task)
-	if len(respBody) == 0 || string(respBody) == "{}" || string(respBody) == "null" {
-		return nil, nil
-	}
-
-	// Backend returns {"active_task": task} or {"active_task": null}
-	var response struct {
-		ActiveTask *models.Task `json:"active_task"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal active task response: %w", err)
-	}
-
-	return response.ActiveTask, nil
 }
 
 func (c *Client) ElaborateTask(taskID string) (*models.Annotation, error) {
@@ -1018,6 +1006,11 @@ type SearchMemoriesOptions struct {
 	MinConfidence    float64
 	MinScore         float64
 	Purpose          string
+	// FastMode signals to the backend that it may skip the expensive HyDE +
+	// rerank stages of its retrieval pipeline. Defaults to false; when
+	// passed via the recall tool's Precision=false (default), the CLI sets
+	// this so warm queries stay sub-500ms.
+	FastMode bool
 }
 
 // SearchMemories calls backend FTS endpoint GET /v1/memory/search
@@ -1050,6 +1043,9 @@ func (c *Client) SearchMemories(query string, opts SearchMemoriesOptions) (*Sear
 	}
 	if opts.Purpose != "" {
 		params.Add("purpose", opts.Purpose)
+	}
+	if opts.FastMode {
+		params.Add("fast_mode", "true")
 	}
 
 	endpoint := "/memory/search?" + params.Encode()
@@ -1488,19 +1484,6 @@ func (c *Client) DeleteContext(id string) error {
 	return err
 }
 
-func (c *Client) UseContext(name string) (*models.Context, error) {
-	endpoint := "/contexts/" + url.PathEscape(name) + "/use"
-	respBody, err := c.makeRequest("POST", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	var context models.Context
-	if err := json.Unmarshal(respBody, &context); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal context: %w", err)
-	}
-	return &context, nil
-}
-
 // Annotation API methods
 func (c *Client) CreateAnnotation(taskID, content string) (*models.Annotation, error) {
 	reqBody := map[string]string{
@@ -1871,48 +1854,6 @@ func (c *Client) DeleteContextPack(id string) error {
 	return err
 }
 
-// UseContextPack activates a context pack and all its contexts
-func (c *Client) UseContextPack(id string) (*ContextPack, error) {
-	endpoint := fmt.Sprintf("/context-packs/%s/use", id)
-	respBody, err := c.makeRequest("POST", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// Response is { "message": "...", "pack": {...} }
-	var response struct {
-		Message string      `json:"message"`
-		Pack    ContextPack `json:"pack"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal context pack: %w", err)
-	}
-	return &response.Pack, nil
-}
-
-// GetActiveContextPack gets the currently active context pack
-func (c *Client) GetActiveContextPack() (*ContextPack, error) {
-	respBody, err := c.makeRequest("GET", "/context-packs/active", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// Response is { "pack": {...} or null, "message": "..." }
-	var response struct {
-		Pack    *ContextPack `json:"pack"`
-		Message string       `json:"message"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal active context pack: %w", err)
-	}
-	return response.Pack, nil
-}
-
-// SetActiveContextPack sets the active context pack (alias for UseContextPack)
-func (c *Client) SetActiveContextPack(id string) (*ContextPack, error) {
-	return c.UseContextPack(id)
-}
-
 // AddMemoryToPack adds a memory to a context pack
 func (c *Client) AddMemoryToPack(packID, memoryID string) (*ContextPack, error) {
 	endpoint := fmt.Sprintf("/context-packs/%s/memories/%s", packID, memoryID)
@@ -1954,75 +1895,6 @@ func (c *Client) RemoveMemoryFromPack(packID, memoryID string) error {
 func (c *Client) RemoveTaskFromPack(packID, taskID string) error {
 	endpoint := fmt.Sprintf("/context-packs/%s/tasks/%s", packID, taskID)
 	_, err := c.makeRequest("DELETE", endpoint, nil)
-	return err
-}
-
-// User Focus API methods (SINGLE SOURCE OF TRUTH for active workspace)
-
-// UserFocus represents the user's current focus state
-type UserFocus struct {
-	ActiveContextPackID *string          `json:"active_context_pack_id"`
-	ActivePack          *FocusPackDetail `json:"active_pack"`
-}
-
-// FocusPackDetail represents a context pack in focus response
-type FocusPackDetail struct {
-	ID            string                `json:"id"`
-	Name          string                `json:"name"`
-	Description   *string               `json:"description,omitempty"`
-	Type          string                `json:"type"`
-	Status        string                `json:"status"`
-	ContextsCount int                   `json:"contexts_count"`
-	MemoriesCount int                   `json:"memories_count"`
-	TasksCount    int                   `json:"tasks_count"`
-	Contexts      []FocusContextPreview `json:"contexts"`
-}
-
-// FocusContextPreview represents a context preview in focus response
-type FocusContextPreview struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// GetFocus returns the user's current focus (active context pack)
-func (c *Client) GetFocus() (*UserFocus, error) {
-	respBody, err := c.makeRequest("GET", "/me/focus", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var focus UserFocus
-	if err := json.Unmarshal(respBody, &focus); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal focus: %w", err)
-	}
-	return &focus, nil
-}
-
-// SetFocus sets the user's active context pack
-func (c *Client) SetFocus(contextPackID string) (*UserFocus, error) {
-	reqBody := map[string]interface{}{
-		"context_pack_id": contextPackID,
-	}
-
-	respBody, err := c.makeRequest("POST", "/me/focus", reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	// Response is { "message": "...", "focus": {...} }
-	var response struct {
-		Message string    `json:"message"`
-		Focus   UserFocus `json:"focus"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal focus: %w", err)
-	}
-	return &response.Focus, nil
-}
-
-// ClearFocus clears the user's active context pack
-func (c *Client) ClearFocus() error {
-	_, err := c.makeRequest("DELETE", "/me/focus", nil)
 	return err
 }
 
@@ -2149,50 +2021,6 @@ func (c *Client) InviteToOrganization(orgID, email, role string) (map[string]int
 		return nil, fmt.Errorf("failed to unmarshal invite response: %w", err)
 	}
 	return result, nil
-}
-
-// SwitchOrganization switches the active organization context
-func (c *Client) SwitchOrganization(orgID string) (*Organization, error) {
-	// Backend endpoint: POST /auth/active-organization
-	// Returns: UserResponse with active_organization_id set
-	reqBody := map[string]interface{}{
-		"organization_id": orgID,
-	}
-	respBody, err := c.makeRequest("POST", "/auth/active-organization", reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	// Backend returns UserResponse, not Organization directly
-	// Parse to verify success, then get full organization details
-	var userResp map[string]interface{}
-	if err := json.Unmarshal(respBody, &userResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	// Verify active_organization_id was set correctly
-	if activeOrgID, ok := userResp["active_organization_id"].(string); ok {
-		if activeOrgID != orgID {
-			return nil, fmt.Errorf("failed to switch organization: active_organization_id mismatch")
-		}
-	}
-
-	// Get the full organization details
-	return c.GetOrganization(orgID)
-}
-
-// GetActiveOrganization gets the currently active organization
-func (c *Client) GetActiveOrganization() (*Organization, error) {
-	respBody, err := c.makeRequest("GET", "/me/organization", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var org Organization
-	if err := json.Unmarshal(respBody, &org); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal organization: %w", err)
-	}
-	return &org, nil
 }
 
 // LeaveOrganization leaves the specified organization

@@ -29,7 +29,6 @@ func NewTaskCommand() *cli.Command {
 			taskStartCmd(),
 			taskStopCmd(),
 			taskCompleteCmd(),
-			taskActiveCmd(),
 			taskDeleteCmd(),
 			taskElaborateCmd(),
 			taskDuplicateCmd(),
@@ -495,41 +494,6 @@ func taskStopCmd() *cli.Command {
 			}
 			fmt.Printf("⏸️  Task %s paused. No longer the active task.\n", shortID)
 			fmt.Println("💡 New memories will NOT auto-link until you start a task again.")
-			return nil
-		},
-	}
-}
-
-// taskActiveCmd shows the currently active task.
-func taskActiveCmd() *cli.Command {
-	return &cli.Command{
-		Name:  "active",
-		Usage: "Show the currently active task (for memory auto-linking)",
-		Action: func(c *cli.Context) error {
-			client := api.NewClient()
-			task, err := client.GetActiveTask()
-			if err != nil {
-				fmt.Println(apierrors.ParseAPIError(err))
-				return err
-			}
-
-			if task == nil {
-				fmt.Println("📭 No active task set.")
-				fmt.Println("💡 Use 'ramorie task start <task-id>' to set one.")
-				return nil
-			}
-
-			// CRITICAL: Decrypt task fields before displaying
-			decryptedTitle, _ := decryptTaskForCLI(task)
-
-			fmt.Println("🎯 Active Task:")
-			fmt.Println(strings.Repeat("-", 50))
-			fmt.Printf("ID:       %s\n", task.ID.String()[:8])
-			fmt.Printf("Title:    %s\n", decryptedTitle)
-			fmt.Printf("Status:   %s\n", task.Status)
-			fmt.Printf("Priority: %s\n", task.Priority)
-			fmt.Println(strings.Repeat("-", 50))
-			fmt.Println("💡 New memories will automatically link to this task.")
 			return nil
 		},
 	}

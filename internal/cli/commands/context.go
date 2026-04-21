@@ -18,7 +18,6 @@ func NewContextCommand() *cli.Command {
 		Subcommands: []*cli.Command{
 			contextCreateCmd(),
 			contextListCmd(),
-			contextUseCmd(),
 			contextDeleteCmd(),
 		},
 	}
@@ -92,31 +91,6 @@ func contextListCmd() *cli.Command {
 					truncateString(desc, 40))
 			}
 			w.Flush()
-			return nil
-		},
-	}
-}
-
-// contextUseCmd sets a context as active.
-func contextUseCmd() *cli.Command {
-	return &cli.Command{
-		Name:      "use",
-		Usage:     "Set the active context",
-		ArgsUsage: "[context-name]",
-		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
-				return fmt.Errorf("context name is required")
-			}
-			name := c.Args().First()
-
-			client := api.NewClient()
-			context, err := client.UseContext(name)
-			if err != nil {
-				fmt.Printf("Error setting active context: %v\n", err)
-				return err
-			}
-
-			fmt.Printf("✅ Active context set to '%s'\n", context.Name)
 			return nil
 		},
 	}

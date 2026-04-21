@@ -55,7 +55,6 @@ User account has encryption enabled in frontend. Backend now requires encrypted 
 | `get_task` | ✅ Working | Returns task details |
 | `get_next_tasks` | ✅ Working | Returns prioritized TODO list |
 | `search_tasks` | ✅ Working | Search by keyword |
-| `get_active_task` | ✅ Working | Returns null if no active task |
 | `start_task` | ✅ Working | Sets task to IN_PROGRESS |
 | `stop_task` | ✅ Working | Pauses task |
 | `complete_task` | ✅ Working | Marks task COMPLETED |
@@ -100,9 +99,6 @@ User account has encryption enabled in frontend. Backend now requires encrypted 
 ### Focus Management
 | Tool | Status | Notes |
 |------|--------|-------|
-| `get_focus` | ✅ Working | Returns active context pack |
-| `set_focus` | ✅ Working | Sets active context pack |
-| `clear_focus` | ✅ Working | Clears active focus |
 
 ### Organizations
 | Tool | Status | Notes |
@@ -111,7 +107,6 @@ User account has encryption enabled in frontend. Backend now requires encrypted 
 | `get_organization` | ✅ Working | Returns org details |
 | `get_organization_members` | ✅ Working | Returns members list |
 | `get_active_organization` | ✅ Working | Returns active org or list |
-| `switch_organization` | ✅ Working | Switches active org |
 | `create_organization` | ⚠️ Not tested | |
 | `update_organization` | ⚠️ Not tested | |
 | `invite_to_organization` | ⚠️ Not tested | |

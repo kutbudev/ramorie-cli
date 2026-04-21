@@ -145,8 +145,6 @@ pool_size=20. Performans için pgbouncer önerilir."
 | Bilgi sakla | `add_memory` |
 | Bilgi ara | `recall` |
 | Karar kaydet | `create_decision` |
-| Bağlam değiştir | `activate_context_pack` |
-| Aktif görev | `get_active_task` |
 
 ---
 

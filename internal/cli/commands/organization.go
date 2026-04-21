@@ -29,7 +29,6 @@ func NewOrganizationCommand() *cli.Command {
 			orgEncryptionStatusCmd(),
 			orgEncryptSetupCmd(),
 			orgRotateKeyCmd(),
-			// orgSwitchCmd(),    // TODO: Backend needs active org support
 			// orgInviteCmd(),    // TODO: Backend needs member management
 			// orgMembersCmd(),   // TODO: Backend needs member listing
 			// orgLeaveCmd(),     // TODO: Backend needs leave functionality
@@ -668,51 +667,6 @@ func orgRotateKeyCmd() *cli.Command {
 		},
 	}
 }
-
-// orgSwitchCmd switches the active organization.
-// TODO: Implement when backend supports active organization
-/*
-func orgSwitchCmd() *cli.Command {
-	return &cli.Command{
-		Name:      "switch",
-		Aliases:   []string{"use"},
-		Usage:     "Switch to a different organization",
-		ArgsUsage: "[org-id]",
-		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
-				return fmt.Errorf("organization ID is required")
-			}
-			orgID := c.Args().First()
-
-			client := api.NewClient()
-
-			// Resolve short ID to full ID if needed
-			if len(orgID) < 36 {
-				orgs, err := client.ListOrganizations()
-				if err != nil {
-					fmt.Println(apierrors.ParseAPIError(err))
-					return err
-				}
-				for _, org := range orgs {
-					if strings.HasPrefix(org.ID, orgID) {
-						orgID = org.ID
-						break
-					}
-				}
-			}
-
-			err := client.SwitchOrganization(orgID)
-			if err != nil {
-				fmt.Println(apierrors.ParseAPIError(err))
-				return err
-			}
-
-			fmt.Printf("✅ Switched to organization %s\n", orgID[:8])
-			return nil
-		},
-	}
-}
-*/
 
 // orgInviteCmd invites a member to the organization.
 // TODO: Implement when backend supports member management

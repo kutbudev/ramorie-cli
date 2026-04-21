@@ -116,6 +116,17 @@ func (s *APIService) ListProjects() ([]models.Project, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Backend returns {projects: [...], total: N} (object).
+	// Fall back to raw array for backward compat with older servers.
+	var envelope struct {
+		Projects []models.Project `json:"projects"`
+		Total    int              `json:"total"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Projects != nil {
+		return envelope.Projects, nil
+	}
+
 	var projects []models.Project
 	err = json.Unmarshal(body, &projects)
 	return projects, err

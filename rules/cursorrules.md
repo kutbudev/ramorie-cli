@@ -22,10 +22,10 @@ Ramorie MCP server'ı Cursor'da kullanmak için `.cursor/mcp.json` dosyasına ek
 ## Core Principles
 
 ### 1. Context-First Approach
-Always start by checking the current context:
+Always start by initializing the session:
 ```
-get_active_context_pack → Understand current focus
-get_active_task → Check if there's ongoing work
+setup_agent → Initialize session and get project context
+task(action="list") → See pending work
 ```
 
 ### 2. Task-Driven Development
@@ -151,8 +151,6 @@ recall "relevant keywords" → Check if answer exists
 | Search info | `recall` | term |
 | Record decision | `create_decision` | title |
 | Switch context | `activate_context_pack` | packId |
-| Current task | `get_active_task` | - |
-| Current context | `get_active_context_pack` | - |
 
 ---
 
@@ -190,8 +188,8 @@ recall "relevant keywords" → Check if answer exists
 
 ```
 // Session start
-get_active_context_pack → "Feature: User Auth"
-get_active_task → null (no active task)
+setup_agent → session ready, project auto-detected
+task(action="list") → no pending work
 
 // New work
 create_task "Implement password reset flow"

@@ -205,8 +205,6 @@ Agent Timeline, tüm AI agent aktivitelerini gerçek zamanlı olarak izleyen ve 
 | `pack_created` | Context pack oluşturuldu | `create_context_pack` |
 | `pack_updated` | Context pack güncellendi | `update_context_pack` |
 | `pack_deleted` | Context pack silindi | `delete_context_pack` |
-| `focus_changed` | Odak değiştirildi | `set_focus` |
-| `focus_cleared` | Odak temizlendi | `clear_focus` |
 
 #### AI Operation Events
 | Event Type | Açıklama | Tetikleyen Tool |
@@ -279,7 +277,6 @@ Her MCP çağrısında aşağıdaki bilgiler otomatik olarak kaydedilir:
 | `stop_task` | Görevi duraklat | `taskId` |
 | `complete_task` | Görevi tamamla | `taskId` |
 | `delete_task` | Görevi sil | `taskId` |
-| `get_active_task` | Aktif görevi getir | - |
 | `update_task_status` | Durum güncelle | `taskId`, `status` |
 | `update_progress` | İlerleme güncelle | `taskId`, `progress` |
 | `add_task_note` | Not ekle | `taskId`, `note` |
@@ -400,11 +397,11 @@ Her MCP çağrısında aşağıdaki bilgiler otomatik olarak kaydedilir:
 ### Workflow 2: Çalışma Sırasında
 
 ```
-1. get_active_task            → Aktif görevi kontrol et
+1. task(action="list")        → Bekleyen görevleri kontrol et
 2. [Çalışma yap]
-3. add_task_note              → İlerlemeyi kaydet
-4. update_progress            → Yüzdeyi güncelle
-5. add_memory                 → Öğrenilenleri kaydet
+3. task(action="note")        → İlerlemeyi kaydet
+4. task(action="progress")    → Yüzdeyi güncelle
+5. remember()                 → Öğrenilenleri kaydet
 ```
 
 ### Workflow 3: Karar Alma
@@ -473,10 +470,10 @@ Her MCP çağrısında aşağıdaki bilgiler otomatik olarak kaydedilir:
 # Ramorie MCP Integration
 
 When working on tasks:
-1. Always check active task with `get_active_task`
-2. Log progress with `add_task_note`
-3. Save learnings with `add_memory`
-4. Record decisions with `create_decision`
+1. List pending work with `task(action="list")`
+2. Log progress with `task(action="note")`
+3. Save learnings with `remember()`
+4. Record decisions with `remember()` (auto-detects type=decision)
 
 Memory Bank Usage:
 - Use `recall` before asking user for information

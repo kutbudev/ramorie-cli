@@ -562,3 +562,135 @@ func keysOf(m map[string]any) []string {
 	}
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// handleRecall precision routing (Stuart #30 fix)
+//
+// precision=false  MUST hit GET /memory/search (fast FTS, no LLM).
+// precision=true   MUST hit POST /memory/find  (hybrid path: HyDE + rerank).
+//
+// Prior to this fix, both modes hit /memory/search and only toggled a no-op
+// fast_mode query param — so precision=true was a lie. These tests are the
+// regression guard.
+// ---------------------------------------------------------------------------
+
+func TestHandleRecall_PrecisionFalse_HitsSearchEndpoint(t *testing.T) {
+	var searchHits, findHits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/memory/search"):
+			searchHits++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"memories":[],"total":0,"query_time_ms":3}`))
+		case r.Method == "POST" && r.URL.Path == "/memory/find":
+			findHits++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"items":[],"_meta":{"total":0,"returned":0,"ranking_mode":"hybrid"}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	_, _, err := handleRecall(context.Background(), nil, RecallInput{Term: "x"})
+	if err != nil {
+		t.Fatalf("handleRecall: %v", err)
+	}
+	if searchHits != 1 || findHits != 0 {
+		t.Fatalf("precision=false must hit /memory/search only; search=%d find=%d", searchHits, findHits)
+	}
+}
+
+func TestHandleRecall_PrecisionTrue_HitsFindEndpoint(t *testing.T) {
+	var searchHits, findHits int
+	var capturedBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/memory/find":
+			findHits++
+			b, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(b, &capturedBody)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"items":[{"id":"abc","type":"memory","kind":"pattern","title":"T","preview":"P","score":0.91,"access_count":4,"created_at":"2026-01-01T00:00:00Z"}],"_meta":{"total":1,"returned":1,"ranking_mode":"hybrid","latency_ms":1234,"hyde_used":true,"rerank_used":true}}`))
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/memory/search"):
+			searchHits++
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	res, _, err := handleRecall(context.Background(), nil, RecallInput{Term: "ui framework", Precision: true})
+	if err != nil {
+		t.Fatalf("handleRecall: %v", err)
+	}
+	if findHits != 1 || searchHits != 0 {
+		t.Fatalf("precision=true must hit /memory/find only; search=%d find=%d", searchHits, findHits)
+	}
+
+	// Body MUST NOT carry fast_mode=true — that would defeat the whole point.
+	if got, ok := capturedBody["fast_mode"].(bool); ok && got {
+		t.Errorf("precision=true must send fast_mode=false (or omitted); got fast_mode=true")
+	}
+	// hyde / rerank left to backend defaults — we either omit or send "default".
+	if v, ok := capturedBody["hyde"].(string); ok && v != "default" {
+		t.Errorf("hyde must be 'default' when sent, got %q", v)
+	}
+	if v, ok := capturedBody["rerank"].(string); ok && v != "default" {
+		t.Errorf("rerank must be 'default' when sent, got %q", v)
+	}
+
+	// Response envelope MUST match the FTS-path shape so agents can't tell which
+	// route served them (consistency guarantee).
+	got := decodeToolResult(t, res)
+	if got["search_mode"] != "hybrid" {
+		t.Errorf("expected search_mode=hybrid, got %v", got["search_mode"])
+	}
+	results, _ := got["results"].([]any)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d (payload=%v)", len(results), got)
+	}
+	r0 := results[0].(map[string]any)
+	// Preview → content mapping preserves the recall contract.
+	if r0["content"] != "P" {
+		t.Errorf("preview must be exposed as content field; got %v", r0["content"])
+	}
+	if r0["type"] != "pattern" {
+		t.Errorf("kind must be exposed as type field; got %v", r0["type"])
+	}
+}
+
+func TestHandleRecall_PrecisionTrue_FallsBackToSearchOnFindFailure(t *testing.T) {
+	// If /memory/find 5xxs, recall should still serve the user via the FTS fallback
+	// so the tool doesn't become brittle on backend hiccups.
+	var searchHits, findHits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/memory/find":
+			findHits++
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/memory/search"):
+			searchHits++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"memories":[],"total":0,"query_time_ms":5}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	_, _, err := handleRecall(context.Background(), nil, RecallInput{Term: "x", Precision: true})
+	if err != nil {
+		t.Fatalf("handleRecall: %v", err)
+	}
+	if findHits != 1 {
+		t.Errorf("expected exactly one /memory/find attempt, got %d", findHits)
+	}
+	if searchHits != 1 {
+		t.Errorf("expected fallback to /memory/search after find failed, search=%d", searchHits)
+	}
+}

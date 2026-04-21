@@ -26,9 +26,8 @@ AI agentlar için JosephsBrain/Ramorie MCP aracının kullanım rehberi.
 
 ### Oturum Başlangıcı
 ```
-1. get_active_context_pack    → Mevcut bağlamı kontrol et
-2. get_active_task            → Devam eden görev var mı?
-3. get_next_tasks             → Bekleyen görevleri gör
+1. setup_agent                → Oturumu başlat ve bağlamı al
+2. task(action="list")        → Bekleyen görevleri gör
 ```
 
 ### Yeni İş Başlatma
@@ -123,8 +122,6 @@ create_decision:
 | Bilgi ara | `recall` |
 | Karar kaydet | `create_decision` |
 | Bağlam değiştir | `activate_context_pack` |
-| Aktif görev | `get_active_task` |
-| Aktif bağlam | `get_active_context_pack` |
 
 ---
 

@@ -38,10 +38,9 @@ func main() {
 			commands.NewAnnotateCmd(),
 			commands.NewTaskAnnotationsCmd(),
 
-			// Context & Focus
+			// Context
 			commands.NewContextCommand(),
 			commands.NewContextPackCommand(),
-			commands.NewFocusCommand(), // NEW
 
 			// Decisions (ADRs)
 			commands.NewDecisionCommand(), // NEW

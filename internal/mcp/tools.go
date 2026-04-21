@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
@@ -233,17 +232,6 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 		},
 	}, handleSurfaceSkills)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "manage_focus",
-		Description: "🔴 ESSENTIAL | Get, set, or clear active workspace focus. No params = get current focus. With pack_id = set focus. With clear=true = clear focus.",
-		Annotations: &mcp.ToolAnnotations{
-			Title:           "Manage Focus",
-			DestructiveHint: boolPtr(false),
-			IdempotentHint:  true,
-			OpenWorldHint:   boolPtr(false),
-		},
-	}, handleManageFocus)
-
 	// ============================================================================
 	// 🟡 COMMON (12 tools)
 	// ============================================================================
@@ -459,17 +447,6 @@ Example: create_project(name: "my-project", description: "My awesome project")`,
 			OpenWorldHint: boolPtr(false),
 		},
 	}, handleListOrganizations)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "switch_organization",
-		Description: "🟢 ADVANCED | Switch active organization. REQUIRED: orgId.",
-		Annotations: &mcp.ToolAnnotations{
-			Title:           "Switch Organization",
-			DestructiveHint: boolPtr(false),
-			IdempotentHint:  true,
-			OpenWorldHint:   boolPtr(false),
-		},
-	}, handleSwitchOrganization)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "consolidate_memories",
@@ -1872,6 +1849,13 @@ type RecallInput struct {
 
 	// Cross-entity search
 	IncludeDecisions *bool `json:"include_decisions,omitempty"` // Include architectural decisions in results (default: true)
+
+	// Precision controls the retrieval quality/latency trade-off. Default false
+	// (fast mode) skips HyDE + rerank for <500ms latency on warm queries. Set
+	// true for higher-quality ranking at the cost of ~5-10s latency. Agents
+	// should leave this false unless recall is explicitly for evaluation /
+	// benchmarking or a lexical match is failing them.
+	Precision bool `json:"precision,omitempty"`
 }
 
 func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInput) (*mcp.CallToolResult, any, error) {
@@ -1917,7 +1901,35 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 		}
 	}
 
-	// Try backend FTS search first (fast, server-side scoring with entity graph)
+	// Route by precision:
+	//   precision=false (default) → GET /memory/search : pure FTS, <500ms, no LLM.
+	//   precision=true            → POST /memory/find  : full hybrid (HyDE + rerank).
+	// Stuart #30: /memory/search is pure FTS server-side, so toggling fast_mode on
+	// it was a no-op — the precision flag was functionally dead. We now pick the
+	// actual endpoint that honors the caller's quality/latency intent.
+	if input.Precision {
+		findResp, ferr := apiClient.FindMemories(api.FindMemoriesOptions{
+			Term:             term,
+			Project:          projectID,
+			Limit:            limit,
+			BudgetTokens:     2000,
+			MinScore:         minScore,
+			IncludeDecisions: includeDecisions,
+			Purpose:          input.Purpose,
+			EntityHops:       entityHops,
+			FastMode:         false,     // precision=true → run hybrid
+			HyDE:             "default", // let server flag decide
+			Rerank:           "default",
+		})
+		if ferr == nil && findResp != nil {
+			return mustTextResult(adaptFindResponseToRecallShape(term, findResp, projectWarning)), nil, nil
+		}
+		// fall through to FTS on failure — keeps the tool usable if hybrid path 5xxs.
+	}
+
+	// Try backend FTS search (fast, server-side scoring with entity graph).
+	// No fast_mode param — /memory/search never ran HyDE/rerank in the first
+	// place, so passing it would only add noise without changing behavior.
 	searchResp, err := apiClient.SearchMemories(term, api.SearchMemoriesOptions{
 		ProjectID:        projectID,
 		Limit:            limit,
@@ -2105,6 +2117,71 @@ func handleRecall(ctx context.Context, req *mcp.CallToolRequest, input RecallInp
 	}
 
 	return mustTextResult(response), nil, nil
+}
+
+// adaptFindResponseToRecallShape maps the hybrid /memory/find response envelope
+// into the same shape the FTS fast path emits, so MCP consumers see a stable
+// contract regardless of which routing branch handled the query. Backend FindItem
+// splits memory vs decision via the Type discriminator; we re-partition them
+// here to match the recall shape ({results: memories, decisions: decisions}).
+func adaptFindResponseToRecallShape(term string, resp *api.FindResponse, projectWarning string) map[string]interface{} {
+	var results []interface{}
+	var decisionResults []interface{}
+	for _, it := range resp.Items {
+		if it.Type == "decision" {
+			d := map[string]interface{}{
+				"id":         it.ID,
+				"title":      it.Title,
+				"score":      it.Score,
+				"created_at": it.CreatedAt,
+			}
+			// Preview carries the decision description in the compact find shape.
+			if it.Preview != "" {
+				d["description"] = it.Preview
+			}
+			decisionResults = append(decisionResults, d)
+			continue
+		}
+		r := map[string]interface{}{
+			"id":    it.ID,
+			"title": it.Title,
+			// Preview is the token-budgeted body the backend serves; surface it as
+			// "content" so recall consumers keep their existing field access.
+			"content":    it.Preview,
+			"score":      it.Score,
+			"created_at": it.CreatedAt,
+		}
+		if it.Kind != "" {
+			r["type"] = it.Kind
+		}
+		if it.AccessCount > 0 {
+			r["access_count"] = it.AccessCount
+		}
+		results = append(results, r)
+	}
+
+	response := map[string]interface{}{
+		"term":          term,
+		"search_mode":   "hybrid", // distinguishable from "FTS" so agents can log it
+		"count":         len(results),
+		"total_found":   resp.Meta.Total,
+		"query_time_ms": resp.Meta.LatencyMs,
+		"results":       results,
+	}
+	if len(decisionResults) > 0 {
+		response["decisions"] = decisionResults
+		response["decisions_count"] = len(decisionResults)
+	}
+	if projectWarning != "" {
+		response["warning"] = projectWarning
+	}
+	if len(results) == 0 && len(decisionResults) == 0 {
+		response["suggestions"] = []string{
+			"Try broader search terms",
+			"Try without project filter to search all projects",
+		}
+	}
+	return response
 }
 
 // SurfaceSkillsInput for proactive skill surfacing
@@ -2405,31 +2482,6 @@ func handleListOrganizations(ctx context.Context, req *mcp.CallToolRequest, inpu
 	return mustTextResult(formatMCPResponse(orgs, getContextString())), nil, nil
 }
 
-type SwitchOrganizationInput struct {
-	OrgID string `json:"orgId"`
-}
-
-func handleSwitchOrganization(ctx context.Context, req *mcp.CallToolRequest, input SwitchOrganizationInput) (*mcp.CallToolResult, interface{}, error) {
-	orgID := strings.TrimSpace(input.OrgID)
-	if orgID == "" {
-		return nil, nil, errors.New("orgId is required")
-	}
-
-	// Switch organization via API
-	org, err := apiClient.SwitchOrganization(orgID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Update session with the new active organization
-	orgUUID, parseErr := uuid.Parse(orgID)
-	if parseErr == nil {
-		SetSessionOrganization(orgUUID)
-	}
-
-	return mustTextResult(org), nil, nil
-}
-
 type ConsolidateMemoriesInput struct {
 	Project          string  `json:"project"`
 	StaleDays        int     `json:"stale_days,omitempty"`
@@ -2601,7 +2653,6 @@ func ToolDefinitions() []toolDef {
 		{Name: "remember", Description: "🔴 ESSENTIAL | Ultra-simple memory storage with auto-detection."},
 		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
 		{Name: "surface_skills", Description: "🟡 COMMON | Find relevant procedural skills based on context."},
-		{Name: "manage_focus", Description: "🔴 ESSENTIAL | Get/set/clear active workspace focus."},
 		// ============================================================================
 		// 🟡 COMMON (12 tools)
 		// ============================================================================
@@ -2626,7 +2677,6 @@ func ToolDefinitions() []toolDef {
 		{Name: "manage_dependencies", Description: "🟢 ADVANCED | Add/list/remove task dependencies."},
 		{Name: "manage_plan", Description: "🟢 ADVANCED | Create/status/list/apply/cancel multi-agent plans."},
 		{Name: "list_organizations", Description: "🟢 ADVANCED | List user's organizations."},
-		{Name: "switch_organization", Description: "🟢 ADVANCED | Switch active organization context."},
 		{Name: "consolidate_memories", Description: "🟢 ADVANCED | Trigger memory consolidation (scores, promotes, archives)."},
 		{Name: "cleanup_memories", Description: "🟢 ADVANCED | Clean up TTL-expired memories."},
 		{Name: "export_context_pack", Description: "🟢 ADVANCED | Export context pack as portable JSON bundle."},
@@ -2996,14 +3046,6 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 		result["projects_count"] = len(projects)
 	}
 
-	if activeTask, err := client.GetActiveTask(); err == nil && activeTask != nil {
-		result["active_task"] = map[string]interface{}{
-			"id":     activeTask.ID.String(),
-			"title":  activeTask.Title,
-			"status": activeTask.Status,
-		}
-	}
-
 	// Top-5 active preferences — surface at session start so agents see
 	// durable user rules ("always yarn", "never push without approval") without
 	// needing a find() call on their first turn. Non-fatal: an endpoint outage
@@ -3021,21 +3063,11 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 	}
 
 	if !full {
-		// Compact mode: no focus, no context injection, no recommendations.
+		// Compact mode: no context injection, no recommendations.
 		return result, nil
 	}
 
-	// Full mode: include workspace focus and context injection.
-	if focus, err := client.GetFocus(); err == nil && focus != nil && focus.ActivePack != nil {
-		result["active_focus"] = map[string]interface{}{
-			"pack_id":        focus.ActiveContextPackID,
-			"pack_name":      focus.ActivePack.Name,
-			"contexts_count": focus.ActivePack.ContextsCount,
-			"memories_count": focus.ActivePack.MemoriesCount,
-			"tasks_count":    focus.ActivePack.TasksCount,
-		}
-	}
-
+	// Full mode: include context injection.
 	contextInjection := map[string]interface{}{}
 
 	// Recent memories — scoped to detected project when available. 3 items, 120-char preview.
@@ -3120,17 +3152,7 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 		result["context_injection"] = contextInjection
 	}
 
-	recommendations := []string{}
-	if result["active_focus"] == nil {
-		recommendations = append(recommendations, "Set an active focus: manage_focus with pack_id")
-	}
-	if result["active_task"] == nil {
-		recommendations = append(recommendations, "Start a task for memory auto-linking: task(action=start)")
-	}
-	if len(recommendations) == 0 {
-		recommendations = append(recommendations, "Ready — use task(action=list, project, next_priority=true)")
-	}
-	result["next_steps"] = recommendations
+	result["next_steps"] = []string{"Ready — use task(action=list, project, next_priority=true)"}
 
 	return result, nil
 }

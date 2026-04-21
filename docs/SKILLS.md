@@ -141,7 +141,7 @@ Skills can be added to context packs for organized retrieval:
 }
 ```
 
-This allows grouping related skills (e.g., all deployment skills, all debugging skills) into a single context pack that can be activated with `manage_focus`.
+This allows grouping related skills (e.g., all deployment skills, all debugging skills) into a single context pack.
 
 ## FAQ
 
