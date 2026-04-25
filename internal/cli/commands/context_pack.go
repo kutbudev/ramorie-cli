@@ -9,21 +9,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// NewContextPackCommand creates all subcommands for the 'context-pack' command group.
-func NewContextPackCommand() *cli.Command {
-	return &cli.Command{
-		Name:    "context-pack",
-		Aliases: []string{"cp", "pack", "context-packs", "packs"},
-		Usage:   "Manage context packs (bundles of contexts)",
-		Subcommands: []*cli.Command{
-			contextPackListCmd(),
-			contextPackCreateCmd(),
-			contextPackDeleteCmd(),
-		},
-	}
-}
-
 // contextPackListCmd lists all context packs.
+// Used as a subcommand under `ramorie context packs`.
 func contextPackListCmd() *cli.Command {
 	return &cli.Command{
 		Name:    "list",
@@ -49,7 +36,7 @@ func contextPackListCmd() *cli.Command {
 			}
 
 			if len(response.ContextPacks) == 0 {
-				fmt.Println("No context packs found. Use 'ramorie context-pack create' to add one.")
+				fmt.Println("No context packs found. Use 'ramorie context packs create' to add one.")
 				return nil
 			}
 
@@ -141,4 +128,3 @@ func contextPackDeleteCmd() *cli.Command {
 		},
 	}
 }
-

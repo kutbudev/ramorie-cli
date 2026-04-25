@@ -539,39 +539,3 @@ func handleVaultStatus() error {
 	return nil
 }
 
-// NewVaultCommand creates a top-level vault command as an alias for setup vault commands
-// This allows users to run 'ramorie vault unlock' instead of 'ramorie vault unlock'
-func NewVaultCommand() *cli.Command {
-	return &cli.Command{
-		Name:  "vault",
-		Usage: "Manage your encrypted vault (alias for setup vault commands)",
-		Subcommands: []*cli.Command{
-			{
-				Name:  "unlock",
-				Usage: "Unlock your encrypted vault with master password",
-				Action: func(c *cli.Context) error {
-					return handleVaultUnlock()
-				},
-			},
-			{
-				Name:  "lock",
-				Usage: "Lock your encrypted vault (clear keys from memory)",
-				Action: func(c *cli.Context) error {
-					return handleVaultLock()
-				},
-			},
-			{
-				Name:    "status",
-				Aliases: []string{"s"},
-				Usage:   "Check encryption vault status",
-				Action: func(c *cli.Context) error {
-					return handleVaultStatus()
-				},
-			},
-		},
-		Action: func(c *cli.Context) error {
-			// Default action - show vault status
-			return handleVaultStatus()
-		},
-	}
-}

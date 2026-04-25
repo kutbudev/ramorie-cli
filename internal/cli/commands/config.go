@@ -4,11 +4,23 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/urfave/cli/v2"
 )
+
+const geminiConfigFile = ".ramorie_gemini_key"
+
+// getGeminiConfigPath returns the absolute path to the user's Gemini API key file.
+func getGeminiConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("could not determine home directory: %w", err)
+	}
+	return filepath.Join(home, geminiConfigFile), nil
+}
 
 // NewConfigCommand creates the 'config' command.
 func NewConfigCommand() *cli.Command {

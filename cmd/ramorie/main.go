@@ -22,8 +22,6 @@ func main() {
 	cli.SubcommandHelpTemplate = help.CommandHelpTemplate()
 
 	cli.HelpPrinterCustom = func(out io.Writer, tmpl string, data interface{}, customFunc map[string]interface{}) {
-		// Register cli's default template funcs (join, indent, …) plus our
-		// tierBadge helper, then layer caller-supplied customFunc on top.
 		funcMap := template.FuncMap{
 			"join":   strings.Join,
 			"trim":   strings.TrimSpace,
@@ -56,18 +54,17 @@ func main() {
 		Commands: []*cli.Command{
 			// 🔴 ESSENTIAL — daily.
 			help.SetTier(commands.NewTaskCommand(), "essential"),
-			help.SetTier(commands.NewProjectCommand(), "essential"),
 			help.SetTier(commands.NewMemoryCommand(), "essential"),
+			help.SetTier(commands.NewProjectCommand(), "essential"),
 			help.SetTier(commands.NewRememberCommand(), "essential"),
 			help.SetTier(commands.NewFindCommand(), "essential"),
 
 			// 🟡 COMMON — frequent.
 			help.SetTier(commands.NewKanbanCmd(), "common"),
-			help.SetTier(commands.NewSubtaskCommand(), "common"),
-			help.SetTier(commands.NewContextCommand(), "common"),
 			help.SetTier(commands.NewStatsCommand(), "common"),
 			help.SetTier(commands.NewActivityCommand(), "common"),
-			help.SetTier(commands.NewReportsCommand(), "common"),
+			help.SetTier(commands.NewSubtaskCommand(), "common"),
+			help.SetTier(commands.NewContextCommand(), "common"),
 
 			// 🟢 ADMIN — setup.
 			help.SetTier(commands.NewSetupCommand(), "admin"),
@@ -76,19 +73,7 @@ func main() {
 			help.SetTier(commands.NewHookCommand(), "admin"),
 			help.SetTier(commands.NewOrganizationCommand(), "admin"),
 
-			// Untiered carry-overs (will be removed in Task 16).
-			commands.NewVaultCommand(),
-			commands.NewGeminiKeyCommand(),
-			commands.NewContextPackCommand(),
-			commands.NewLinkCommand(),
-			commands.NewTaskMemoriesCommand(),
-			commands.NewMemoryTasksCommand(),
-			commands.NewAnnotateCmd(),
-			commands.NewTaskAnnotationsCmd(),
-			commands.NewDecisionCommand(),
-			commands.NewAICommand(),
-			commands.NewPlanCommand(),
-			commands.NewOverviewCommand(),
+			// Hidden — Claude Code hook helper.
 			commands.NewFindRelatedCommand(),
 		},
 	}
