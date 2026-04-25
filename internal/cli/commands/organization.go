@@ -148,7 +148,11 @@ func orgShowCmd() *cli.Command {
 			fmt.Printf("ID:          %s\n", org.ID)
 			fmt.Printf("Name:        %s\n", org.Name)
 			fmt.Printf("Description: %s\n", org.Description)
-			fmt.Printf("Owner ID:    %s\n", org.OwnerID[:8])
+			ownerShort := org.OwnerID
+			if len(ownerShort) > 8 {
+				ownerShort = ownerShort[:8]
+			}
+			fmt.Printf("Owner ID:    %s\n", ownerShort)
 			fmt.Printf("Created At:  %s\n", org.CreatedAt.Format("2006-01-02 15:04:05"))
 			fmt.Printf("Updated At:  %s\n", org.UpdatedAt.Format("2006-01-02 15:04:05"))
 			return nil
