@@ -58,6 +58,7 @@ func main() {
 			help.SetTier(commands.NewProjectCommand(), "essential"),
 			help.SetTier(commands.NewRememberCommand(), "essential"),
 			help.SetTier(commands.NewFindCommand(), "essential"),
+			help.SetTier(commands.NewUICommand(), "essential"),
 
 			// 🟡 COMMON — frequent.
 			help.SetTier(commands.NewKanbanCmd(), "common"),
