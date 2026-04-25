@@ -69,6 +69,8 @@ func main() {
 
 			// 🟢 ADMIN — setup.
 			help.SetTier(commands.NewSetupCommand(), "admin"),
+			help.SetTier(commands.NewUnlockCommand(), "admin"),
+			help.SetTier(commands.NewLockCommand(), "admin"),
 			help.SetTier(commands.NewConfigCommand(), "admin"),
 			help.SetTier(commands.NewMcpCommand(), "admin"),
 			help.SetTier(commands.NewHookCommand(), "admin"),
