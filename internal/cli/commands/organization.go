@@ -8,11 +8,19 @@ import (
 	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/resolve"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/term"
 )
+
+// resolveOrgArg returns the canonical org UUID for arg, accepting
+// name (case-insensitive), short ID prefix (>=4 chars), or full UUID.
+// Used by every org subcommand that takes an org identifier.
+func resolveOrgArg(arg string, client *api.Client) (string, error) {
+	return resolve.ResolveOrg(arg, resolve.OrgListerFromAPI(client))
+}
 
 // NewOrganizationCommand creates all subcommands for the 'organization' command group.
 func NewOrganizationCommand() *cli.Command {
@@ -120,23 +128,13 @@ func orgShowCmd() *cli.Command {
 			if c.NArg() == 0 {
 				return fmt.Errorf("organization ID is required")
 			}
-			orgID := c.Args().First()
+			arg := c.Args().First()
 
 			client := api.NewClient()
-
-			// If short ID provided, resolve to full ID
-			if len(orgID) < 36 {
-				orgs, err := client.ListOrganizations()
-				if err != nil {
-					fmt.Println(apierrors.ParseAPIError(err))
-					return err
-				}
-				for _, org := range orgs {
-					if strings.HasPrefix(org.ID, orgID) {
-						orgID = org.ID
-						break
-					}
-				}
+			orgID, err := resolveOrgArg(arg, client)
+			if err != nil {
+				fmt.Println(apierrors.ParseAPIError(err))
+				return err
 			}
 
 			org, err := client.GetOrganization(orgID)
@@ -158,21 +156,10 @@ func orgShowCmd() *cli.Command {
 	}
 }
 
-// resolveOrgID resolves a short org ID to its full UUID
+// resolveOrgID resolves an org identifier (name, short ID prefix, or full UUID)
+// to its canonical UUID. Delegates to the shared resolver in internal/cli/resolve.
 func resolveOrgID(client *api.Client, orgID string) (string, error) {
-	if len(orgID) >= 36 {
-		return orgID, nil
-	}
-	orgs, err := client.ListOrganizations()
-	if err != nil {
-		return "", err
-	}
-	for _, org := range orgs {
-		if strings.HasPrefix(org.ID, orgID) {
-			return org.ID, nil
-		}
-	}
-	return "", fmt.Errorf("organization not found with ID prefix: %s", orgID)
+	return resolveOrgArg(orgID, client)
 }
 
 // orgUnlockCmd unlocks the organization vault with passphrase
