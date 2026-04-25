@@ -37,6 +37,15 @@ type rootModel struct {
 	// Cache of the currently-shown task/memory IDs to avoid duplicate detail
 	// fetches when the cursor doesn't move to a new item.
 	lastSelectedID string
+
+	// kanban buckets cached so the detail view can re-render without a
+	// re-fetch when geometry changes.
+	kanbanTodo       []models.Task
+	kanbanInProgress []models.Task
+	kanbanCompleted  []models.Task
+
+	// profile bundle cached.
+	profile *profileLoadedMsg
 }
 
 func newRootModel(c *api.Client) rootModel {
@@ -95,11 +104,11 @@ func (m *rootModel) applyFocus() {
 }
 
 // loadForCategory issues the appropriate data-fetch cmd for the active
-// sidebar category.
+// sidebar category and resets the list pane's nav stack.
 func (m *rootModel) loadForCategory() tea.Cmd {
 	cat := m.sidebar.selected()
 	m.loadedCat = cat
-	m.list.cat = cat
+	m.list.resetStack(cat, cat.Label())
 	m.list.loading = true
 	m.list.errMsg = ""
 	m.lastSelectedID = ""
@@ -110,15 +119,27 @@ func (m *rootModel) loadForCategory() tea.Cmd {
 		return loadTasks(m.client, m.projectID)
 	case CatMemories:
 		return loadMemories(m.client, m.projectID)
-	default:
-		// Phase 3 placeholders.
-		m.list.setPlaceholder("coming in Phase 3")
-		return nil
+	case CatProjects:
+		return loadProjects(m.client, "")
+	case CatOrganizations:
+		return loadOrgs(m.client)
+	case CatActivity:
+		return loadActivity(m.client)
+	case CatKanban:
+		if m.projectID == "" {
+			m.list.setPlaceholder("press 'p' to pick a project for the kanban board")
+			return nil
+		}
+		return loadKanban(m.client, m.projectID)
+	case CatProfile:
+		m.list.setProfileMode()
+		return loadProfile(m.client)
 	}
+	return nil
 }
 
 // loadDetailForSelection issues a detail fetch for whatever's currently
-// highlighted in the list.
+// highlighted in the list, dispatching by category AND drill-down depth.
 func (m *rootModel) loadDetailForSelection() tea.Cmd {
 	sel := m.list.selected()
 	if sel == nil || sel.id == "placeholder" {
@@ -130,15 +151,65 @@ func (m *rootModel) loadDetailForSelection() tea.Cmd {
 		return nil
 	}
 	m.lastSelectedID = sel.id
-	m.detail.setLoading(true)
 
 	switch m.list.cat {
 	case CatTasks:
+		m.detail.setLoading(true)
 		return loadTaskDetail(m.client, sel.id)
 	case CatMemories:
+		m.detail.setLoading(true)
 		return loadMemoryDetail(m.client, sel.id)
+	case CatProjects:
+		m.detail.setLoading(true)
+		return loadProjectDetail(m.client, sel.id)
+	case CatOrganizations:
+		m.detail.setLoading(true)
+		return loadOrgDetail(m.client, sel.id)
+	case CatActivity:
+		// Inline render — no extra fetch.
+		if item, ok := sel.raw.(models.ActivityItem); ok {
+			m.detail.setContent(renderActivityDetail(item))
+		}
+		return nil
+	case CatKanban:
+		// Always render the same board regardless of which row is selected.
+		m.detail.setContent(renderKanbanDetail(
+			m.detail.width, m.kanbanTodo, m.kanbanInProgress, m.kanbanCompleted,
+		))
+		return nil
+	case CatProfile:
+		// Already populated by profileLoadedMsg.
+		return nil
 	}
 	return nil
+}
+
+// handleEnterOnList implements the drill-down rules for `enter` (or →) on a
+// list row. Returns (consumed, cmd). When consumed=false the caller should
+// fall through to the existing "zoom into detail pane" behavior.
+func (m *rootModel) handleEnterOnList() (bool, tea.Cmd) {
+	sel := m.list.selected()
+	if sel == nil || sel.id == "placeholder" {
+		return false, nil
+	}
+	switch m.list.cat {
+	case CatOrganizations:
+		// Push: projects-of-this-org.
+		if org, ok := sel.raw.(api.Organization); ok {
+			m.list.pushFrame(CatProjects, org.Name, org.ID)
+			m.lastSelectedID = ""
+			return true, loadProjects(m.client, org.ID)
+		}
+	case CatProjects:
+		// Push: tasks-of-this-project. Only triggered when at depth >=1
+		// and the user presses enter again on a project row.
+		if proj, ok := sel.raw.(models.Project); ok {
+			m.list.pushFrame(CatTasks, proj.Name, proj.ID.String())
+			m.lastSelectedID = ""
+			return true, loadTasks(m.client, proj.ID.String())
+		}
+	}
+	return false, nil
 }
 
 func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -148,6 +219,12 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.layout()
+		// Re-render kanban board on resize so its column widths follow.
+		if m.list.cat == CatKanban && m.detail.content != "" {
+			m.detail.setContent(renderKanbanDetail(
+				m.detail.width, m.kanbanTodo, m.kanbanInProgress, m.kanbanCompleted,
+			))
+		}
 		if first {
 			return m, m.loadForCategory()
 		}
@@ -171,7 +248,12 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadForCategory()
 
 		case key.Matches(msg, m.keys.Back):
-			// Move focus left toward the sidebar.
+			// Esc: pop drill-down frame first if we're in one.
+			if m.focus == paneList && m.list.depth() > 1 {
+				m.list.popFrame()
+				m.lastSelectedID = ""
+				return m, m.loadDetailForSelection()
+			}
 			if m.focus > paneSidebar {
 				m.focus--
 				m.applyFocus()
@@ -196,6 +278,20 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case paneList:
+			// Drill-down handling for h/← when we're inside a stacked frame.
+			if key.Matches(msg, m.keys.Left) && m.list.depth() > 1 {
+				m.list.popFrame()
+				m.lastSelectedID = ""
+				return m, m.loadDetailForSelection()
+			}
+
+			// Enter / → potentially drills further.
+			if key.Matches(msg, m.keys.Enter) || key.Matches(msg, m.keys.Right) {
+				if consumed, cmd := m.handleEnterOnList(); consumed {
+					return m, cmd
+				}
+			}
+
 			// Forward keys to the bubbles list (handles up/down/filter/etc).
 			var cmd tea.Cmd
 			m.list.list, cmd = m.list.list.Update(msg)
@@ -231,7 +327,6 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.list.setTasks(msg.items)
-		// Auto-load detail for the first item.
 		return m, m.loadDetailForSelection()
 
 	case memoriesLoadedMsg:
@@ -241,6 +336,57 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.list.setMemories(msg.items)
 		return m, m.loadDetailForSelection()
+
+	case projectsLoadedMsg:
+		if msg.err != nil {
+			m.list.setError(msg.err)
+			return m, nil
+		}
+		m.list.setProjects(msg.items)
+		return m, m.loadDetailForSelection()
+
+	case orgsLoadedMsg:
+		if msg.err != nil {
+			m.list.setError(msg.err)
+			return m, nil
+		}
+		m.list.setOrgs(msg.items)
+		return m, m.loadDetailForSelection()
+
+	case activityLoadedMsg:
+		if msg.err != nil {
+			m.list.setError(msg.err)
+			return m, nil
+		}
+		m.list.setActivity(msg.items)
+		return m, m.loadDetailForSelection()
+
+	case kanbanLoadedMsg:
+		if msg.err != nil {
+			m.list.setError(msg.err)
+			return m, nil
+		}
+		m.kanbanTodo = msg.todo
+		m.kanbanInProgress = msg.inProgress
+		m.kanbanCompleted = msg.completed
+		m.list.setKanbanSummary(len(msg.todo), len(msg.inProgress), len(msg.completed))
+		m.detail.setContent(renderKanbanDetail(
+			m.detail.width, m.kanbanTodo, m.kanbanInProgress, m.kanbanCompleted,
+		))
+		return m, nil
+
+	case profileLoadedMsg:
+		if msg.err != nil {
+			m.detail.setError(msg.err)
+			return m, nil
+		}
+		// Cache for future re-renders.
+		mm := msg
+		m.profile = &mm
+		m.detail.setContent(renderProfileDetail(
+			msg.profile, msg.orgs, msg.agents, msg.stats, msg.oauth,
+		))
+		return m, nil
 
 	case taskDetailLoadedMsg:
 		if msg.taskID != m.lastSelectedID {
@@ -266,6 +412,32 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.setContent(renderMemoryDetail(
 			msg.memory, msg.linkedTasks, msg.comments,
+		))
+		return m, nil
+
+	case projectDetailLoadedMsg:
+		if msg.projectID != m.lastSelectedID {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.detail.setError(msg.err)
+			return m, nil
+		}
+		m.detail.setContent(renderProjectDetail(
+			msg.project, msg.tasks, msg.memories,
+		))
+		return m, nil
+
+	case orgDetailLoadedMsg:
+		if msg.orgID != m.lastSelectedID {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.detail.setError(msg.err)
+			return m, nil
+		}
+		m.detail.setContent(renderOrgDetail(
+			msg.org, msg.projects, msg.encryption,
 		))
 		return m, nil
 	}
@@ -297,6 +469,3 @@ func (m rootModel) renderStatusBar() string {
 
 // Compile-time assertion: rootModel implements tea.Model.
 var _ tea.Model = rootModel{}
-
-// Silence unused warnings for models import in this file (used elsewhere).
-var _ = models.Task{}

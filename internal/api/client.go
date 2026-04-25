@@ -3462,3 +3462,39 @@ func (c *Client) ListOAuthAccounts() ([]models.OAuthAccount, error) {
 
 	return nil, fmt.Errorf("unexpected response shape for /auth/oauth/accounts: %s", string(body))
 }
+
+// GetActivityHistory fetches the recent activity feed (GET /reports/history).
+// days  : look-back window (server defaults to 7 if <=0).
+// limit : max items (server defaults to 15 if <=0).
+// projectID : optional project UUID or name; empty means all projects.
+//
+// Mirrors the inline call in internal/cli/commands/activity.go but returns
+// typed ActivityItem values for programmatic consumers like the TUI.
+func (c *Client) GetActivityHistory(days, limit int, projectID string) ([]models.ActivityItem, error) {
+	params := url.Values{}
+	if days > 0 {
+		params.Set("days", fmt.Sprintf("%d", days))
+	}
+	if limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if projectID != "" {
+		params.Set("project", projectID)
+	}
+
+	endpoint := "/reports/history"
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+
+	body, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []models.ActivityItem
+	if err := json.Unmarshal(body, &items); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal activity history: %w", err)
+	}
+	return items, nil
+}
