@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -51,11 +52,13 @@ func taskListCmd() *cli.Command {
 			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Filter by project ID or name"},
 			&cli.StringFlag{Name: "status", Aliases: []string{"s"}, Usage: "Filter by status (TODO, IN_PROGRESS, COMPLETED)"},
 			&cli.IntFlag{Name: "limit", Aliases: []string{"n"}, Usage: "Limit number of results", Value: 0},
+			&cli.BoolFlag{Name: "newest-first", Usage: "Show newest item at the top (default: oldest at top)"},
 		},
 		Action: func(c *cli.Context) error {
 			projectArg := c.String("project")
 			status := c.String("status")
 			limit := c.Int("limit")
+			newestFirst := c.Bool("newest-first")
 
 			client := api.NewClient()
 
@@ -90,9 +93,15 @@ func taskListCmd() *cli.Command {
 				return nil
 			}
 
-			// Apply limit if specified
+			// Apply limit if specified (slice the newest N from DESC backend response)
 			if limit > 0 && len(tasks) > limit {
 				tasks = tasks[:limit]
+			}
+
+			// Default: chronological asc — oldest at top, newest at bottom (pipe to `tail`).
+			// `--newest-first` keeps the legacy DESC order.
+			if !newestFirst {
+				slices.Reverse(tasks)
 			}
 
 			// Header: count + scope summary.
@@ -105,6 +114,14 @@ func taskListCmd() *cli.Command {
 					subtitle += " · "
 				}
 				subtitle += "status: " + status
+			}
+			if subtitle != "" {
+				subtitle += " · "
+			}
+			if newestFirst {
+				subtitle += "newest first"
+			} else {
+				subtitle += "oldest first"
 			}
 			countPart := fmt.Sprintf("🗂  %d task", len(tasks))
 			if len(tasks) != 1 {
@@ -695,10 +712,12 @@ func taskNextCmd() *cli.Command {
 				Aliases: []string{"p"},
 				Usage:   "Filter by project ID",
 			},
+			&cli.BoolFlag{Name: "newest-first", Usage: "Show highest-priority task at the top (default: at the bottom, agent-friendly)"},
 		},
 		Action: func(c *cli.Context) error {
 			count := c.Int("count")
 			projectArg := c.String("project")
+			newestFirst := c.Bool("newest-first")
 
 			client := api.NewClient()
 
@@ -769,11 +788,22 @@ func taskNextCmd() *cli.Command {
 				return nil
 			}
 
+			// Default: highest-priority task at the BOTTOM so `tail` shows the
+			// task an agent should pick up next. `--newest-first` keeps the
+			// legacy ordering with highest-priority on top.
+			if !newestFirst {
+				slices.Reverse(scored)
+			}
+
 			countPart := fmt.Sprintf("⏭  next %d task", len(scored))
 			if len(scored) != 1 {
 				countPart += "s"
 			}
-			fmt.Println(display.Header(countPart, ""))
+			subtitle := "highest-priority last"
+			if newestFirst {
+				subtitle = "highest-priority first"
+			}
+			fmt.Println(display.Header(countPart, subtitle))
 			fmt.Println()
 
 			cols := []display.Column{

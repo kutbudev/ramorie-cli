@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -230,6 +231,10 @@ func memoriesCmd() *cli.Command {
 				Aliases: []string{"t"},
 				Usage:   "Filter by tag",
 			},
+			&cli.BoolFlag{
+				Name:  "newest-first",
+				Usage: "Show newest item at the top (default: oldest at top)",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			projectArg := c.String("project")
@@ -237,6 +242,7 @@ func memoriesCmd() *cli.Command {
 			orgOnly := c.Bool("org-only")
 			limit := c.Int("limit")
 			tagFilter := c.String("tag")
+			newestFirst := c.Bool("newest-first")
 
 			client := api.NewClient()
 
@@ -286,9 +292,16 @@ func memoriesCmd() *cli.Command {
 				return nil
 			}
 
-			// Apply limit if specified
+			// Apply limit if specified (slice the newest N from DESC backend response)
 			if limit > 0 && len(memories) > limit {
 				memories = memories[:limit]
+			}
+
+			// Default: chronological asc — oldest at top, newest at bottom
+			// (pipe to `tail` to see the most recent). `--newest-first` keeps
+			// the legacy DESC order.
+			if !newestFirst {
+				slices.Reverse(memories)
 			}
 
 			countPart := fmt.Sprintf("🧠 %d memor", len(memories))
@@ -297,7 +310,11 @@ func memoriesCmd() *cli.Command {
 			} else {
 				countPart += "ies"
 			}
-			fmt.Println(display.Header(countPart, ""))
+			subtitle := "oldest first"
+			if newestFirst {
+				subtitle = "newest first"
+			}
+			fmt.Println(display.Header(countPart, subtitle))
 			fmt.Println()
 
 			cols := []display.Column{

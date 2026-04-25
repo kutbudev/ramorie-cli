@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
@@ -67,7 +68,11 @@ func contextListCmd() *cli.Command {
 		Name:    "list",
 		Aliases: []string{"ls"},
 		Usage:   "List all available contexts",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "newest-first", Usage: "Show newest item at the top (default: oldest at top)"},
+		},
 		Action: func(c *cli.Context) error {
+			newestFirst := c.Bool("newest-first")
 			client := api.NewClient()
 			contexts, err := client.ListContexts()
 			if err != nil {
@@ -78,6 +83,11 @@ func contextListCmd() *cli.Command {
 			if len(contexts) == 0 {
 				fmt.Println(display.Dim.Render("  no contexts — use `ramorie context create` to add one"))
 				return nil
+			}
+
+			// Default: chronological asc (oldest top, newest bottom).
+			if !newestFirst {
+				slices.Reverse(contexts)
 			}
 
 			cols := []display.Column{

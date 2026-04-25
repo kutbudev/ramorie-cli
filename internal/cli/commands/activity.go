@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -36,12 +37,14 @@ func NewActivityCommand() *cli.Command {
 			&cli.StringFlag{Name: "interval", Aliases: []string{"i"}, Usage: "daily or weekly (burndown only)", Value: "daily"},
 			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Project name or ID"},
 			&cli.BoolFlag{Name: "json", Usage: "Output raw JSON (always on when piped)"},
+			&cli.BoolFlag{Name: "newest-first", Usage: "Show newest event at the top (default: oldest at top)"},
 		},
 		Action: func(c *cli.Context) error {
 			client := api.NewClient()
 			project := c.String("project")
 			isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 			wantJSON := c.Bool("json") || !isTTY
+			newestFirst := c.Bool("newest-first")
 
 			if c.Bool("burndown") {
 				days := c.Int("days")
@@ -111,22 +114,31 @@ func NewActivityCommand() *cli.Command {
 				return err
 			}
 
+			// Parse for both paths so we can reverse uniformly. Default order
+			// is chronological asc — oldest at top, newest at bottom (`tail`
+			// shows the most recent event). `--newest-first` keeps the
+			// legacy DESC order.
+			var items []activityItem
+			parseErr := json.Unmarshal(b, &items)
+
 			if wantJSON {
-				var out interface{}
-				if err := json.Unmarshal(b, &out); err != nil {
+				if parseErr != nil {
+					// Fallback: dump raw output rather than swallowing it.
 					os.Stdout.Write(b)
 					os.Stdout.Write([]byte("\n"))
 					return nil
 				}
-				pretty, _ := json.MarshalIndent(out, "", "  ")
+				if !newestFirst {
+					slices.Reverse(items)
+				}
+				pretty, _ := json.MarshalIndent(items, "", "  ")
 				os.Stdout.Write(pretty)
 				os.Stdout.Write([]byte("\n"))
 				return nil
 			}
 
 			// TTY path: render as a responsive table.
-			var items []activityItem
-			if err := json.Unmarshal(b, &items); err != nil {
+			if parseErr != nil {
 				// Fallback: dump raw output rather than swallowing it.
 				os.Stdout.Write(b)
 				os.Stdout.Write([]byte("\n"))
@@ -138,6 +150,10 @@ func NewActivityCommand() *cli.Command {
 				return nil
 			}
 
+			if !newestFirst {
+				slices.Reverse(items)
+			}
+
 			countPart := fmt.Sprintf("📜 %d event", len(items))
 			if len(items) != 1 {
 				countPart += "s"
@@ -145,6 +161,11 @@ func NewActivityCommand() *cli.Command {
 			subtitle := fmt.Sprintf("last %dd", days)
 			if project != "" {
 				subtitle += " · project: " + project
+			}
+			if newestFirst {
+				subtitle += " · newest first"
+			} else {
+				subtitle += " · oldest first"
 			}
 			fmt.Println(display.Header(countPart, subtitle))
 			fmt.Println()

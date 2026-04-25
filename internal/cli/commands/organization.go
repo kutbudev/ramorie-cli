@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -61,7 +62,11 @@ func orgListCmd() *cli.Command {
 		Name:    "list",
 		Aliases: []string{"ls"},
 		Usage:   "List your organizations",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "newest-first", Usage: "Show newest item at the top (default: oldest at top)"},
+		},
 		Action: func(c *cli.Context) error {
+			newestFirst := c.Bool("newest-first")
 			client := api.NewClient()
 			orgs, err := client.ListOrganizations()
 			if err != nil {
@@ -72,6 +77,11 @@ func orgListCmd() *cli.Command {
 			if len(orgs) == 0 {
 				fmt.Println(display.Dim.Render("  no organizations — use `ramorie org create` to create one"))
 				return nil
+			}
+
+			// Default: chronological asc (oldest top, newest bottom).
+			if !newestFirst {
+				slices.Reverse(orgs)
 			}
 
 			cols := []display.Column{

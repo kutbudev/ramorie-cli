@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
@@ -30,11 +31,15 @@ func subtaskListCmd() *cli.Command {
 		Aliases:   []string{"ls"},
 		Usage:     "List subtasks for a task",
 		ArgsUsage: "[task-id]",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "newest-first", Usage: "Show newest item at the top (default: oldest at top)"},
+		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() == 0 {
 				return fmt.Errorf("task ID is required")
 			}
 			taskID := c.Args().First()
+			newestFirst := c.Bool("newest-first")
 
 			client := api.NewClient()
 			subtasks, err := client.ListSubtasks(taskID)
@@ -46,6 +51,11 @@ func subtaskListCmd() *cli.Command {
 			if len(subtasks) == 0 {
 				fmt.Println(display.Dim.Render("  no subtasks"))
 				return nil
+			}
+
+			// Default: chronological asc (oldest top, newest bottom).
+			if !newestFirst {
+				slices.Reverse(subtasks)
 			}
 
 			cols := []display.Column{
