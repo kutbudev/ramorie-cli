@@ -70,24 +70,25 @@ func NewSetupCommand() *cli.Command {
 				},
 			},
 			{
-				Name:  "unlock",
-				Usage: "Unlock your encrypted vault with master password",
-				Action: func(c *cli.Context) error {
-					return handleVaultUnlock()
-				},
-			},
-			{
-				Name:  "lock",
-				Usage: "Lock your encrypted vault (clear keys from memory)",
-				Action: func(c *cli.Context) error {
-					return handleVaultLock()
-				},
-			},
-			{
-				Name:  "vault-status",
-				Usage: "Check encryption vault status",
-				Action: func(c *cli.Context) error {
-					return handleVaultStatus()
+				Name:  "vault",
+				Usage: "Encrypted vault operations (unlock | lock | status)",
+				Subcommands: []*cli.Command{
+					{
+						Name:   "unlock",
+						Usage:  "Unlock vault with master password",
+						Action: func(c *cli.Context) error { return handleVaultUnlock() },
+					},
+					{
+						Name:   "lock",
+						Usage:  "Lock vault (clear keys from memory)",
+						Action: func(c *cli.Context) error { return handleVaultLock() },
+					},
+					{
+						Name:    "status",
+						Aliases: []string{"s"},
+						Usage:   "Show vault status",
+						Action:  func(c *cli.Context) error { return handleVaultStatus() },
+					},
 				},
 			},
 		},
