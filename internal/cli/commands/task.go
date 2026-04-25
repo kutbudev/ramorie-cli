@@ -115,33 +115,32 @@ func taskListCmd() *cli.Command {
 			fmt.Println(display.Header(countPart, subtitle))
 			fmt.Println()
 
-			// Budget title width to the remaining terminal width after the
-			// fixed-width columns: status icon (2) + priority badge (3) +
-			// short id (8) + spaces (6 × " ") + age tail (~12) ≈ 35.
-			titleWidth := display.TerminalWidth() - 40
-			if titleWidth < 30 {
-				titleWidth = 30
+			cols := []display.Column{
+				{Title: "S", Min: 3, Weight: 0},        // status icon
+				{Title: "P", Min: 3, Weight: 0},        // priority badge
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "TITLE", Min: 24, Weight: 4},
+				{Title: "TAGS", Min: 14, Weight: 1},    // dropped first
+				{Title: "UPDATED", Min: 10, Weight: 0},
 			}
-
+			rows := make([][]string, 0, len(tasks))
 			for _, t := range tasks {
 				decryptedTitle, _ := decryptTaskForCLI(&t)
 				title := display.SingleLine(decryptedTitle)
-				title = display.Truncate(title, titleWidth)
-
-				tagLine := ""
+				tags := ""
 				if tagList := getTagsAsStrings(t.Tags); len(tagList) > 0 {
-					tagLine = display.Sep() + display.Tags(tagList, 3)
+					tags = display.Tags(tagList, 3)
 				}
-
-				fmt.Printf(" %s %s %s  %s%s%s\n",
+				rows = append(rows, []string{
 					display.StatusIcon(t.Status),
 					display.PriorityBadge(t.Priority),
 					display.Dim.Render(t.ID.String()[:8]),
 					title,
-					display.Sep()+display.Dim.Render(display.Relative(t.UpdatedAt)),
-					tagLine,
-				)
+					tags,
+					display.Dim.Render(display.Relative(t.UpdatedAt)),
+				})
 			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}

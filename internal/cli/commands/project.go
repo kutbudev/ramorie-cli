@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/cli/resolve"
 	"github.com/urfave/cli/v2"
 )
@@ -46,17 +46,20 @@ func projectListCmd() *cli.Command {
 				return nil
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tDESCRIPTION")
-			fmt.Fprintln(w, "--\t----\t-----------")
-
+			cols := []display.Column{
+				{Title: "ID", Min: 36, Weight: 0},          // full UUID — fixed
+				{Title: "NAME", Min: 16, Weight: 1},
+				{Title: "DESCRIPTION", Min: 24, Weight: 3}, // dropped on narrow terminals
+			}
+			rows := make([][]string, 0, len(projects))
 			for _, p := range projects {
-				fmt.Fprintf(w, "%s\t%s\t%s\n",
+				rows = append(rows, []string{
 					p.ID.String(),
 					p.Name,
-					truncateString(p.Description, 40))
+					display.SingleLine(p.Description),
+				})
 			}
-			w.Flush()
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}

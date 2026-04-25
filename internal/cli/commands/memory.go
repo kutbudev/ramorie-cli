@@ -247,31 +247,36 @@ func memoriesCmd() *cli.Command {
 			fmt.Println(display.Header(countPart, ""))
 			fmt.Println()
 
-			// Budget content width: type badge (12) + short id (8) + age (12) +
-			// tag tail (~20) + spaces ≈ 55 reserved.
-			contentWidth := display.TerminalWidth() - 60
-			if contentWidth < 30 {
-				contentWidth = 30
+			cols := []display.Column{
+				{Title: "TYPE", Min: 12, Weight: 0}, // [general] etc — already padded
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "PROJECT", Min: 10, Weight: 1},
+				{Title: "PREVIEW", Min: 24, Weight: 4},
+				{Title: "TAGS", Min: 14, Weight: 1},
+				{Title: "AGE", Min: 8, Weight: 0},
 			}
-
+			rows := make([][]string, 0, len(memories))
 			for _, m := range memories {
-				// CRITICAL: Decrypt memory content before displaying
-				content := display.SingleLine(decryptMemoryForCLI(&m))
-				content = display.Truncate(content, contentWidth)
-
-				tagLine := ""
-				if tags := getTagsAsStrings(m.Tags); len(tags) > 0 {
-					tagLine = display.Sep() + display.Tags(tags, 3)
+				proj := ""
+				if m.Project != nil {
+					proj = m.Project.Name
 				}
-
-				fmt.Printf(" %s %s  %s%s%s\n",
+				// CRITICAL: Decrypt memory content before displaying
+				preview := display.SingleLine(decryptMemoryForCLI(&m))
+				tags := ""
+				if tagList := getTagsAsStrings(m.Tags); len(tagList) > 0 {
+					tags = display.Tags(tagList, 3)
+				}
+				rows = append(rows, []string{
 					display.TypeBadge(m.Type),
 					display.Dim.Render(m.ID.String()[:8]),
-					content,
-					display.Sep()+display.Dim.Render(display.Relative(m.UpdatedAt)),
-					tagLine,
-				)
+					display.Dim.Render(proj),
+					preview,
+					tags,
+					display.Dim.Render(display.Relative(m.UpdatedAt)),
+				})
 			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}
