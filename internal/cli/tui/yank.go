@@ -149,7 +149,7 @@ func serializeTask(
 		fmt.Fprintf(&b, "## Notes (%d)\n\n", len(notes))
 		for _, n := range notes {
 			fmt.Fprintf(&b, "**%s** — %s\n\n",
-				n.CreatedAt.Format("2006-01-02 15:04"), n.Content)
+				n.CreatedAt.Format("2006-01-02 15:04"), decryptAnnotation(&n))
 		}
 	}
 
@@ -547,7 +547,7 @@ func writeOneCommentMD(b *strings.Builder, c models.Comment, nested bool) {
 	} else {
 		b.WriteString("\n")
 	}
-	for _, line := range strings.Split(strings.TrimRight(c.Content, "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimRight(decryptComment(&c), "\n"), "\n") {
 		fmt.Fprintf(b, "%s%s\n", prefix, line)
 	}
 }

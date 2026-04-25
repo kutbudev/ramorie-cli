@@ -453,6 +453,57 @@ func decryptTask(t *models.Task) (title, description string) {
 	return title, description
 }
 
+// decryptAnnotation returns plaintext content for a task annotation.
+// Mirrors decryptMemoryContent — vault must be unlocked, otherwise the
+// existing (already-plaintext) Content field is used as fallback.
+func decryptAnnotation(a *models.Annotation) string {
+	if a == nil {
+		return ""
+	}
+	if !a.IsEncrypted {
+		return a.Content
+	}
+	if !crypto.IsVaultUnlocked() {
+		if a.Content != "" && a.Content != "[Encrypted]" {
+			return a.Content
+		}
+		return "[Vault Locked]"
+	}
+	if a.EncryptedContent != "" {
+		dec, err := crypto.DecryptContent(a.EncryptedContent, a.ContentNonce, true)
+		if err != nil {
+			return "[Decryption Failed]"
+		}
+		return dec
+	}
+	return a.Content
+}
+
+// decryptComment returns plaintext content for a generic Comment (task or
+// memory). Same fallback rules as decryptMemoryContent.
+func decryptComment(c *models.Comment) string {
+	if c == nil {
+		return ""
+	}
+	if !c.IsEncrypted {
+		return c.Content
+	}
+	if !crypto.IsVaultUnlocked() {
+		if c.Content != "" && c.Content != "[Encrypted]" {
+			return c.Content
+		}
+		return "[Vault Locked]"
+	}
+	if c.EncryptedContent != "" {
+		dec, err := crypto.DecryptContent(c.EncryptedContent, c.ContentNonce, true)
+		if err != nil {
+			return "[Decryption Failed]"
+		}
+		return dec
+	}
+	return c.Content
+}
+
 // decryptMemoryContent returns plaintext content for a memory.
 func decryptMemoryContent(m *models.Memory) string {
 	if m == nil {

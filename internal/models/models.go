@@ -99,6 +99,11 @@ type Annotation struct {
 	TaskID    uuid.UUID `json:"task_id"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	// Encryption fields (mirror frontend TaskAnnotation).
+	IsEncrypted      bool   `json:"is_encrypted,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+	ContentNonce     string `json:"content_nonce,omitempty"`
 }
 
 type Subtask struct {

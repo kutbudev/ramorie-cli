@@ -340,7 +340,7 @@ func renderTaskDetail(
 		mdSection(&b, fmt.Sprintf("Notes (%d)", len(annotations)))
 		for _, a := range annotations {
 			ts := a.CreatedAt.Format("2006-01-02 15:04")
-			fmt.Fprintf(&b, "- _[%s]_ %s\n", ts, a.Content)
+			fmt.Fprintf(&b, "- _[%s]_ %s\n", ts, decryptAnnotation(&a))
 		}
 		b.WriteString("\n")
 	}
@@ -791,7 +791,7 @@ func renderOneComment(c models.Comment, nested bool) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s**@%s** _%s_\n", prefix, author, stamp)
-	for _, line := range strings.Split(strings.TrimRight(c.Content, "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimRight(decryptComment(&c), "\n"), "\n") {
 		b.WriteString(prefix)
 		b.WriteString(line)
 		b.WriteString("\n")
