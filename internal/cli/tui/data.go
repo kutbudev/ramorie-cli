@@ -270,29 +270,13 @@ func loadProjects(c *api.Client, orgID string) tea.Cmd {
 // loadProjectDetail fans out GetProject + ListTasks + ListMemories.
 func loadProjectDetail(c *api.Client, projectID string) tea.Cmd {
 	return func() tea.Msg {
-		var (
-			wg   sync.WaitGroup
-			p    *models.Project
-			ts   []models.Task
-			ms   []models.Memory
-			err1 error
-			err2 error
-			err3 error
-		)
-		wg.Add(3)
-		go func() { defer wg.Done(); p, err1 = c.GetProject(projectID) }()
-		go func() { defer wg.Done(); ts, err2 = c.ListTasks(projectID, "") }()
-		go func() { defer wg.Done(); ms, err3 = c.ListMemories(projectID, "") }()
-		wg.Wait()
-		// Soft-fail tasks/memories — only surface GetProject errors.
-		_ = err2
-		_ = err3
+		// Project tab shows settings only — no task/memory list. The user
+		// uses the Tasks / Memories tabs (with `p` to filter) for content.
+		p, err := c.GetProject(projectID)
 		return projectDetailLoadedMsg{
 			projectID: projectID,
 			project:   p,
-			tasks:     ts,
-			memories:  ms,
-			err:       err1,
+			err:       err,
 		}
 	}
 }

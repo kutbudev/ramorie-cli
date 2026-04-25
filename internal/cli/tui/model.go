@@ -275,13 +275,11 @@ func (m *rootModel) handleEnterOnList() (bool, tea.Cmd) {
 			return true, loadProjects(m.client, org.ID)
 		}
 	case CatProjects:
-		// Push: tasks-of-this-project. Only triggered when at depth >=1
-		// and the user presses enter again on a project row.
-		if proj, ok := sel.raw.(models.Project); ok {
-			m.list.pushFrame(CatTasks, proj.Name, proj.ID.String())
-			m.lastSelectedID = ""
-			return true, loadTasks(m.client, proj.ID.String())
-		}
+		// Projects sidebar shows project settings only — no task/memory drill.
+		// To browse a project's content, the user switches to Tasks or
+		// Memories and uses `p` to filter. Returning false lets the default
+		// "zoom into detail pane" behavior take over.
+		return false, nil
 	}
 	return false, nil
 }

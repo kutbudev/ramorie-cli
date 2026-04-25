@@ -13,6 +13,59 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/models"
 )
 
+// Markdown-safe glyph helpers — used in detail render functions instead of
+// the lipgloss-rendered display.* badges. We can't embed lipgloss ANSI inside
+// a markdown source string because glamour parses it as inline text and
+// strips the ESC byte, leaving raw "[38;2;...m" garbage on screen. These
+// helpers emit pure unicode + the markdown source decides the styling.
+
+func mdPriority(p string) string {
+	switch p {
+	case "H":
+		return "🔴 H"
+	case "M":
+		return "🟡 M"
+	case "L":
+		return "🟢 L"
+	}
+	return p
+}
+
+func mdStatusLabel(s string) string {
+	switch s {
+	case "COMPLETED":
+		return "✓ COMPLETED"
+	case "IN_PROGRESS":
+		return "◐ IN_PROGRESS"
+	case "TODO":
+		return "○ TODO"
+	case "BLOCKED":
+		return "✗ BLOCKED"
+	}
+	return s
+}
+
+func mdStatusIcon(s string) string {
+	switch s {
+	case "COMPLETED":
+		return "✓"
+	case "IN_PROGRESS":
+		return "◐"
+	case "TODO":
+		return "○"
+	case "BLOCKED":
+		return "✗"
+	}
+	return "·"
+}
+
+func mdTypeBadge(t string) string {
+	if t == "" {
+		return ""
+	}
+	return "`[" + t + "]`"
+}
+
 // detailModel is the right pane — a scrollable rendering of the currently
 // selected entity.
 //
@@ -240,8 +293,8 @@ func renderTaskDetail(
 	// Header line: [task] <id>   <priority> · <status>
 	fmt.Fprintf(&b, "`[task]` `%s`  %s · %s\n",
 		shortID(t.ID.String()),
-		display.PriorityBadge(t.Priority),
-		display.StatusLabel(t.Status),
+		mdPriority(t.Priority),
+		mdStatusLabel(t.Status),
 	)
 	fmt.Fprintf(&b, "# %s\n\n", display.SingleLine(title))
 
@@ -297,7 +350,7 @@ func renderTaskDetail(
 		mdSection(&b, fmt.Sprintf("Linked Memories (%d)", len(linkedMems)))
 		for _, m := range linkedMems {
 			fmt.Fprintf(&b, "- %s `%s` %s\n",
-				display.TypeBadge(m.Type),
+				mdTypeBadge(m.Type),
 				shortID(m.ID.String()),
 				display.SingleLine(decryptMemoryContent(&m)),
 			)
@@ -330,7 +383,7 @@ func renderMemoryDetail(
 
 	// Header line.
 	fmt.Fprintf(&b, "%s `%s`  _★ access %d · %s_\n",
-		display.TypeBadge(m.Type),
+		mdTypeBadge(m.Type),
 		shortID(m.ID.String()),
 		m.AccessCount, display.Relative(m.UpdatedAt),
 	)
@@ -361,7 +414,7 @@ func renderMemoryDetail(
 		for _, t := range linkedTasks {
 			title, _ := decryptTask(&t)
 			fmt.Fprintf(&b, "- %s `%s` %s\n",
-				display.StatusIcon(t.Status),
+				mdStatusIcon(t.Status),
 				shortID(t.ID.String()),
 				display.SingleLine(title),
 			)
@@ -372,71 +425,45 @@ func renderMemoryDetail(
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// renderProjectDetail summarizes a project plus a capped list of recent tasks
-// and memories.
+// renderProjectDetail shows project settings — metadata only. Task/memory
+// browsing belongs under their own sidebar tabs (Tasks / Memories with `p`
+// to filter). Member management would go here when the backend adds the
+// `/projects/:id/members` endpoint.
 func renderProjectDetail(
 	p *models.Project,
-	tasks []models.Task,
-	memories []models.Memory,
+	_ []models.Task,
+	_ []models.Memory,
 ) string {
 	if p == nil {
 		return "_no project_"
 	}
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "`[project]` `%s`\n", shortID(p.ID.String()))
+	fmt.Fprintf(&b, "`[project]` `%s`\n", p.ID.String())
 	fmt.Fprintf(&b, "# %s\n\n", p.Name)
 
+	mdSection(&b, "Settings")
 	if p.Organization != nil && p.Organization.Name != "" {
-		fmt.Fprintf(&b, "**Org:** %s · ", p.Organization.Name)
+		fmt.Fprintf(&b, "- **Organization:** %s\n", p.Organization.Name)
+	} else {
+		b.WriteString("- **Organization:** _(personal)_\n")
 	}
-	fmt.Fprintf(&b, "**Created:** %s\n\n", display.Relative(p.CreatedAt))
+	fmt.Fprintf(&b, "- **Created:** %s\n", display.Relative(p.CreatedAt))
+	fmt.Fprintf(&b, "- **Updated:** %s\n", display.Relative(p.UpdatedAt))
 
 	if p.Description != "" {
+		b.WriteString("\n")
 		mdSection(&b, "Description")
 		b.WriteString(p.Description)
-		b.WriteString("\n\n")
+		b.WriteString("\n")
 	}
 
-	const cap = 10
-	tShown := len(tasks)
-	if tShown > cap {
-		tShown = cap
-	}
-	mdSection(&b, fmt.Sprintf("Recent Tasks (showing %d of %d)", tShown, len(tasks)))
-	for i := 0; i < tShown; i++ {
-		t := tasks[i]
-		title, _ := decryptTask(&t)
-		fmt.Fprintf(&b, "- %s %s `%s` %s\n",
-			display.StatusIcon(t.Status),
-			display.PriorityBadge(t.Priority),
-			shortID(t.ID.String()),
-			display.SingleLine(title),
-		)
-	}
-	if len(tasks) == 0 {
-		b.WriteString("_(none)_\n")
-	}
 	b.WriteString("\n")
+	mdSection(&b, "Members")
+	b.WriteString("_(project-level membership not yet exposed by the backend)_\n")
 
-	mShown := len(memories)
-	if mShown > cap {
-		mShown = cap
-	}
-	mdSection(&b, fmt.Sprintf("Recent Memories (showing %d of %d)", mShown, len(memories)))
-	for i := 0; i < mShown; i++ {
-		m := memories[i]
-		fmt.Fprintf(&b, "- %s `%s` %s\n",
-			display.TypeBadge(m.Type),
-			shortID(m.ID.String()),
-			display.SingleLine(decryptMemoryContent(&m)),
-		)
-	}
-	if len(memories) == 0 {
-		b.WriteString("_(none)_\n")
-	}
 	b.WriteString("\n")
-	b.WriteString("> ↵ enter to drill into this project's tasks")
+	b.WriteString("> use the **Tasks** or **Memories** tabs (`p` to filter by this project) to browse content.\n")
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -489,7 +516,7 @@ func renderOrgDetail(
 // renderActivityDetail expands a single activity feed item.
 func renderActivityDetail(item models.ActivityItem) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s `%s`\n\n", display.TypeBadge(item.EntityType), item.EntityID.String())
+	fmt.Fprintf(&b, "%s `%s`\n\n", mdTypeBadge(item.EntityType), item.EntityID.String())
 	fmt.Fprintf(&b, "**Timestamp:** %s (%s)\n",
 		item.Timestamp.Format("2006-01-02 15:04:05"),
 		display.Relative(item.Timestamp),
