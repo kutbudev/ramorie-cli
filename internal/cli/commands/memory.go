@@ -447,17 +447,28 @@ func memoryLinksCmd() *cli.Command {
 				return err
 			}
 			if len(tasks) == 0 {
-				fmt.Println("(no linked tasks)")
+				fmt.Println(display.Dim.Render("  no linked tasks"))
 				return nil
 			}
-			for _, t := range tasks {
-				shortID := t.ID.String()
-				if len(shortID) > 8 {
-					shortID = shortID[:8]
-				}
-				title, _ := decryptTaskForCLI(&t)
-				fmt.Printf("  %s  %s\n", shortID, title)
+			cols := []display.Column{
+				{Title: "S", Min: 3, Weight: 0},
+				{Title: "P", Min: 3, Weight: 0},
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "TITLE", Min: 24, Weight: 4},
+				{Title: "UPDATED", Min: 10, Weight: 0},
 			}
+			rows := make([][]string, 0, len(tasks))
+			for _, t := range tasks {
+				title, _ := decryptTaskForCLI(&t)
+				rows = append(rows, []string{
+					display.StatusIcon(t.Status),
+					display.PriorityBadge(t.Priority),
+					display.Dim.Render(t.ID.String()[:8]),
+					display.SingleLine(title),
+					display.Dim.Render(display.Relative(t.UpdatedAt)),
+				})
+			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}

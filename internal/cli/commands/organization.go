@@ -2,12 +2,11 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/cli/resolve"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
@@ -71,22 +70,26 @@ func orgListCmd() *cli.Command {
 			}
 
 			if len(orgs) == 0 {
-				fmt.Println("No organizations found. Use 'ramorie org create' to create one.")
+				fmt.Println(display.Dim.Render("  no organizations — use `ramorie org create` to create one"))
 				return nil
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tDESCRIPTION\tROLE")
-			fmt.Fprintln(w, "--\t----\t-----------\t----")
-
-			for _, org := range orgs {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-					org.ID[:8],
-					truncateString(org.Name, 30),
-					truncateString(org.Description, 40),
-					"owner") // TODO: Backend should return role when member system is added
+			cols := []display.Column{
+				{Title: "ID", Min: 36, Weight: 0},
+				{Title: "NAME", Min: 16, Weight: 1},
+				{Title: "DESCRIPTION", Min: 20, Weight: 3},
+				{Title: "ROLE", Min: 8, Weight: 0},
 			}
-			w.Flush()
+			rows := make([][]string, 0, len(orgs))
+			for _, org := range orgs {
+				rows = append(rows, []string{
+					display.Dim.Render(org.ID),
+					org.Name,
+					display.SingleLine(org.Description),
+					display.Dim.Render("owner"), // TODO: Backend should return role when member system is added
+				})
+			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}

@@ -2,10 +2,8 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
@@ -767,28 +765,44 @@ func taskNextCmd() *cli.Command {
 			}
 
 			if len(scored) == 0 {
-				fmt.Println(" No pending tasks! You're all caught up.")
+				fmt.Println(display.Dim.Render("  no pending tasks — you're all caught up"))
 				return nil
 			}
 
-			fmt.Printf(" Next %d task(s):\n", len(scored))
-			fmt.Println(strings.Repeat("-", 60))
-
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "#	ID	PRIORITY	STATUS	TITLE")
-
-			for i, s := range scored {
-				t := tasks[s.idx]
-				// CRITICAL: Decrypt task fields before displaying
-				decryptedTitle, _ := decryptTaskForCLI(&t)
-				fmt.Fprintf(w, "%d	%s	%s	%s	%s\n",
-					i+1,
-					t.ID.String()[:8],
-					t.Priority,
-					t.Status,
-					truncateString(decryptedTitle, 35))
+			countPart := fmt.Sprintf("⏭  next %d task", len(scored))
+			if len(scored) != 1 {
+				countPart += "s"
 			}
-			w.Flush()
+			fmt.Println(display.Header(countPart, ""))
+			fmt.Println()
+
+			cols := []display.Column{
+				{Title: "S", Min: 3, Weight: 0},
+				{Title: "P", Min: 3, Weight: 0},
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "TITLE", Min: 24, Weight: 4},
+				{Title: "TAGS", Min: 14, Weight: 1},
+				{Title: "UPDATED", Min: 10, Weight: 0},
+			}
+			rows := make([][]string, 0, len(scored))
+			for _, s := range scored {
+				t := tasks[s.idx]
+				decryptedTitle, _ := decryptTaskForCLI(&t)
+				title := display.SingleLine(decryptedTitle)
+				tags := ""
+				if tagList := getTagsAsStrings(t.Tags); len(tagList) > 0 {
+					tags = display.Tags(tagList, 3)
+				}
+				rows = append(rows, []string{
+					display.StatusIcon(t.Status),
+					display.PriorityBadge(t.Priority),
+					display.Dim.Render(t.ID.String()[:8]),
+					title,
+					tags,
+					display.Dim.Render(display.Relative(t.UpdatedAt)),
+				})
+			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}
@@ -886,14 +900,21 @@ func taskNotesCmd() *cli.Command {
 				return err
 			}
 			if len(notes) == 0 {
-				fmt.Println("(no notes)")
+				fmt.Println(display.Dim.Render("  no notes"))
 				return nil
 			}
-			for _, n := range notes {
-				fmt.Printf("  %s  %s\n",
-					display.Dim.Render(n.CreatedAt.Format("Jan 2 15:04")),
-					n.Content)
+			cols := []display.Column{
+				{Title: "DATE", Min: 16, Weight: 0},
+				{Title: "NOTE", Min: 30, Weight: 4},
 			}
+			rows := make([][]string, 0, len(notes))
+			for _, n := range notes {
+				rows = append(rows, []string{
+					display.Dim.Render(n.CreatedAt.Format("Jan 2 15:04")),
+					display.SingleLine(n.Content),
+				})
+			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}
@@ -946,20 +967,32 @@ func taskLinksCmd() *cli.Command {
 				return err
 			}
 			if len(mems) == 0 {
-				fmt.Println("(no linked memories)")
+				fmt.Println(display.Dim.Render("  no linked memories"))
 				return nil
 			}
-			for _, m := range mems {
-				content := m.Content
-				if len(content) > 80 {
-					content = content[:77] + "..."
-				}
-				shortID := m.ID.String()
-				if len(shortID) > 8 {
-					shortID = shortID[:8]
-				}
-				fmt.Printf("  %s  %s\n", shortID, content)
+			cols := []display.Column{
+				{Title: "TYPE", Min: 12, Weight: 0},
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "PROJECT", Min: 10, Weight: 1},
+				{Title: "PREVIEW", Min: 24, Weight: 4},
+				{Title: "AGE", Min: 8, Weight: 0},
 			}
+			rows := make([][]string, 0, len(mems))
+			for _, m := range mems {
+				proj := ""
+				if m.Project != nil {
+					proj = m.Project.Name
+				}
+				preview := display.SingleLine(decryptMemoryForCLI(&m))
+				rows = append(rows, []string{
+					display.TypeBadge(m.Type),
+					display.Dim.Render(m.ID.String()[:8]),
+					display.Dim.Render(proj),
+					preview,
+					display.Dim.Render(display.Relative(m.UpdatedAt)),
+				})
+			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}

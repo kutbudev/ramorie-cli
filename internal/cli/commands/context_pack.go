@@ -2,10 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"os"
-	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/urfave/cli/v2"
 )
 
@@ -36,29 +35,40 @@ func contextPackListCmd() *cli.Command {
 			}
 
 			if len(response.ContextPacks) == 0 {
-				fmt.Println("No context packs found. Use 'ramorie context packs create' to add one.")
+				fmt.Println(display.Dim.Render("  no context packs — use `ramorie context packs create` to add one"))
 				return nil
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ACTIVE\tID\tNAME\tTYPE\tSTATUS\tCONTEXTS")
-			fmt.Fprintln(w, "------\t--\t----\t----\t------\t--------")
-
+			cols := []display.Column{
+				{Title: "ACTIVE", Min: 4, Weight: 0},
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "NAME", Min: 16, Weight: 1},
+				{Title: "TYPE", Min: 10, Weight: 0},
+				{Title: "STATUS", Min: 8, Weight: 0},
+				{Title: "CTX", Min: 4, Weight: 0},
+				{Title: "DESCRIPTION", Min: 20, Weight: 3},
+			}
+			rows := make([][]string, 0, len(response.ContextPacks))
 			for _, pack := range response.ContextPacks {
 				active := ""
 				if pack.Status == "published" {
-					active = "📦"
+					active = display.Good.Render("✓")
 				}
-				contextCount := 0 // TODO: Backend should return contexts count
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n",
+				desc := ""
+				if pack.Description != nil {
+					desc = *pack.Description
+				}
+				rows = append(rows, []string{
 					active,
-					pack.ID[:8],
-					truncateString(pack.Name, 30),
-					pack.Type,
-					pack.Status,
-					contextCount)
+					display.Dim.Render(pack.ID[:8]),
+					pack.Name,
+					display.Dim.Render(pack.Type),
+					display.Dim.Render(pack.Status),
+					display.Dim.Render(fmt.Sprintf("%d", pack.ContextsCount)),
+					display.SingleLine(desc),
+				})
 			}
-			w.Flush()
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}

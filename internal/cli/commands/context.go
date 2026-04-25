@@ -2,10 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"os"
-	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/urfave/cli/v2"
 )
 
@@ -77,30 +76,34 @@ func contextListCmd() *cli.Command {
 			}
 
 			if len(contexts) == 0 {
-				fmt.Println("No contexts found. Use 'ramorie context create' to add one.")
+				fmt.Println(display.Dim.Render("  no contexts — use `ramorie context create` to add one"))
 				return nil
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ACTIVE\tID\tNAME\tDESCRIPTION")
-			fmt.Fprintln(w, "------\t--\t----\t-----------")
-
+			cols := []display.Column{
+				{Title: "ACTIVE", Min: 4, Weight: 0},
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "NAME", Min: 16, Weight: 1},
+				{Title: "DESCRIPTION", Min: 20, Weight: 4},
+			}
+			rows := make([][]string, 0, len(contexts))
 			for _, ctx := range contexts {
 				active := ""
 				if ctx.IsActive {
-					active = "✅"
+					active = display.Good.Render("✓")
 				}
 				desc := ""
 				if ctx.Description != nil {
 					desc = *ctx.Description
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+				rows = append(rows, []string{
 					active,
-					ctx.ID.String()[:8],
+					display.Dim.Render(ctx.ID.String()[:8]),
 					ctx.Name,
-					truncateString(desc, 40))
+					display.SingleLine(desc),
+				})
 			}
-			w.Flush()
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}

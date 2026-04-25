@@ -2,10 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"os"
-	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/urfave/cli/v2"
 )
 
@@ -45,25 +44,28 @@ func subtaskListCmd() *cli.Command {
 			}
 
 			if len(subtasks) == 0 {
-				fmt.Println("No subtasks found for this task.")
+				fmt.Println(display.Dim.Render("  no subtasks"))
 				return nil
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tDESCRIPTION\tSTATUS")
-			fmt.Fprintln(w, "--\t-----------\t------")
-
-			for _, s := range subtasks {
-				status := "⬜ Pending"
-				if s.Completed == 1 {
-					status = "✅ Done"
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n",
-					s.ID.String()[:8],
-					truncateString(s.Description, 40),
-					status)
+			cols := []display.Column{
+				{Title: "DONE", Min: 4, Weight: 0},
+				{Title: "ID", Min: 8, Weight: 0},
+				{Title: "DESCRIPTION", Min: 24, Weight: 4},
 			}
-			w.Flush()
+			rows := make([][]string, 0, len(subtasks))
+			for _, s := range subtasks {
+				done := display.Dim.Render("○")
+				if s.Completed == 1 {
+					done = display.Good.Render("✓")
+				}
+				rows = append(rows, []string{
+					done,
+					display.Dim.Render(s.ID.String()[:8]),
+					display.SingleLine(s.Description),
+				})
+			}
+			fmt.Println(display.NewResponsiveTable(cols, rows))
 			return nil
 		},
 	}
