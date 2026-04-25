@@ -19,6 +19,16 @@ func NewContextCommand() *cli.Command {
 			contextCreateCmd(),
 			contextListCmd(),
 			contextDeleteCmd(),
+			{
+				Name:    "packs",
+				Aliases: []string{"pack"},
+				Usage:   "Manage context packs (bundles of contexts)",
+				Subcommands: []*cli.Command{
+					contextPackListCmd(),
+					contextPackCreateCmd(),
+					contextPackDeleteCmd(),
+				},
+			},
 		},
 	}
 }
