@@ -32,11 +32,23 @@ func NewOrganizationCommand() *cli.Command {
 			orgListCmd(),
 			orgCreateCmd(),
 			orgShowCmd(),
-			orgUnlockCmd(),
-			orgLockCmd(),
-			orgEncryptionStatusCmd(),
-			orgEncryptSetupCmd(),
-			orgRotateKeyCmd(),
+			{
+				Name:  "vault",
+				Usage: "Organization vault operations (unlock | lock)",
+				Subcommands: []*cli.Command{
+					renameSubcommand(orgUnlockCmd(), "unlock"),
+					renameSubcommand(orgLockCmd(), "lock"),
+				},
+			},
+			{
+				Name:  "encryption",
+				Usage: "Organization encryption operations (status | setup | rotate)",
+				Subcommands: []*cli.Command{
+					renameSubcommand(orgEncryptionStatusCmd(), "status"),
+					renameSubcommand(orgEncryptSetupCmd(), "setup"),
+					renameSubcommand(orgRotateKeyCmd(), "rotate"),
+				},
+			},
 			// orgInviteCmd(),    // TODO: Backend needs member management
 			// orgMembersCmd(),   // TODO: Backend needs member listing
 			// orgLeaveCmd(),     // TODO: Backend needs leave functionality
@@ -733,6 +745,15 @@ func orgMembersCmd() *cli.Command {
 	}
 }
 */
+
+// renameSubcommand returns cmd with Name overridden — used to fold flat
+// verbs (e.g. "encryption-status") into a subgroup ("encryption status")
+// without rewriting handler logic.
+func renameSubcommand(cmd *cli.Command, name string) *cli.Command {
+	cmd.Name = name
+	cmd.Aliases = nil
+	return cmd
+}
 
 // orgLeaveCmd leaves the organization.
 // TODO: Implement when backend supports leave functionality
