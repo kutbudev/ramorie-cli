@@ -3335,3 +3335,130 @@ type BootstrapProjectRequest = models.BootstrapProjectRequest
 
 // BootstrapResult is an alias for models.BootstrapResult
 type BootstrapResult = models.BootstrapResult
+
+// ============================================================================
+// Profile / Comments / Agents (Phase 1 — TUI foundation)
+// ============================================================================
+
+// ListEntityComments returns the comment thread for any entity (task or memory).
+// Mirrors GET /comments?entity_type=...&entity_id=...&page=1&limit=50.
+//
+// The backend wraps comments in {"comments":[...], "total":..., "page":..., "limit":..., "has_more":...}.
+// We accept that envelope but also degrade gracefully if a plain array or {"data":[...]} is ever returned.
+func (c *Client) ListEntityComments(entityType, entityID string) ([]models.Comment, error) {
+	endpoint := fmt.Sprintf("/comments?entity_type=%s&entity_id=%s&page=1&limit=50",
+		url.QueryEscape(entityType), url.QueryEscape(entityID))
+	body, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Preferred envelope (matches frontend CommentListResponse).
+	var env models.CommentListResponse
+	if err := json.Unmarshal(body, &env); err == nil && env.Comments != nil {
+		return env.Comments, nil
+	}
+
+	// Fallback: plain array.
+	var arr []models.Comment
+	if err := json.Unmarshal(body, &arr); err == nil {
+		return arr, nil
+	}
+
+	// Fallback: {"data":[...]}.
+	var dataEnv struct {
+		Data []models.Comment `json:"data"`
+	}
+	if err := json.Unmarshal(body, &dataEnv); err == nil {
+		return dataEnv.Data, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response shape for /comments: %s", string(body))
+}
+
+// GetProfile returns the authenticated user's profile (GET /auth/profile).
+func (c *Client) GetProfile() (*models.UserProfile, error) {
+	body, err := c.makeRequest("GET", "/auth/profile", nil)
+	if err != nil {
+		return nil, err
+	}
+	var p models.UserProfile
+	if err := json.Unmarshal(body, &p); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
+	}
+	return &p, nil
+}
+
+// ListAgents returns the user's registered agent identities (GET /agents).
+// Backend wraps the result in {"agents":[...]}.
+func (c *Client) ListAgents() ([]models.AgentProfile, error) {
+	body, err := c.makeRequest("GET", "/agents", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Preferred envelope.
+	var env models.AgentListResponse
+	if err := json.Unmarshal(body, &env); err == nil && env.Agents != nil {
+		return env.Agents, nil
+	}
+
+	// Fallback: plain array.
+	var arr []models.AgentProfile
+	if err := json.Unmarshal(body, &arr); err == nil {
+		return arr, nil
+	}
+
+	// Fallback: {"data":[...]}.
+	var dataEnv struct {
+		Data []models.AgentProfile `json:"data"`
+	}
+	if err := json.Unmarshal(body, &dataEnv); err == nil {
+		return dataEnv.Data, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response shape for /agents: %s", string(body))
+}
+
+// GetAgentEventStats returns aggregate usage stats (GET /agent-events/stats).
+func (c *Client) GetAgentEventStats() (*models.AgentEventStats, error) {
+	body, err := c.makeRequest("GET", "/agent-events/stats", nil)
+	if err != nil {
+		return nil, err
+	}
+	var s models.AgentEventStats
+	if err := json.Unmarshal(body, &s); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal agent event stats: %w", err)
+	}
+	return &s, nil
+}
+
+// ListOAuthAccounts returns linked OAuth providers (GET /auth/oauth/accounts).
+func (c *Client) ListOAuthAccounts() ([]models.OAuthAccount, error) {
+	body, err := c.makeRequest("GET", "/auth/oauth/accounts", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Frontend types it as OAuthAccount[] — try plain array first.
+	var arr []models.OAuthAccount
+	if err := json.Unmarshal(body, &arr); err == nil {
+		return arr, nil
+	}
+
+	// Fallbacks for common envelopes.
+	var dataEnv struct {
+		Data []models.OAuthAccount `json:"data"`
+	}
+	if err := json.Unmarshal(body, &dataEnv); err == nil {
+		return dataEnv.Data, nil
+	}
+	var accountsEnv struct {
+		Accounts []models.OAuthAccount `json:"accounts"`
+	}
+	if err := json.Unmarshal(body, &accountsEnv); err == nil {
+		return accountsEnv.Accounts, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response shape for /auth/oauth/accounts: %s", string(body))
+}
