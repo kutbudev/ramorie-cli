@@ -465,37 +465,46 @@ func (c *Client) CreateTaskWithMeta(projectID, title, description, priority stri
 }
 
 func (c *Client) ListTasks(projectID, status string) ([]models.Task, error) {
-	endpoint := "/tasks"
-	if projectID != "" {
-		endpoint += "?project_id=" + projectID
-		if status != "" {
-			endpoint += "&status=" + status
+	const pageSize = 100
+	var all []models.Task
+	for page := 1; ; page++ {
+		params := url.Values{}
+		if projectID != "" {
+			params.Add("project_id", projectID)
 		}
-	} else if status != "" {
-		endpoint += "?status=" + status
-	}
+		if status != "" {
+			params.Add("status", status)
+		}
+		params.Add("page", fmt.Sprintf("%d", page))
+		params.Add("limit", fmt.Sprintf("%d", pageSize))
 
-	respBody, err := c.makeRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
+		respBody, err := c.makeRequest("GET", "/tasks?"+params.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
 
-	// Try wrapped response first (backend returns {tasks: [], total: N})
-	var wrappedResp struct {
-		Tasks []models.Task `json:"tasks"`
-		Total int           `json:"total"`
-	}
-	if err := json.Unmarshal(respBody, &wrappedResp); err == nil && wrappedResp.Tasks != nil {
-		return wrappedResp.Tasks, nil
-	}
+		// Backend returns {tasks: [], total: N} or a bare array.
+		var wrapped struct {
+			Tasks []models.Task `json:"tasks"`
+			Total int           `json:"total"`
+		}
+		var batch []models.Task
+		if err := json.Unmarshal(respBody, &wrapped); err == nil && wrapped.Tasks != nil {
+			batch = wrapped.Tasks
+		} else if err := json.Unmarshal(respBody, &batch); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
 
-	// Fallback to direct array
-	var tasks []models.Task
-	if err := json.Unmarshal(respBody, &tasks); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
+		all = append(all, batch...)
 
-	return tasks, nil
+		if len(batch) < pageSize {
+			break
+		}
+		if page >= 50 { // 50 * 100 = 5,000 max
+			break
+		}
+	}
+	return all, nil
 }
 
 func (c *Client) ListTasksQuery(projectID string, status string, q string, priorities []string, tags []string) ([]models.Task, error) {
@@ -1371,29 +1380,41 @@ func (c *Client) CheckViolations(opts CheckViolationsOptions) (*CheckViolationsR
 }
 
 func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error) {
-	endpoint := "/memories"
-	params := url.Values{}
-	if projectID != "" {
-		params.Add("project_id", projectID)
-	}
-	if search != "" {
-		params.Add("search", search)
-	}
-	if encoded := params.Encode(); encoded != "" {
-		endpoint += "?" + encoded
-	}
+	const pageSize = 100
+	var all []models.Memory
+	for page := 1; ; page++ {
+		params := url.Values{}
+		if projectID != "" {
+			params.Add("project_id", projectID)
+		}
+		if search != "" {
+			params.Add("search", search)
+		}
+		params.Add("page", fmt.Sprintf("%d", page))
+		params.Add("limit", fmt.Sprintf("%d", pageSize))
 
-	respBody, err := c.makeRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
+		respBody, err := c.makeRequest("GET", "/memories?"+params.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
 
-	var response MemoriesListResponse
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
+		var response MemoriesListResponse
+		if err := json.Unmarshal(respBody, &response); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
 
-	return response.Memories, nil
+		all = append(all, response.Memories...)
+
+		// Stop when the backend returned a partial page (last page reached).
+		if len(response.Memories) < pageSize {
+			break
+		}
+		// Safety cap: prevent infinite loops if backend ignores pagination.
+		if page >= 50 { // 50 * 100 = 5,000 max
+			break
+		}
+	}
+	return all, nil
 }
 
 func (c *Client) DeleteMemory(id string) error {
