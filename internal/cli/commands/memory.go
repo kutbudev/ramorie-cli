@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -12,6 +15,7 @@ import (
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/term"
 )
 
 // NewMemoryCommand creates all subcommands for the 'memory' command group.
@@ -40,102 +44,151 @@ func rememberCmd() *cli.Command {
 	return &cli.Command{
 		Name:                   "remember",
 		Usage:                  "Create a new memory",
-		ArgsUsage:              "[content]",
+		ArgsUsage:              "[content]   (or pipe via stdin)",
 		UseShortOptionHandling: true,
+		Description: `Create a new memory entry, scoped to a project.
+
+Project resolution accepts a name, short ID prefix, or full UUID — same
+semantics as ` + "`task list -p`" + ` and ` + "`kanban -p`" + `.
+
+Content sources (in priority order):
+  1. Positional argument(s) — joined with spaces
+  2. Piped stdin when no positional is given and stdin is not a TTY
+
+For multi-line content with leading "-" bullets, prefer piping via stdin
+(or use the "--" separator) so urfave/cli doesn't treat lines as flags:
+
+  cat memory.md | ramorie remember -p "Ramorie Backend"
+  ramorie remember -p "Ramorie Backend" -- "- bullet one"`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:     "project",
 				Aliases:  []string{"p"},
-				Usage:    "Project ID (required)",
+				Usage:    "Project (name | short id | UUID)",
 				Required: true,
 			},
 			&cli.StringSliceFlag{
 				Name:    "tags",
 				Aliases: []string{"t"},
-				Usage:   "Tags for the memory (can be used multiple times or comma-separated)",
+				Usage:   "Tags (comma-separated or repeated -t)",
+			},
+			&cli.BoolFlag{
+				Name:  "json",
+				Usage: "Print result as JSON (for agents / scripts)",
 			},
 		},
 		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
-				return fmt.Errorf("memory content is required")
-			}
-			content := c.Args().First()
-			projectID := c.String("project")
-			tags := c.StringSlice("tags")
-
-			// Check content length limit before sending
-			if !constants.IsWithinMemoryLimit(content) {
-				chars, tokens, usage := constants.GetContentStats(content)
-				fmt.Printf("❌ Content exceeds maximum limit!\n")
-				fmt.Printf("   Your content: %d chars (~%d tokens)\n", chars, tokens)
-				fmt.Printf("   Maximum: %d chars (~%d tokens)\n", constants.MaxMemoryChars, constants.MaxMemoryChars/constants.CharsPerToken)
-				fmt.Printf("   Usage: %.1f%%\n", usage)
-				return fmt.Errorf("content too large")
-			}
-
-			// Show warning if approaching limit (80%+)
-			chars, tokens, usage := constants.GetContentStats(content)
-			if usage >= constants.WarningThresholdPercent {
-				fmt.Printf("⚠️  Warning: Content is %.1f%% of maximum limit (%d chars)\n", usage, chars)
-			}
-
 			client := api.NewClient()
 
-			// Check if project belongs to an org (org projects skip encryption)
-			isOrgProject := false
-			if projectID != "" {
-				projects, _ := client.ListProjects()
-				for _, p := range projects {
-					if p.ID.String() == projectID && p.OrganizationID != nil {
-						isOrgProject = true
-						break
+			// 1. Resolve project (name, short id, or UUID).
+			projectArg := c.String("project")
+			projectID, err := resolve.ResolveProject(projectArg, client)
+			if err != nil {
+				return err
+			}
+
+			// 2. Get content from positionals or piped stdin.
+			content := strings.TrimSpace(strings.Join(c.Args().Slice(), " "))
+			if content == "" {
+				if !term.IsTerminal(int(os.Stdin.Fd())) {
+					b, readErr := io.ReadAll(os.Stdin)
+					if readErr != nil {
+						return fmt.Errorf("read stdin: %w", readErr)
+					}
+					content = strings.TrimRight(string(b), "\n")
+				}
+			}
+			if content == "" {
+				return fmt.Errorf("memory content is required (positional arg or piped stdin)")
+			}
+
+			// 3. Tags: split CSV — turn -t "a,b" into [a,b].
+			rawTags := c.StringSlice("tags")
+			tags := make([]string, 0, len(rawTags))
+			for _, t := range rawTags {
+				for _, sub := range strings.Split(t, ",") {
+					s := strings.TrimSpace(sub)
+					if s != "" {
+						tags = append(tags, s)
 					}
 				}
 			}
 
-			// Check if vault is unlocked for encryption
+			// 4. Length guard.
+			if !constants.IsWithinMemoryLimit(content) {
+				chars, tokens, usage := constants.GetContentStats(content)
+				fmt.Fprintf(os.Stderr, "❌ Content exceeds maximum limit!\n")
+				fmt.Fprintf(os.Stderr, "   Your content: %d chars (~%d tokens)\n", chars, tokens)
+				fmt.Fprintf(os.Stderr, "   Maximum: %d chars (~%d tokens)\n", constants.MaxMemoryChars, constants.MaxMemoryChars/constants.CharsPerToken)
+				fmt.Fprintf(os.Stderr, "   Usage: %.1f%%\n", usage)
+				return fmt.Errorf("content too large")
+			}
+			chars, tokens, usage := constants.GetContentStats(content)
+			if usage >= constants.WarningThresholdPercent {
+				fmt.Fprintf(os.Stderr, "⚠️  Warning: Content is %.1f%% of maximum limit (%d chars)\n", usage, chars)
+			}
+
+			// 5. Encryption decision: org projects skip personal-vault encryption.
+			isOrgProject := false
+			projects, _ := client.ListProjects()
+			for _, p := range projects {
+				if p.ID.String() == projectID && p.OrganizationID != nil {
+					isOrgProject = true
+					break
+				}
+			}
+
 			var memory *models.Memory
-			var err error
-
 			if crypto.IsVaultUnlocked() && !isOrgProject {
-				// Personal project only — encrypt with personal key
 				contentHash := crypto.ComputeContentHash(content)
-
 				encryptedContent, nonce, isEncrypted, encErr := crypto.EncryptContent(content)
 				if encErr != nil {
 					return fmt.Errorf("encryption failed: %w", encErr)
 				}
-
 				if isEncrypted {
 					memory, err = client.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash, tags...)
-					if err == nil {
-						fmt.Printf("🔐 Memory encrypted and stored! (ID: %s)\n", memory.ID.String()[:8])
-					}
 				} else {
 					memory, err = client.CreateMemory(projectID, content, tags...)
-					if err == nil {
-						fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
-					}
 				}
 			} else {
-				// Org project or vault locked — send plaintext
 				memory, err = client.CreateMemory(projectID, content, tags...)
-				if err == nil {
-					fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
-				}
 			}
-
 			if err != nil {
-				fmt.Println(apierrors.ParseAPIError(err))
-				return err
+				return fmt.Errorf("%s", apierrors.ParseAPIError(err))
 			}
 
+			// 6. Output.
+			if c.Bool("json") {
+				out := map[string]interface{}{
+					"id":         memory.ID.String(),
+					"project_id": projectID,
+					"type":       memory.Type,
+					"encrypted":  memory.IsEncrypted,
+					"chars":      chars,
+					"tokens":     tokens,
+					"tags":       tags,
+				}
+				if memory.LinkedTaskID != nil {
+					out["linked_task_id"] = memory.LinkedTaskID.String()
+				}
+				b, mErr := json.MarshalIndent(out, "", "  ")
+				if mErr != nil {
+					return fmt.Errorf("marshal json: %w", mErr)
+				}
+				fmt.Println(string(b))
+				return nil
+			}
+
+			// Human-readable output.
+			if memory.IsEncrypted {
+				fmt.Printf("🔐 Memory encrypted and stored! (ID: %s)\n", memory.ID.String()[:8])
+			} else {
+				fmt.Printf("🧠 Memory stored successfully! (ID: %s)\n", memory.ID.String()[:8])
+			}
 			fmt.Printf("   Size: %d chars (~%d tokens)\n", chars, tokens)
 			if len(tags) > 0 {
 				fmt.Printf("   Tags: %s\n", strings.Join(tags, ", "))
 			}
-
-			// Show if memory was auto-linked to active task
 			if memory.LinkedTaskID != nil {
 				fmt.Printf("🔗 Auto-linked to active task: %s\n", memory.LinkedTaskID.String()[:8])
 			}
