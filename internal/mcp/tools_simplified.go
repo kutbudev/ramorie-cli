@@ -345,9 +345,9 @@ func handleTaskMove(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToolR
 // --- unified_memory: list/get/generate_skill ---
 
 type UnifiedMemoryInput struct {
-	Action      string  `json:"action"`              // list, get, create, generate_skill
-	Project     string  `json:"project"`             // For list, create, generate_skill
-	MemoryID    string  `json:"memoryId"`            // For get
+	Action      string  `json:"action,omitempty"`    // list, get, create, generate_skill (omitted when goal is set)
+	Project     string  `json:"project,omitempty"`   // For list, create, generate_skill
+	MemoryID    string  `json:"memoryId,omitempty"`  // For get
 	Term        string  `json:"term,omitempty"`      // For list filter
 	Limit       float64 `json:"limit,omitempty"`
 	Cursor      string  `json:"cursor,omitempty"`
