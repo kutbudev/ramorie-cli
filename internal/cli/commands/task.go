@@ -35,6 +35,10 @@ func NewTaskCommand() *cli.Command {
 			taskMoveCmd(),
 			taskNextCmd(),
 			taskProgressCmd(),
+			taskNoteCmd(),
+			taskNotesCmd(),
+			taskLinkCmd(),
+			taskLinksCmd(),
 		},
 	}
 }
@@ -835,6 +839,128 @@ func taskProgressCmd() *cli.Command {
 			decryptedTitle, _ := decryptTaskForCLI(task)
 			fmt.Printf("📊 Task '%s' progress updated\n", truncateString(decryptedTitle, 30))
 			fmt.Printf("   [%s] %d%%\n", bar, progress)
+			return nil
+		},
+	}
+}
+
+// taskNoteCmd adds an annotation to a task.
+func taskNoteCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "note",
+		Usage:     "Add a note (annotation) to a task",
+		ArgsUsage: "<task-id> <text...>",
+		Action: func(c *cli.Context) error {
+			if c.NArg() < 2 {
+				return fmt.Errorf("usage: ramorie task note <task-id> <text>")
+			}
+			taskID := c.Args().Get(0)
+			text := strings.Join(c.Args().Slice()[1:], " ")
+			client := api.NewClient()
+			if _, err := client.CreateAnnotation(taskID, text); err != nil {
+				return err
+			}
+			shortID := taskID
+			if len(shortID) > 8 {
+				shortID = shortID[:8]
+			}
+			fmt.Printf("✅ Note added to task %s\n", shortID)
+			return nil
+		},
+	}
+}
+
+// taskNotesCmd lists annotations on a task.
+func taskNotesCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "notes",
+		Usage:     "List notes (annotations) on a task",
+		ArgsUsage: "<task-id>",
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("task ID is required")
+			}
+			taskID := c.Args().First()
+			client := api.NewClient()
+			notes, err := client.ListAnnotations(taskID)
+			if err != nil {
+				return err
+			}
+			if len(notes) == 0 {
+				fmt.Println("(no notes)")
+				return nil
+			}
+			for _, n := range notes {
+				fmt.Printf("  %s  %s\n",
+					display.Dim.Render(n.CreatedAt.Format("Jan 2 15:04")),
+					n.Content)
+			}
+			return nil
+		},
+	}
+}
+
+// taskLinkCmd links a memory to a task.
+func taskLinkCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "link",
+		Usage:     "Link a memory to a task",
+		ArgsUsage: "<task-id> <memory-id>",
+		Action: func(c *cli.Context) error {
+			if c.NArg() < 2 {
+				return fmt.Errorf("usage: ramorie task link <task-id> <memory-id>")
+			}
+			taskID := c.Args().Get(0)
+			memoryID := c.Args().Get(1)
+			client := api.NewClient()
+			if _, err := client.CreateMemoryTaskLink(taskID, memoryID, ""); err != nil {
+				return err
+			}
+			shortTask := taskID
+			if len(shortTask) > 8 {
+				shortTask = shortTask[:8]
+			}
+			shortMem := memoryID
+			if len(shortMem) > 8 {
+				shortMem = shortMem[:8]
+			}
+			fmt.Printf("✅ Linked task %s ↔ memory %s\n", shortTask, shortMem)
+			return nil
+		},
+	}
+}
+
+// taskLinksCmd lists memories linked to a task.
+func taskLinksCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "links",
+		Usage:     "List memories linked to a task",
+		ArgsUsage: "<task-id>",
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("task ID is required")
+			}
+			taskID := c.Args().First()
+			client := api.NewClient()
+			mems, err := client.ListTaskMemories(taskID)
+			if err != nil {
+				return err
+			}
+			if len(mems) == 0 {
+				fmt.Println("(no linked memories)")
+				return nil
+			}
+			for _, m := range mems {
+				content := m.Content
+				if len(content) > 80 {
+					content = content[:77] + "..."
+				}
+				shortID := m.ID.String()
+				if len(shortID) > 8 {
+					shortID = shortID[:8]
+				}
+				fmt.Printf("  %s  %s\n", shortID, content)
+			}
 			return nil
 		},
 	}
