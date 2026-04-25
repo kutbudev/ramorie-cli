@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -8,6 +11,15 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 )
+
+// clearStatusMsg fires after a delay to wipe the transient status message
+// (e.g. "✓ copied (n chars)") off the bottom bar.
+type clearStatusMsg struct{}
+
+// clearStatusAfter returns a tea.Cmd that emits a clearStatusMsg after d.
+func clearStatusAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return clearStatusMsg{} })
+}
 
 // pane identifies which of the three columns currently has keyboard focus.
 type pane int
@@ -46,6 +58,25 @@ type rootModel struct {
 
 	// profile bundle cached.
 	profile *profileLoadedMsg
+
+	// Yank cache — raw entities + their satellites currently shown in the
+	// detail pane. Populated whenever a *DetailLoadedMsg arrives so the `c`
+	// key can serialize the live entity to markdown without refetching.
+	yankTask          *models.Task
+	yankTaskSubtasks  []models.Subtask
+	yankTaskNotes     []models.Annotation
+	yankTaskMems      []models.Memory
+	yankTaskComments  []models.Comment
+	yankMemory        *models.Memory
+	yankMemoryTasks   []models.Task
+	yankMemoryComments []models.Comment
+	yankProject       *models.Project
+	yankProjectTasks  []models.Task
+	yankProjectMems   []models.Memory
+	yankOrg           *api.Organization
+	yankOrgProjects   []models.Project
+	yankOrgEncryption *api.OrgEncryptionStatus
+	yankActivity      *models.ActivityItem
 }
 
 func newRootModel(c *api.Client) rootModel {
@@ -168,6 +199,8 @@ func (m *rootModel) loadDetailForSelection() tea.Cmd {
 	case CatActivity:
 		// Inline render — no extra fetch.
 		if item, ok := sel.raw.(models.ActivityItem); ok {
+			it := item
+			m.yankActivity = &it
 			m.detail.setContent(renderActivityDetail(item))
 		}
 		return nil
@@ -246,6 +279,15 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Refresh):
 			return m, m.loadForCategory()
+
+		case key.Matches(msg, m.keys.Yank):
+			res := m.yankCurrent()
+			if res.err != nil {
+				m.statusMsg = "✗ " + res.err.Error()
+			} else {
+				m.statusMsg = fmt.Sprintf("✓ copied (%d chars)", res.chars)
+			}
+			return m, clearStatusAfter(3 * time.Second)
 
 		case key.Matches(msg, m.keys.Back):
 			// Esc: pop drill-down frame first if we're in one.
@@ -397,6 +439,12 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.setError(msg.err)
 			return m, nil
 		}
+		// Stash the raw entities so `c` can serialize them.
+		m.yankTask = msg.task
+		m.yankTaskSubtasks = msg.subtasks
+		m.yankTaskNotes = msg.annotations
+		m.yankTaskMems = msg.linkedMems
+		m.yankTaskComments = msg.comments
 		m.detail.setContent(renderTaskDetail(
 			msg.task, msg.subtasks, msg.annotations, msg.linkedMems, msg.comments,
 		))
@@ -410,6 +458,9 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.setError(msg.err)
 			return m, nil
 		}
+		m.yankMemory = msg.memory
+		m.yankMemoryTasks = msg.linkedTasks
+		m.yankMemoryComments = msg.comments
 		m.detail.setContent(renderMemoryDetail(
 			msg.memory, msg.linkedTasks, msg.comments,
 		))
@@ -423,6 +474,9 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.setError(msg.err)
 			return m, nil
 		}
+		m.yankProject = msg.project
+		m.yankProjectTasks = msg.tasks
+		m.yankProjectMems = msg.memories
 		m.detail.setContent(renderProjectDetail(
 			msg.project, msg.tasks, msg.memories,
 		))
@@ -436,9 +490,16 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.setError(msg.err)
 			return m, nil
 		}
+		m.yankOrg = msg.org
+		m.yankOrgProjects = msg.projects
+		m.yankOrgEncryption = msg.encryption
 		m.detail.setContent(renderOrgDetail(
 			msg.org, msg.projects, msg.encryption,
 		))
+		return m, nil
+
+	case clearStatusMsg:
+		m.statusMsg = ""
 		return m, nil
 	}
 
