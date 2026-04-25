@@ -16,6 +16,7 @@ type keyMap struct {
 	Project key.Binding
 	Refresh key.Binding
 	Yank    key.Binding
+	Theme   key.Binding
 	Help    key.Binding
 	Quit    key.Binding
 }
@@ -33,6 +34,7 @@ func defaultKeyMap() keyMap {
 		Project: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "project")),
 		Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Yank:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy")),
+		Theme:   key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
 		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}

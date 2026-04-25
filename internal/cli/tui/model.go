@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
+	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 )
 
@@ -77,15 +78,26 @@ type rootModel struct {
 	yankOrgProjects   []models.Project
 	yankOrgEncryption *api.OrgEncryptionStatus
 	yankActivity      *models.ActivityItem
+
+	// TUI chrome state.
+	theme    string
+	helpOpen bool
+	caps     terminalCaps
 }
 
 func newRootModel(c *api.Client) rootModel {
+	theme := ThemeAuto
+	if cfg, err := config.LoadConfig(); err == nil && cfg != nil && cfg.Theme != "" {
+		theme = cfg.Theme
+	}
 	return rootModel{
 		client:    c,
 		keys:      defaultKeyMap(),
 		focus:     paneSidebar,
 		sidebar:   newSidebar(),
 		loadedCat: -1,
+		theme:     theme,
+		caps:      detectTerminal(),
 	}
 }
 
@@ -122,6 +134,8 @@ func (m *rootModel) layout() {
 	}
 	if m.detail.width == 0 {
 		m.detail = newDetail(dw, h)
+		m.detail.theme = m.theme
+		m.detail.caps = m.caps
 	} else {
 		m.detail.resize(dw, h)
 	}
@@ -233,7 +247,7 @@ func (m *rootModel) loadDetailForSelection() tea.Cmd {
 		return nil
 	case CatKanban:
 		// Always render the same board regardless of which row is selected.
-		m.detail.setContent(renderKanbanDetail(
+		m.detail.setRawContent(renderKanbanDetail(
 			m.detail.width, m.kanbanTodo, m.kanbanInProgress, m.kanbanCompleted,
 		))
 		return nil
@@ -281,7 +295,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		// Re-render kanban board on resize so its column widths follow.
 		if m.list.cat == CatKanban && m.detail.content != "" {
-			m.detail.setContent(renderKanbanDetail(
+			m.detail.setRawContent(renderKanbanDetail(
 				m.detail.width, m.kanbanTodo, m.kanbanInProgress, m.kanbanCompleted,
 			))
 		}
@@ -291,6 +305,32 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Help overlay: ? toggles, esc/q closes; while open, swallow other keys.
+		if key.Matches(msg, m.keys.Help) {
+			m.helpOpen = !m.helpOpen
+			return m, nil
+		}
+		if m.helpOpen {
+			if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Quit) {
+				m.helpOpen = false
+			}
+			return m, nil
+		}
+
+		// Theme cycle (global): t.
+		if key.Matches(msg, m.keys.Theme) {
+			m.theme = nextTheme(m.theme)
+			invalidateMarkdownCache()
+			m.detail.setTheme(m.theme)
+			// Persist (best effort).
+			if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
+				cfg.Theme = m.theme
+				_ = config.SaveConfig(cfg)
+			}
+			m.statusMsg = "✓ theme: " + m.theme
+			return m, clearStatusAfter(2 * time.Second)
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
@@ -465,7 +505,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.kanbanInProgress = msg.inProgress
 		m.kanbanCompleted = msg.completed
 		m.list.setKanbanSummary(len(msg.todo), len(msg.inProgress), len(msg.completed))
-		m.detail.setContent(renderKanbanDetail(
+		m.detail.setRawContent(renderKanbanDetail(
 			m.detail.width, m.kanbanTodo, m.kanbanInProgress, m.kanbanCompleted,
 		))
 		return m, nil
@@ -563,6 +603,13 @@ func (m rootModel) View() string {
 	if m.width == 0 {
 		return "loading…"
 	}
+	if m.helpOpen {
+		return helpOverlay(m.keys, m.width, m.height)
+	}
+	return m.normalView()
+}
+
+func (m rootModel) normalView() string {
 	body := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.sidebar.View(),
@@ -573,7 +620,7 @@ func (m rootModel) View() string {
 }
 
 func (m rootModel) renderStatusBar() string {
-	help := "h/← back · j/k up/dn · l/→ forward · ↵ open · ⇥ pane · / search · p project · r refresh · c copy · ? help · q quit"
+	help := "h/← back · j/k up/dn · l/→ forward · ↵ open · ⇥ pane · / search · p project · r refresh · c copy · t theme · ? help · q quit"
 	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(help)
 	if m.statusMsg != "" {
 		bar = lipgloss.NewStyle().Foreground(display.ColorGood).Render(m.statusMsg) + "  " + bar

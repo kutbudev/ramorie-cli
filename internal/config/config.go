@@ -23,6 +23,9 @@ type Config struct {
 	Salt                  string `json:"salt,omitempty"`                    // base64
 	KDFIterations         int    `json:"kdf_iterations,omitempty"`
 	KDFAlgorithm          string `json:"kdf_algorithm,omitempty"`
+
+	// TUI preferences
+	Theme string `json:"theme,omitempty"` // glamour markdown theme for `ramorie ui`
 }
 
 // GetConfigPath returns the path to the new config file (~/.ramorie/config.json)

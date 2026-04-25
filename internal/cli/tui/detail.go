@@ -14,19 +14,37 @@ import (
 
 // detailModel is the right pane — a scrollable rendering of the currently
 // selected entity.
+//
+// Content flows in as a markdown source string from the various
+// render*Detail() functions. setContent() runs it through glamour using the
+// current width + theme and feeds the resulting ANSI text to the viewport.
+//
+// Some content (kanban grid, error/loading) is NOT markdown — those callers
+// use setRawContent() which bypasses glamour.
 type detailModel struct {
-	vp      viewport.Model
-	width   int
-	height  int
-	focused bool
-	loading bool
-	content string
-	errMsg  string
+	vp       viewport.Model
+	width    int
+	height   int
+	focused  bool
+	loading  bool
+	content  string // pre-rendered text fed into the viewport
+	errMsg   string
+	caps     terminalCaps
+	theme    string
+	// lastContent is the most recent markdown source passed to setContent().
+	// Stored so we can re-render on width or theme changes.
+	lastContent    string
+	lastIsMarkdown bool
 }
 
 func newDetail(width, height int) detailModel {
 	vp := viewport.New(maxInt(width-4, 10), maxInt(height-4, 3))
-	return detailModel{vp: vp, width: width, height: height}
+	return detailModel{
+		vp:     vp,
+		width:  width,
+		height: height,
+		theme:  ThemeAuto,
+	}
 }
 
 func (d *detailModel) resize(width, height int) {
@@ -34,15 +52,56 @@ func (d *detailModel) resize(width, height int) {
 	d.height = height
 	d.vp.Width = maxInt(width-4, 10)
 	d.vp.Height = maxInt(height-4, 3)
+	// Re-render markdown to the new wrap width.
+	if d.lastIsMarkdown && d.lastContent != "" {
+		d.content = d.renderMD(d.lastContent)
+	}
 	d.vp.SetContent(d.content)
 }
 
+// setContent treats `s` as markdown source. Stored as lastContent so
+// theme/width changes can re-render.
 func (d *detailModel) setContent(s string) {
+	d.lastContent = s
+	d.lastIsMarkdown = true
+	if s == "" {
+		d.content = ""
+	} else {
+		d.content = d.renderMD(s)
+	}
+	d.vp.SetContent(d.content)
+	d.vp.GotoTop()
+	d.loading = false
+	d.errMsg = ""
+}
+
+// setRawContent feeds pre-formatted (non-markdown) text directly to the
+// viewport. Used by the kanban board and any other view that builds its own
+// ANSI layout.
+func (d *detailModel) setRawContent(s string) {
+	d.lastContent = s
+	d.lastIsMarkdown = false
 	d.content = s
 	d.vp.SetContent(s)
 	d.vp.GotoTop()
 	d.loading = false
 	d.errMsg = ""
+}
+
+// setTheme swaps the active glamour theme. Caller is responsible for
+// invalidating the global cache before calling. Re-renders the most recent
+// markdown content (if any).
+func (d *detailModel) setTheme(theme string) {
+	d.theme = theme
+	if d.lastIsMarkdown && d.lastContent != "" {
+		d.content = d.renderMD(d.lastContent)
+		d.vp.SetContent(d.content)
+	}
+}
+
+func (d *detailModel) renderMD(src string) string {
+	src = linkifyText(src, d.caps)
+	return renderMarkdown(src, maxInt(d.width-4, 10), d.theme)
 }
 
 func (d *detailModel) setLoading(b bool) { d.loading = b }
@@ -88,14 +147,17 @@ func shortID(s string) string {
 	return s
 }
 
-// sectionHead renders a "Title\n───" two-line header used by every detail
-// view to chunk content.
-func sectionHead(title string) string {
-	return display.Label.Render(title) + "\n" + display.Dim.Render("───")
+// mdSection writes a "## Title\n\n" header into the builder.
+func mdSection(b *strings.Builder, title string) {
+	b.WriteString("## ")
+	b.WriteString(title)
+	b.WriteString("\n\n")
 }
 
 // renderTaskDetail builds the rich detail block for a task: header, metadata,
 // description, subtasks, notes, linked memories and comments.
+//
+// Output is pure markdown; the detail pane runs it through glamour.
 func renderTaskDetail(
 	t *models.Task,
 	subtasks []models.Subtask,
@@ -104,46 +166,33 @@ func renderTaskDetail(
 	comments []models.Comment,
 ) string {
 	if t == nil {
-		return display.Dim.Render("(no task)")
+		return "_no task_"
 	}
 	title, desc := decryptTask(t)
 	var b strings.Builder
 
 	// Header line: [task] <id>   <priority> · <status>
-	b.WriteString(display.Dim.Render("[task]"))
-	b.WriteString(" ")
-	b.WriteString(display.Dim.Render(shortID(t.ID.String())))
-	b.WriteString("    ")
-	b.WriteString(display.PriorityBadge(t.Priority))
-	b.WriteString(" · ")
-	b.WriteString(display.StatusLabel(t.Status))
-	b.WriteString("\n")
-	b.WriteString(display.Title.Render(display.SingleLine(title)))
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "`[task]` `%s`  %s · %s\n",
+		shortID(t.ID.String()),
+		display.PriorityBadge(t.Priority),
+		display.StatusLabel(t.Status),
+	)
+	fmt.Fprintf(&b, "# %s\n\n", display.SingleLine(title))
 
 	// Metadata block.
 	if t.Project != nil && t.Project.Name != "" {
-		b.WriteString(display.Label.Render("Project: "))
-		b.WriteString(t.Project.Name)
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**Project:** %s  \n", t.Project.Name)
 	}
-	b.WriteString(display.Label.Render("Created: "))
-	b.WriteString(display.Relative(t.CreatedAt))
-	b.WriteString(" · ")
-	b.WriteString(display.Label.Render("Updated: "))
-	b.WriteString(display.Relative(t.UpdatedAt))
-	b.WriteString("\n")
+	fmt.Fprintf(&b, "**Created:** %s · **Updated:** %s  \n",
+		display.Relative(t.CreatedAt), display.Relative(t.UpdatedAt))
 	if tags := tagSlice(t.Tags); len(tags) > 0 {
-		b.WriteString(display.Label.Render("Tags: "))
-		b.WriteString(strings.Join(tags, " · "))
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**Tags:** %s  \n", strings.Join(tags, " · "))
 	}
 	b.WriteString("\n")
 
 	// Description.
 	if desc != "" {
-		b.WriteString(sectionHead("Description"))
-		b.WriteString("\n")
+		mdSection(&b, "Description")
 		b.WriteString(desc)
 		b.WriteString("\n\n")
 	}
@@ -156,55 +205,43 @@ func renderTaskDetail(
 				done++
 			}
 		}
-		b.WriteString(sectionHead(fmt.Sprintf("Subtasks (%d/%d)", done, len(subtasks))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Subtasks (%d/%d)", done, len(subtasks)))
 		for _, s := range subtasks {
-			marker := "○"
+			marker := "- [ ]"
 			if s.Completed == 1 || strings.EqualFold(s.Status, "COMPLETED") {
-				marker = display.Good.Render("✓")
-			} else {
-				marker = display.Dim.Render("○")
+				marker = "- [x]"
 			}
-			b.WriteString(marker)
-			b.WriteString(" ")
-			b.WriteString(s.Description)
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "%s %s\n", marker, s.Description)
 		}
 		b.WriteString("\n")
 	}
 
 	// Notes (annotations).
 	if len(annotations) > 0 {
-		b.WriteString(sectionHead(fmt.Sprintf("Notes (%d)", len(annotations))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Notes (%d)", len(annotations)))
 		for _, a := range annotations {
 			ts := a.CreatedAt.Format("2006-01-02 15:04")
-			b.WriteString(display.Dim.Render("[" + ts + "] "))
-			b.WriteString(a.Content)
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "- _[%s]_ %s\n", ts, a.Content)
 		}
 		b.WriteString("\n")
 	}
 
 	// Linked memories.
 	if len(linkedMems) > 0 {
-		b.WriteString(sectionHead(fmt.Sprintf("Linked Memories (%d)", len(linkedMems))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Linked Memories (%d)", len(linkedMems)))
 		for _, m := range linkedMems {
-			b.WriteString(display.TypeBadge(m.Type))
-			b.WriteString(" ")
-			b.WriteString(display.Dim.Render(shortID(m.ID.String())))
-			b.WriteString("  ")
-			b.WriteString(display.SingleLine(decryptMemoryContent(&m)))
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "- %s `%s` %s\n",
+				display.TypeBadge(m.Type),
+				shortID(m.ID.String()),
+				display.SingleLine(decryptMemoryContent(&m)),
+			)
 		}
 		b.WriteString("\n")
 	}
 
 	// Comments.
 	if len(comments) > 0 {
-		b.WriteString(sectionHead(fmt.Sprintf("Comments (%d)", len(comments))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Comments (%d)", len(comments)))
 		b.WriteString(renderCommentTree(comments))
 		b.WriteString("\n")
 	}
@@ -220,62 +257,48 @@ func renderMemoryDetail(
 	comments []models.Comment,
 ) string {
 	if m == nil {
-		return display.Dim.Render("(no memory)")
+		return "_no memory_"
 	}
 	content := decryptMemoryContent(m)
 	var b strings.Builder
 
 	// Header line.
-	b.WriteString(display.TypeBadge(m.Type))
-	b.WriteString(" ")
-	b.WriteString(display.Dim.Render(shortID(m.ID.String())))
-	b.WriteString("    ")
-	b.WriteString(display.Dim.Render(fmt.Sprintf("★ access %d · %s",
-		m.AccessCount, display.Relative(m.UpdatedAt))))
-	b.WriteString("\n")
-	// First line of content as the title-ish.
+	fmt.Fprintf(&b, "%s `%s`  _★ access %d · %s_\n",
+		display.TypeBadge(m.Type),
+		shortID(m.ID.String()),
+		m.AccessCount, display.Relative(m.UpdatedAt),
+	)
 	first := display.SingleLine(content)
-	b.WriteString(display.Title.Render(display.Truncate(first, 80)))
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "# %s\n\n", display.Truncate(first, 80))
 
 	if m.Project != nil && m.Project.Name != "" {
-		b.WriteString(display.Label.Render("Project: "))
-		b.WriteString(m.Project.Name)
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**Project:** %s  \n", m.Project.Name)
 	}
 	if tags := tagSlice(m.Tags); len(tags) > 0 {
-		b.WriteString(display.Label.Render("Tags: "))
-		b.WriteString(strings.Join(tags, " · "))
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**Tags:** %s  \n", strings.Join(tags, " · "))
 	}
-	b.WriteString(display.Label.Render("Created: "))
-	b.WriteString(display.Relative(m.CreatedAt))
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "**Created:** %s\n\n", display.Relative(m.CreatedAt))
 
 	// Full content.
-	b.WriteString(sectionHead("Content"))
-	b.WriteString("\n")
+	mdSection(&b, "Content")
 	b.WriteString(content)
 	b.WriteString("\n\n")
 
 	if len(comments) > 0 {
-		b.WriteString(sectionHead(fmt.Sprintf("Comments (%d)", len(comments))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Comments (%d)", len(comments)))
 		b.WriteString(renderCommentTree(comments))
 		b.WriteString("\n")
 	}
 
 	if len(linkedTasks) > 0 {
-		b.WriteString(sectionHead(fmt.Sprintf("Linked Tasks (%d)", len(linkedTasks))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Linked Tasks (%d)", len(linkedTasks)))
 		for _, t := range linkedTasks {
 			title, _ := decryptTask(&t)
-			b.WriteString(display.StatusIcon(t.Status))
-			b.WriteString(" ")
-			b.WriteString(display.Dim.Render(shortID(t.ID.String())))
-			b.WriteString("  ")
-			b.WriteString(display.SingleLine(title))
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "- %s `%s` %s\n",
+				display.StatusIcon(t.Status),
+				shortID(t.ID.String()),
+				display.SingleLine(title),
+			)
 		}
 		b.WriteString("\n")
 	}
@@ -291,29 +314,20 @@ func renderProjectDetail(
 	memories []models.Memory,
 ) string {
 	if p == nil {
-		return display.Dim.Render("(no project)")
+		return "_no project_"
 	}
 	var b strings.Builder
 
-	b.WriteString(display.Dim.Render("[project]"))
-	b.WriteString(" ")
-	b.WriteString(display.Dim.Render(shortID(p.ID.String())))
-	b.WriteString("\n")
-	b.WriteString(display.Title.Render(p.Name))
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "`[project]` `%s`\n", shortID(p.ID.String()))
+	fmt.Fprintf(&b, "# %s\n\n", p.Name)
 
 	if p.Organization != nil && p.Organization.Name != "" {
-		b.WriteString(display.Label.Render("Org: "))
-		b.WriteString(p.Organization.Name)
-		b.WriteString(" · ")
+		fmt.Fprintf(&b, "**Org:** %s · ", p.Organization.Name)
 	}
-	b.WriteString(display.Label.Render("Created: "))
-	b.WriteString(display.Relative(p.CreatedAt))
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "**Created:** %s\n\n", display.Relative(p.CreatedAt))
 
 	if p.Description != "" {
-		b.WriteString(sectionHead("Description"))
-		b.WriteString("\n")
+		mdSection(&b, "Description")
 		b.WriteString(p.Description)
 		b.WriteString("\n\n")
 	}
@@ -323,23 +337,19 @@ func renderProjectDetail(
 	if tShown > cap {
 		tShown = cap
 	}
-	b.WriteString(sectionHead(fmt.Sprintf("Recent Tasks (showing %d of %d)", tShown, len(tasks))))
-	b.WriteString("\n")
+	mdSection(&b, fmt.Sprintf("Recent Tasks (showing %d of %d)", tShown, len(tasks)))
 	for i := 0; i < tShown; i++ {
 		t := tasks[i]
 		title, _ := decryptTask(&t)
-		b.WriteString(display.StatusIcon(t.Status))
-		b.WriteString(" ")
-		b.WriteString(display.PriorityBadge(t.Priority))
-		b.WriteString(" ")
-		b.WriteString(display.Dim.Render(shortID(t.ID.String())))
-		b.WriteString("  ")
-		b.WriteString(display.SingleLine(title))
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "- %s %s `%s` %s\n",
+			display.StatusIcon(t.Status),
+			display.PriorityBadge(t.Priority),
+			shortID(t.ID.String()),
+			display.SingleLine(title),
+		)
 	}
 	if len(tasks) == 0 {
-		b.WriteString(display.Dim.Render("(none)"))
-		b.WriteString("\n")
+		b.WriteString("_(none)_\n")
 	}
 	b.WriteString("\n")
 
@@ -347,23 +357,20 @@ func renderProjectDetail(
 	if mShown > cap {
 		mShown = cap
 	}
-	b.WriteString(sectionHead(fmt.Sprintf("Recent Memories (showing %d of %d)", mShown, len(memories))))
-	b.WriteString("\n")
+	mdSection(&b, fmt.Sprintf("Recent Memories (showing %d of %d)", mShown, len(memories)))
 	for i := 0; i < mShown; i++ {
 		m := memories[i]
-		b.WriteString(display.TypeBadge(m.Type))
-		b.WriteString(" ")
-		b.WriteString(display.Dim.Render(shortID(m.ID.String())))
-		b.WriteString("  ")
-		b.WriteString(display.SingleLine(decryptMemoryContent(&m)))
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "- %s `%s` %s\n",
+			display.TypeBadge(m.Type),
+			shortID(m.ID.String()),
+			display.SingleLine(decryptMemoryContent(&m)),
+		)
 	}
 	if len(memories) == 0 {
-		b.WriteString(display.Dim.Render("(none)"))
-		b.WriteString("\n")
+		b.WriteString("_(none)_\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(display.Dim.Render("↵ enter to drill into this project's tasks"))
+	b.WriteString("> ↵ enter to drill into this project's tasks")
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -374,82 +381,58 @@ func renderOrgDetail(
 	enc *api.OrgEncryptionStatus,
 ) string {
 	if org == nil {
-		return display.Dim.Render("(no organization)")
+		return "_no organization_"
 	}
 	var b strings.Builder
-	b.WriteString(display.Dim.Render("[org]"))
-	b.WriteString(" ")
-	b.WriteString(display.Dim.Render(shortID(org.ID)))
-	b.WriteString("\n")
-	b.WriteString(display.Title.Render(org.Name))
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "`[org]` `%s`\n", shortID(org.ID))
+	fmt.Fprintf(&b, "# %s\n\n", org.Name)
 
 	if org.Description != "" {
-		b.WriteString(display.Label.Render("Description: "))
-		b.WriteString(org.Description)
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**Description:** %s  \n", org.Description)
 	}
 	if org.OwnerID != "" {
-		b.WriteString(display.Label.Render("Owner: "))
-		b.WriteString(display.Dim.Render(shortID(org.OwnerID)))
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**Owner:** `%s`  \n", shortID(org.OwnerID))
 	}
 	if enc != nil {
-		b.WriteString(display.Label.Render("Encryption: "))
 		if enc.IsEnabled {
-			b.WriteString(display.Good.Render(fmt.Sprintf("✓ Enabled (v%d)", enc.EncryptionVersion)))
+			fmt.Fprintf(&b, "**Encryption:** ✓ Enabled (v%d)  \n", enc.EncryptionVersion)
 		} else {
-			b.WriteString(display.Dim.Render("× Disabled"))
+			b.WriteString("**Encryption:** × Disabled  \n")
 		}
-		b.WriteString("\n")
 	}
-	b.WriteString(display.Label.Render("Created: "))
-	b.WriteString(display.Relative(org.CreatedAt))
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "**Created:** %s\n\n", display.Relative(org.CreatedAt))
 
 	const cap = 20
 	pShown := len(projects)
 	if pShown > cap {
 		pShown = cap
 	}
-	b.WriteString(sectionHead(fmt.Sprintf("Projects (%d)", len(projects))))
-	b.WriteString("\n")
+	mdSection(&b, fmt.Sprintf("Projects (%d)", len(projects)))
 	for i := 0; i < pShown; i++ {
 		p := projects[i]
-		b.WriteString(display.Dim.Render(shortID(p.ID.String())))
-		b.WriteString("  ")
-		b.WriteString(p.Name)
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "- `%s` %s\n", shortID(p.ID.String()), p.Name)
 	}
 	if len(projects) == 0 {
-		b.WriteString(display.Dim.Render("(none)"))
-		b.WriteString("\n")
+		b.WriteString("_(none)_\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(display.Dim.Render("↵ enter to drill into this org's projects"))
+	b.WriteString("> ↵ enter to drill into this org's projects")
 	return strings.TrimRight(b.String(), "\n")
 }
 
 // renderActivityDetail expands a single activity feed item.
 func renderActivityDetail(item models.ActivityItem) string {
 	var b strings.Builder
-	b.WriteString(display.TypeBadge(item.EntityType))
-	b.WriteString(" ")
-	b.WriteString(display.Dim.Render(item.EntityID.String()))
-	b.WriteString("\n\n")
-	b.WriteString(display.Label.Render("Timestamp: "))
-	b.WriteString(item.Timestamp.Format("2006-01-02 15:04:05"))
-	b.WriteString(" (")
-	b.WriteString(display.Relative(item.Timestamp))
-	b.WriteString(")\n")
+	fmt.Fprintf(&b, "%s `%s`\n\n", display.TypeBadge(item.EntityType), item.EntityID.String())
+	fmt.Fprintf(&b, "**Timestamp:** %s (%s)\n",
+		item.Timestamp.Format("2006-01-02 15:04:05"),
+		display.Relative(item.Timestamp),
+	)
 	if item.ProjectID != nil {
-		b.WriteString(display.Label.Render("Project ID: "))
-		b.WriteString(item.ProjectID.String())
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**Project ID:** `%s`\n", item.ProjectID.String())
 	}
 	b.WriteString("\n")
-	b.WriteString(sectionHead("Summary"))
-	b.WriteString("\n")
+	mdSection(&b, "Summary")
 	b.WriteString(item.Summary)
 	return b.String()
 }
@@ -457,6 +440,8 @@ func renderActivityDetail(item models.ActivityItem) string {
 // renderKanbanDetail draws a 3-column board inside the detail pane.
 // Mirrors the logic of internal/cli/commands/kanban.renderBoard but writes to
 // a string and uses the pane's pixel width instead of terminal width.
+//
+// NOTE: Output is NOT markdown — caller should use setRawContent.
 func renderKanbanDetail(width int, todo, inProgress, completed []models.Task) string {
 	cols := [3]struct {
 		title string
@@ -516,28 +501,21 @@ func renderProfileDetail(
 	oauth []models.OAuthAccount,
 ) string {
 	if p == nil {
-		return display.Dim.Render("(no profile)")
+		return "_no profile_"
 	}
 	var b strings.Builder
 
-	b.WriteString(display.Dim.Render("[profile]"))
-	b.WriteString(" ")
-	b.WriteString(p.Email)
-	b.WriteString("\n")
+	fmt.Fprintf(&b, "`[profile]` %s\n", p.Email)
 	name := strings.TrimSpace(p.FirstName + " " + p.LastName)
 	if name != "" {
-		b.WriteString(display.Title.Render(name))
+		fmt.Fprintf(&b, "# %s\n\n", name)
+	} else {
 		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
-	b.WriteString(display.Label.Render("ID: "))
-	b.WriteString(p.ID)
-	b.WriteString("\n")
+	fmt.Fprintf(&b, "**ID:** `%s`  \n", p.ID)
 	if p.APIKey != "" {
-		b.WriteString(display.Label.Render("API Key: "))
-		b.WriteString(maskAPIKey(p.APIKey))
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "**API Key:** `%s`  \n", maskAPIKey(p.APIKey))
 	}
 	if p.ActiveOrganizationID != nil && *p.ActiveOrganizationID != "" {
 		activeName := ""
@@ -547,35 +525,25 @@ func renderProfileDetail(
 				break
 			}
 		}
-		b.WriteString(display.Label.Render("Active Org: "))
-		b.WriteString(display.Dim.Render(shortID(*p.ActiveOrganizationID)))
+		fmt.Fprintf(&b, "**Active Org:** `%s`", shortID(*p.ActiveOrganizationID))
 		if activeName != "" {
-			b.WriteString(" ")
-			b.WriteString(activeName)
+			fmt.Fprintf(&b, " %s", activeName)
 		}
-		b.WriteString("\n")
+		b.WriteString("  \n")
 	}
 	if p.CreatedAt != nil {
-		b.WriteString(display.Label.Render("Created: "))
-		b.WriteString(p.CreatedAt.Format("2006-01-02"))
+		fmt.Fprintf(&b, "**Created:** %s", p.CreatedAt.Format("2006-01-02"))
 		if p.UpdatedAt != nil {
-			b.WriteString(" · ")
-			b.WriteString(display.Label.Render("Updated: "))
-			b.WriteString(p.UpdatedAt.Format("2006-01-02"))
+			fmt.Fprintf(&b, " · **Updated:** %s", p.UpdatedAt.Format("2006-01-02"))
 		}
-		b.WriteString("\n")
+		b.WriteString("  \n")
 	}
 	b.WriteString("\n")
 
 	if len(orgs) > 0 {
-		b.WriteString(sectionHead(fmt.Sprintf("Organizations (%d)", len(orgs))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Organizations (%d)", len(orgs)))
 		for _, o := range orgs {
-			b.WriteString("- ")
-			b.WriteString(o.Name)
-			b.WriteString(" · ")
-			b.WriteString(display.Dim.Render(shortID(o.ID)))
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "- %s · `%s`\n", o.Name, shortID(o.ID))
 		}
 		b.WriteString("\n")
 	}
@@ -586,16 +554,15 @@ func renderProfileDetail(
 		if len(shown) > 10 {
 			shown = shown[:10]
 		}
-		b.WriteString(sectionHead(fmt.Sprintf("Top Agents (%d)", len(shown))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Top Agents (%d)", len(shown)))
 		for _, a := range shown {
 			label := a.DisplayName
 			if label == "" {
 				label = a.AgentName
 			}
-			active := display.Dim.Render("× inactive")
+			active := "× inactive"
 			if a.IsActive {
-				active = display.Good.Render("✓ active")
+				active = "✓ active"
 			}
 			last := ""
 			if a.LastEventAt != nil {
@@ -605,8 +572,8 @@ func renderProfileDetail(
 			if typeStr == "" {
 				typeStr = "agent"
 			}
-			b.WriteString(fmt.Sprintf("[%s] %s · %d events%s · %s\n",
-				typeStr, label, a.EventCount, last, active))
+			fmt.Fprintf(&b, "- `[%s]` %s · %d events%s · %s\n",
+				typeStr, label, a.EventCount, last, active)
 		}
 		b.WriteString("\n")
 	} else if len(agents) > 0 {
@@ -614,48 +581,40 @@ func renderProfileDetail(
 		if len(shown) > 10 {
 			shown = shown[:10]
 		}
-		b.WriteString(sectionHead(fmt.Sprintf("Agents (%d)", len(shown))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("Agents (%d)", len(shown)))
 		for _, a := range shown {
 			label := a.DisplayName
 			if label == "" {
 				label = a.AgentName
 			}
-			active := display.Dim.Render("× inactive")
+			active := "× inactive"
 			if a.IsActive {
-				active = display.Good.Render("✓ active")
+				active = "✓ active"
 			}
 			last := ""
 			if a.LastEventAt != nil {
 				last = " · last " + display.Relative(*a.LastEventAt)
 			}
-			b.WriteString(fmt.Sprintf("[%s] %s · %d events%s · %s\n",
-				a.AgentType, label, a.TotalEvents, last, active))
+			fmt.Fprintf(&b, "- `[%s]` %s · %d events%s · %s\n",
+				a.AgentType, label, a.TotalEvents, last, active)
 		}
 		b.WriteString("\n")
 	}
 
 	if stats != nil {
-		b.WriteString(sectionHead("Stats"))
-		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("Total events: %d · Last 24h: %d · Last 7d: %d\n",
-			stats.TotalEvents, stats.EventsLast24h, stats.EventsLast7d))
+		mdSection(&b, "Stats")
+		fmt.Fprintf(&b, "Total events: **%d** · Last 24h: **%d** · Last 7d: **%d**\n\n",
+			stats.TotalEvents, stats.EventsLast24h, stats.EventsLast7d)
 		if len(stats.EventsByType) > 0 {
-			b.WriteString("By type: ")
-			b.WriteString(formatCountMap(stats.EventsByType))
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "**By type:** %s\n\n", formatCountMap(stats.EventsByType))
 		}
 		if len(stats.EventsBySource) > 0 {
-			b.WriteString("By source: ")
-			b.WriteString(formatCountMap(stats.EventsBySource))
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "**By source:** %s\n\n", formatCountMap(stats.EventsBySource))
 		}
-		b.WriteString("\n")
 	}
 
 	if len(oauth) > 0 {
-		b.WriteString(sectionHead(fmt.Sprintf("OAuth Accounts (%d)", len(oauth))))
-		b.WriteString("\n")
+		mdSection(&b, fmt.Sprintf("OAuth Accounts (%d)", len(oauth)))
 		for _, o := range oauth {
 			line := "- " + o.Provider
 			if o.Email != "" {
@@ -698,9 +657,8 @@ func tagSlice(v interface{}) []string {
 	return out
 }
 
-// renderCommentTree renders top-level comments and one level of replies.
-// Uses comment.Replies if populated; otherwise falls back to filtering by
-// ParentID.
+// renderCommentTree renders top-level comments and one level of replies as
+// markdown blockquotes (replies are nested deeper).
 func renderCommentTree(comments []models.Comment) string {
 	var b strings.Builder
 	// Build a quick parent-id map for the fallback branch.
@@ -729,26 +687,23 @@ func renderCommentTree(comments []models.Comment) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// renderOneComment formats one comment line + body. nested=true indents and
-// prefixes with a tree branch glyph.
+// renderOneComment formats one comment as a markdown blockquote. nested=true
+// uses a doubled `>>` to nest the reply visually.
 func renderOneComment(c models.Comment, nested bool) string {
 	author := commentAuthor(c)
 	stamp := c.CreatedAt.Format("2006-01-02")
-	prefix := ""
-	bodyIndent := "  "
+	prefix := "> "
 	if nested {
-		prefix = "  └ "
-		bodyIndent = "      "
+		prefix = "> > "
 	}
 	var b strings.Builder
-	b.WriteString(prefix)
-	b.WriteString(display.Dim.Render("@" + author + " " + stamp))
-	b.WriteString("\n")
+	fmt.Fprintf(&b, "%s**@%s** _%s_\n", prefix, author, stamp)
 	for _, line := range strings.Split(strings.TrimRight(c.Content, "\n"), "\n") {
-		b.WriteString(bodyIndent)
+		b.WriteString(prefix)
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
+	b.WriteString("\n")
 	return b.String()
 }
 
