@@ -13,6 +13,12 @@ import (
 
 // ProjectLister is the minimal API surface ResolveProject needs. Implemented
 // by *api.Client; injectable in tests.
+//
+// NOTE: The variadic orgID parameter exists solely to match *api.Client's
+// ListProjects signature so the client satisfies this interface directly.
+// ResolveProject does NOT pass any orgID through — it always calls
+// ListProjects() with no arguments. Do not drop the variadic from this
+// interface: removing it would break interface satisfaction by *api.Client.
 type ProjectLister interface {
 	ListProjects(orgID ...string) ([]models.Project, error)
 }
@@ -85,7 +91,7 @@ type OrgLister interface {
 }
 
 // Organization is the structural view ResolveOrg needs (avoids importing api package).
-// Callers adapt with FromAPI in api_adapter.go.
+// Callers adapt with OrgListerFromAPI in api_adapter.go.
 type Organization struct {
 	ID   string
 	Name string
