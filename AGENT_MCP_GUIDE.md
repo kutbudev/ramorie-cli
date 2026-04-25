@@ -121,11 +121,11 @@ Retrieve with `find("deploy production")`.
 Context packs group related memories/tasks. Manage them via the CLI:
 
 ```bash
-ramorie context-pack list
-ramorie context-pack create "feature-auth"
+ramorie context list
+ramorie context create "feature-auth"
 ```
 
-There is no MCP tool for pack activation in v5.0.0 — the agent passes
+There is no MCP tool for pack activation in v6.0.0 — the agent passes
 project scope through tool args (`project:` field on `remember` / `task` /
 `find`).
 
@@ -144,8 +144,7 @@ project scope through tool args (`project:` field on `remember` / `task` /
 
 | Goal | Command |
 |------|---------|
-| Login | `ramorie setup login` |
-| Logout | `ramorie setup logout` |
+| Login / setup | `ramorie setup` |
 | Auth status | `ramorie setup status` |
 | Create project | `ramorie project create <name>` |
 | List projects | `ramorie project list` |
@@ -153,11 +152,13 @@ project scope through tool args (`project:` field on `remember` / `task` /
 | Start task | `ramorie task start <id>` |
 | Complete task | `ramorie task complete <id>` |
 | Kanban view | `ramorie kanban` |
+| Stats | `ramorie stats` |
+| Activity / burndown | `ramorie activity [--burndown]` |
 | Save memory | `ramorie remember "<content>"` |
-| Search memories | `ramorie memory recall "<term>"` |
+| Search memories | `ramorie find "<term>"` |
 | List MCP tools | `ramorie mcp tools` |
 | MCP config snippet | `ramorie mcp config` |
 
 ---
 
-*Ramorie MCP v5.0.0 — 14 tools. Source: https://github.com/kutbudev/ramorie-cli*
+*Ramorie MCP v6.0.0. Source: https://github.com/kutbudev/ramorie-cli*

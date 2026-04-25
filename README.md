@@ -131,7 +131,7 @@ ramorie task complete <task-id>
 ramorie remember "Use bcrypt with 12 rounds for password hashing"
 
 # Search your memories
-ramorie memory recall "password"
+ramorie find "password"
 ```
 
 ---
@@ -191,13 +191,13 @@ Some advanced features (AI-powered suggestions, tag generation, etc.) require a 
 
 **To securely set or update your Gemini API key:**
 ```bash
-ramorie set-gemini-key
+ramorie config set-gemini-key
 ```
 You will be prompted to enter your key, which will be stored securely in your home directory (`~/.ramorie_gemini_key`, permissions 0600).
 
 **To remove your Gemini API key:**
 ```bash
-ramorie set-gemini-key --remove
+ramorie config set-gemini-key --remove
 ```
 
 **Environment Variables:**
@@ -214,89 +214,39 @@ If you prefer, you can set the `GEMINI_API_KEY` environment variable instead of 
 - `annotations` - Task notes
 - `tags` - Tagging system
 
-## 📚 Command Reference
+## Commands
 
-### **Project Commands**
-```bash
-# Project lifecycle
-ramorie project create <name>            # Create new project
-ramorie project list                     # List all projects
-ramorie project show <name-or-id>        # Show project details
-ramorie project update <id>              # Update a project
-ramorie project delete <name-or-id>      # Delete project
+### 🔴 Essential — daily
 
-# Examples
-ramorie project create "orkai-backend"
-ramorie project show orkai-backend
-```
+| Command | Purpose |
+|---|---|
+| `ramorie task` | List, create, update, link, note tasks |
+| `ramorie memory` | List, get, link memories |
+| `ramorie project` | Manage projects (accepts name, short id, or UUID) |
+| `ramorie remember <text>` | Quick memory create (auto-detects type) |
+| `ramorie find <term>` | Hybrid memory search (HyDE + rerank) |
 
-### **Task Commands**
-```bash
-# Task creation & management
-ramorie task create <description>         # Create task
-ramorie task list                        # List tasks
-ramorie task show <id>                   # Show detailed task information
-ramorie task start <id>                  # Start working on task
-ramorie task progress <id> <0-100>       # Update progress percentage
-ramorie task stop <id>                   # Stop (pause) a task
-ramorie task complete <id>               # Mark task complete
-ramorie task update <id> [flags]         # Modify task properties
-ramorie task move <id> <status>          # Move task to a status
-ramorie task delete <id>                 # Delete task
-ramorie task elaborate <id>              # AI-assisted task elaboration
-ramorie task duplicate <id>              # Duplicate a task
-ramorie task next [count]                # Show next prioritized tasks
+### 🟡 Common — frequent
 
-# Examples
-ramorie task create "Implement user authentication"
-ramorie task start a1b2c3d4              # Using partial task ID
-ramorie task show a1b2c3d4               # View full details
-ramorie task complete a1b2c3d4           # Mark complete
-```
+| Command | Purpose |
+|---|---|
+| `ramorie kanban -p <project>` | Beautified three-column board |
+| `ramorie stats` | Task counts (todo / in-progress / done) |
+| `ramorie activity [--burndown]` | Activity feed or burndown report |
+| `ramorie subtask` | Manage subtasks |
+| `ramorie context` | Manage contexts and packs |
 
-### **Annotation Commands**
-```bash
-# Add notes and details to tasks
-ramorie annotate <task-id> <note>        # Add annotation to task
-ramorie task-annotations <task-id>       # List all annotations for task
+### 🟢 Admin — setup
 
-# Examples
-ramorie annotate a1b2c3d4 "Fixed authentication bug by updating JWT validation"
-ramorie annotate a1b2c3d4 "Used bcrypt for password hashing"
-ramorie task-annotations a1b2c3d4       # View all notes for this task
-```
+| Command | Purpose |
+|---|---|
+| `ramorie setup` | Interactive auth + `vault unlock\|lock\|status` |
+| `ramorie config` | Show config, set API key, set Gemini key |
+| `ramorie mcp` | MCP server management |
+| `ramorie hook` | Claude Code PreToolUse hook |
+| `ramorie org` | Organizations + `vault` + `encryption` subgroups |
 
-### **Memory Commands**
-```bash
-# Memory management
-ramorie remember <text>                   # Store new insight/learning
-ramorie memories [flags]                  # List memories
-
-ramorie memory recall <search_term>    # Search memories
-ramorie memory get <id>                # View a memory by ID
-ramorie memory forget <id>             # Delete memory
-
-# Examples
-ramorie remember "Use connection pooling for better database performance"
-ramorie remember "Bug in API rate limiting - fix with exponential backoff"
-ramorie memories                         # See project memories
-```
-
-### **Visual Commands**
-```bash
-# Kanban board
-ramorie kanban                               # Display kanban board
-
-# Output example:
-┌──────────────┬──────────────┬──────────────┬──────────────┐
-│ TODO (3)     │ IN_PROGRESS  │ IN_REVIEW (1)│ COMPLETED (2)│
-│              │ (2)          │              │              │
-├──────────────┼──────────────┼──────────────┼──────────────┤
-│ 🔴 Fix login │ 🟡 API tests │ 🟢 User auth │ ✅ Database  │
-│ 🟡 Add logs  │ 🔴 Security  │              │ ✅ Setup CI  │
-│ 🟢 Cleanup   │              │              │              │
-└──────────────┴──────────────┴──────────────┴──────────────┘
-```
+> Project / org / task arguments accept name, 8-char short ID, or full UUID.
 
 ## 🤖 AI Agent Decision Guide
 
@@ -331,17 +281,17 @@ ramorie remember "Redis connection pooling reduces latency by 40% in high-traffi
 ramorie remember "Avoid using SELECT * in production queries - causes performance issues"
 ```
 
-#### Use `annotate` for:
+#### Use `task note` for:
 - ✅ **Progress updates** on existing tasks
 - ✅ **Implementation details** and decisions
 - ✅ **Blocking issues** or dependencies
 - ✅ **Code snippets** or specific technical notes
 
 ```bash
-# Examples of GOOD annotate usage:
-ramorie annotate a1b2c3d4 "Switched from JWT to session-based auth for better security"
-ramorie annotate a1b2c3d4 "Blocked: waiting for API key from third-party service"
-ramorie annotate a1b2c3d4 "Performance improved 3x after adding database indexes"
+# Examples of GOOD task note usage:
+ramorie task note a1b2c3d4 "Switched from JWT to session-based auth for better security"
+ramorie task note a1b2c3d4 "Blocked: waiting for API key from third-party service"
+ramorie task note a1b2c3d4 "Performance improved 3x after adding database indexes"
 ```
 
 ## 🎯 Workflow Examples
@@ -379,7 +329,7 @@ ramorie kanban
 ramorie task list --status IN_PROGRESS
 
 # Review recent memories for insights
-ramorie memories | head -10
+ramorie memory list | head -10
 
 # Check completed tasks
 ramorie task list --status COMPLETED
@@ -388,25 +338,25 @@ ramorie task list --status COMPLETED
 ### **Project Retrospective**
 ```bash
 # Review all project memories
-ramorie memories
+ramorie memory list
 
 # Check task completion stats via kanban
 ramorie kanban
 
 # Search for specific learnings
-ramorie memory recall "performance"
-ramorie memory recall "bug"
+ramorie find "performance"
+ramorie find "bug"
 ```
 
 ## 🔧 Advanced Usage
 
 ### **Cross-Project Memory Access**
 ```bash
-# View memories from all projects (282+ total memories available)
-ramorie memories --all
+# View memories from all projects
+ramorie memory list --all
 
 # Search across all projects
-ramorie memory recall "database" --all
+ramorie find "database" --all
 ```
 
 ### **Task Dependencies & Workflows**
@@ -423,7 +373,7 @@ ramorie task create "Integration tests" --priority L --context "feature-x"
 ramorie task list --priority H --status TODO --context "urgent"
 
 # Filter memories by search
-ramorie memory recall "TypeScript" --all
+ramorie find "TypeScript" --all
 ```
 
 ## 📊 Data Model
@@ -542,14 +492,11 @@ Add to your MCP configuration:
 # Project statistics
 ramorie stats
 
-# Task history (last 7 days)
-ramorie history -d 7
+# Activity feed (last 7 days)
+ramorie activity -d 7
 
-# Burndown chart
-ramorie burndown
-
-# Project summary
-ramorie summary
+# Burndown report
+ramorie activity --burndown
 ```
 
 ---
@@ -565,7 +512,7 @@ Your credentials are stored securely in `~/.ramorie/config.json`.
 For AI-powered features (suggestions, analysis, auto-tagging):
 
 ```bash
-ramorie set-gemini-key
+ramorie config set-gemini-key
 ```
 
 Or set the environment variable:
@@ -677,22 +624,22 @@ ramorie mcp serve
 
 ```bash
 # Essential Commands
-ramorie setup login                      # Authenticate (email + password)
+ramorie setup                            # Authenticate (email + password)
 ramorie project list                     # List all projects
 ramorie kanban                           # Visual task board
 ramorie task create "Description"        # New task
 ramorie task show <id>                   # Task details
 ramorie task start <id>                  # Begin working
-ramorie annotate <id> "Note"             # Add progress note
+ramorie task note <id> "Note"            # Add progress note
 ramorie remember "Insight"               # Store knowledge
 ramorie task complete <id>               # Complete task
 
 # Decision Guide
 # Need to do work?      → task create
-# Making progress?      → annotate
+# Making progress?      → task note
 # Learned something?    → remember
 # Need overview?        → kanban
-# Need details?         → task info
+# Need details?         → task show
 ```
 
 ---

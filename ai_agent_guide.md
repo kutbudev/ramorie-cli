@@ -21,7 +21,7 @@ Neredeyse tüm komutlar bir **ID** ile çalışır. `create` veya `list` komutla
 
 Kullanıcı yeni bir hedef veya görev verdiğinde, izlenecek adımlar:
 
-1.  **Aktif Projeyi Kontrol Et:** `ramorie project list` komutu ile aktif bir proje olup olmadığını kontrol et. Aktif proje yoksa, kullanıcıdan `ramorie project use <id>` ile bir proje seçmesini iste.
+1.  **Aktif Projeyi Kontrol Et:** `ramorie project list` komutu ile mevcut projeleri kontrol et. Komutlara her zaman `--project <name-or-id>` flag'i ile proje bağlamı geç.
 2.  **Görevi Oluştur (Taskify):** Kullanıcının isteğini hemen bir göreve dönüştür.
     ```bash
     ramorie task create "Kullanıcının verdiği görev başlığı" --description "Görevin detaylı açıklaması ve hedefleri"
@@ -63,10 +63,10 @@ Kodlama, komut çalıştırma gibi aktif geliştirme adımları sırasında:
     # Kısa flag isimleri de kullanılabilir
     ramorie task update <görev-id> -t "Yeni Başlık" -s COMPLETED -P M
     ```
-3.  **İlerlemeyi Not Al (Annotate):** Yaptığın her anlamlı işlemi (bir komut çalıştırmak, bir dosyayı düzenlemek, bir hata almak vb.) göreve not olarak ekle. Bu, hem ilerlemenin bir kaydını tutar hem de kullanıcıya ne yapıldığını şeffaf bir şekilde gösterir.
+3.  **İlerlemeyi Not Al (task note):** Yaptığın her anlamlı işlemi (bir komut çalıştırmak, bir dosyayı düzenlemek, bir hata almak vb.) göreve not olarak ekle. Bu, hem ilerlemenin bir kaydını tutar hem de kullanıcıya ne yapıldığını şeffaf bir şekilde gösterir.
     ```bash
-    ramorie annotate <görev-id> "Makefile düzenlendi ve 'build' komutu eklendi."
-    ramorie annotate <görev-id> "Derleme sırasında 'redeclared function' hatası alındı. Çözülüyor."
+    ramorie task note <görev-id> "Makefile düzenlendi ve 'build' komutu eklendi."
+    ramorie task note <görev-id> "Derleme sırasında 'redeclared function' hatası alındı. Çözülüyor."
     ```
 
 ### 4. Görevi Tamamlama
@@ -84,11 +84,11 @@ Görevin tüm gereksinimleri karşılandığında ve iş bittiğinde:
 
 1.  **Bilgiyi Hatırla (Remember):**
     ```bash
-    ramorie memory remember "Uygulamayı kurmak için 'make dev-install' komutu kullanılır."
+    ramorie remember "Uygulamayı kurmak için 'make dev-install' komutu kullanılır."
     ```
-2.  **Bilgiyi Geri Çağır (Recall):** Benzer bir problemle karşılaştığında veya bir bilgiye ihtiyaç duyduğunda hafızayı sorgula.
+2.  **Bilgiyi Geri Çağır (Find):** Benzer bir problemle karşılaştığında veya bir bilgiye ihtiyaç duyduğunda hafızayı sorgula.
     ```bash
-    ramorie memory recall "uygulama kurulumu"
+    ramorie find "uygulama kurulumu"
     ```
 
 ## Komut Referansı
@@ -104,7 +104,7 @@ Görevin tüm gereksinimleri karşılandığında ve iş bittiğinde:
 | `task start` | Görevi IN_PROGRESS yap | `ramorie task start a6ba6295` |
 | `task complete` | Görevi COMPLETED yap | `ramorie task complete a6ba6295` |
 | `task elaborate` | AI ile görev planı oluştur | `ramorie task elaborate a6ba6295` |
-| `annotate` | Göreve not ekle (tam UUID gerekli) | `ramorie annotate <tam-uuid> "İlerleme notu"` |
+| `task note` | Göreve not ekle | `ramorie task note <id> "İlerleme notu"` |
 
 ### Task Update Flag'leri
 
@@ -120,14 +120,16 @@ Görevin tüm gereksinimleri karşılandığında ve iş bittiğinde:
 
 | Komut | Açıklama | Örnek |
 |-------|----------|-------|
-| `memory remember` | Bilgi sakla | `ramorie memory remember "Deploy komutu: make deploy"` |
-| `memory recall` | Bilgi ara | `ramorie memory recall "deploy"` |
+| `remember` | Bilgi sakla | `ramorie remember "Deploy komutu: make deploy"` |
+| `find` | Bilgi ara (HyDE + rerank) | `ramorie find "deploy"` |
+| `memory list` | Bilgileri listele | `ramorie memory list` |
+| `memory get` | Bir bilgiyi göster | `ramorie memory get <id>` |
 
 ### Project Yönetimi
 
 | Komut | Açıklama | Örnek |
 |-------|----------|-------|
 | `project list` | Projeleri listele | `ramorie project list` |
-| `project use` | Aktif projeyi değiştir | `ramorie project use <project-id>` |
+| `project show` | Proje detayını göster | `ramorie project show <name-or-id>` |
 
 Bu rehberi takip ederek, bir AI ajanı `ramorie`'ı verimli ve insan-gözetimli bir şekilde kullanabilir.
