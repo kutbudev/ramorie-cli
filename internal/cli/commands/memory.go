@@ -6,6 +6,7 @@ import (
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
+	"github.com/kutbudev/ramorie-cli/internal/cli/resolve"
 	"github.com/kutbudev/ramorie-cli/internal/constants"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
@@ -178,19 +179,23 @@ func memoriesCmd() *cli.Command {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			projectID := c.String("project")
+			projectArg := c.String("project")
 			showAll := c.Bool("all")
 			orgOnly := c.Bool("org-only")
 			limit := c.Int("limit")
 			tagFilter := c.String("tag")
 
+			client := api.NewClient()
 
-			// If --all flag, don't filter by project
-			if showAll {
-				projectID = ""
+			projectID := ""
+			if projectArg != "" && !showAll {
+				resolved, err := resolve.ResolveProject(projectArg, client)
+				if err != nil {
+					return err
+				}
+				projectID = resolved
 			}
 
-			client := api.NewClient()
 			memories, err := client.ListMemories(projectID, "") // No search query
 			if err != nil {
 				fmt.Println(apierrors.ParseAPIError(err))
