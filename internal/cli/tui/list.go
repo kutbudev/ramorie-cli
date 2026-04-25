@@ -44,6 +44,12 @@ type listModel struct {
 	loading bool
 	errMsg  string
 	stack   []navFrame
+
+	// Pagination state for the active top frame (tasks/memories only).
+	page        int  // current page (1-based) loaded so far
+	pageSize    int  // page size used in fetches; default 100
+	hasMore     bool // true when the last fetch returned a full page
+	loadingMore bool // true while a follow-up page is being fetched
 }
 
 func newList(cat Category, width, height int) listModel {
@@ -79,12 +85,16 @@ func (l *listModel) resize(width, height int) {
 }
 
 // resetStack clears the breadcrumb stack and seeds it with a single frame for
-// the new active category.
+// the new active category. Also resets pagination state.
 func (l *listModel) resetStack(cat Category, label string) {
 	l.cat = cat
 	l.stack = []navFrame{{cat: cat, label: label}}
 	l.list.SetItems(nil)
 	l.errMsg = ""
+	l.page = 0
+	l.pageSize = 100
+	l.hasMore = false
+	l.loadingMore = false
 }
 
 // pushFrame adds a new drill-down frame and clears the visible list (caller
@@ -125,53 +135,103 @@ func (l listModel) topFrame() navFrame {
 	return l.stack[len(l.stack)-1]
 }
 
-// setItemsForCategory replaces list contents based on the category data.
-func (l *listModel) setTasks(tasks []models.Task) {
-	items := make([]list.Item, 0, len(tasks))
-	for i := range tasks {
-		t := tasks[i]
-		title, _ := decryptTask(&t)
-		shortID := t.ID.String()
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
-		}
-		formatted := fmt.Sprintf("%s %s  %s",
-			display.PriorityBadge(t.Priority),
-			display.Dim.Render(shortID),
-			display.SingleLine(title),
-		)
-		items = append(items, listItem{
-			id:    t.ID.String(),
-			title: formatted,
-			sub:   "",
-			raw:   t,
-		})
+// taskToItem renders a single task as a list cell.
+func taskToItem(t models.Task) list.Item {
+	title, _ := decryptTask(&t)
+	shortID := t.ID.String()
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
 	}
+	formatted := fmt.Sprintf("%s %s  %s",
+		display.PriorityBadge(t.Priority),
+		display.Dim.Render(shortID),
+		display.SingleLine(title),
+	)
+	return listItem{
+		id:    t.ID.String(),
+		title: formatted,
+		raw:   t,
+	}
+}
+
+// memoryToItem renders a single memory as a list cell.
+func memoryToItem(m models.Memory) list.Item {
+	shortID := m.ID.String()
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	content := display.SingleLine(decryptMemoryContent(&m))
+	formatted := fmt.Sprintf("%s %s  %s",
+		display.TypeBadge(m.Type),
+		display.Dim.Render(shortID),
+		display.Truncate(content, 80),
+	)
+	return listItem{
+		id:    m.ID.String(),
+		title: formatted,
+		raw:   m,
+	}
+}
+
+// setTasks replaces the list with the first page of tasks. page+hasMore drive
+// the infinite-scroll state machine.
+func (l *listModel) setTasks(tasks []models.Task, page int, hasMore bool) {
+	items := make([]list.Item, 0, len(tasks))
+	for _, t := range tasks {
+		items = append(items, taskToItem(t))
+	}
+	l.page = page
+	l.hasMore = hasMore
+	l.loadingMore = false
 	l.applyItems(items)
 }
 
-func (l *listModel) setMemories(mems []models.Memory) {
-	items := make([]list.Item, 0, len(mems))
-	for i := range mems {
-		m := mems[i]
-		shortID := m.ID.String()
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
-		}
-		content := display.SingleLine(decryptMemoryContent(&m))
-		formatted := fmt.Sprintf("%s %s  %s",
-			display.TypeBadge(m.Type),
-			display.Dim.Render(shortID),
-			display.Truncate(content, 80),
-		)
-		items = append(items, listItem{
-			id:    m.ID.String(),
-			title: formatted,
-			sub:   "",
-			raw:   m,
-		})
+// appendTasks adds another page of tasks to the existing list.
+func (l *listModel) appendTasks(tasks []models.Task, page int, hasMore bool) {
+	cur := l.list.Items()
+	for _, t := range tasks {
+		cur = append(cur, taskToItem(t))
 	}
+	l.page = page
+	l.hasMore = hasMore
+	l.loadingMore = false
+	l.applyItems(cur)
+}
+
+// setMemories replaces the list with the first page of memories.
+func (l *listModel) setMemories(mems []models.Memory, page int, hasMore bool) {
+	items := make([]list.Item, 0, len(mems))
+	for _, m := range mems {
+		items = append(items, memoryToItem(m))
+	}
+	l.page = page
+	l.hasMore = hasMore
+	l.loadingMore = false
 	l.applyItems(items)
+}
+
+// appendMemories adds another page of memories.
+func (l *listModel) appendMemories(mems []models.Memory, page int, hasMore bool) {
+	cur := l.list.Items()
+	for _, m := range mems {
+		cur = append(cur, memoryToItem(m))
+	}
+	l.page = page
+	l.hasMore = hasMore
+	l.loadingMore = false
+	l.applyItems(cur)
+}
+
+// shouldFetchMore returns true when the cursor is within the bottom guard band
+// AND another page is available AND no fetch is in flight.
+func (l listModel) shouldFetchMore() bool {
+	if !l.hasMore || l.loadingMore {
+		return false
+	}
+	idx := l.list.Index()
+	total := len(l.list.Items())
+	// Trigger when within the last 3 visible items.
+	return total > 0 && idx >= total-3
 }
 
 // setProjects renders projects as one-line cells and stores them in the top
@@ -349,6 +409,31 @@ func (l listModel) View() string {
 		if crumb := l.breadcrumb(); crumb != "" {
 			inner = crumb + "\n" + inner
 		}
+		if foot := l.paginationFooter(); foot != "" {
+			inner += "\n" + foot
+		}
 	}
 	return container.Render(inner)
+}
+
+// paginationFooter shows "n loaded · page N · more →" or "all loaded" when
+// the cat supports pagination. Empty string for non-paginated cats.
+func (l listModel) paginationFooter() string {
+	if l.page == 0 {
+		return ""
+	}
+	switch l.cat {
+	case CatTasks, CatMemories:
+		// fall through
+	default:
+		return ""
+	}
+	count := len(l.list.Items())
+	if l.loadingMore {
+		return display.Dim.Render(fmt.Sprintf("%d loaded · page %d · loading next…", count, l.page))
+	}
+	if l.hasMore {
+		return display.Dim.Render(fmt.Sprintf("%d loaded · page %d · ↓ for more", count, l.page))
+	}
+	return display.Dim.Render(fmt.Sprintf("%d loaded · all pages", count))
 }

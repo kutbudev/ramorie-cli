@@ -169,6 +169,33 @@ func (m *rootModel) loadForCategory() tea.Cmd {
 	return nil
 }
 
+// maybeFetchNextPage triggers an append-mode fetch when the cursor reaches
+// the bottom guard band of a paginated list AND another page is available.
+// Returns nil when no fetch should happen (kept simple — only Tasks and
+// Memories paginate today).
+func (m *rootModel) maybeFetchNextPage() tea.Cmd {
+	if !m.list.shouldFetchMore() {
+		return nil
+	}
+	// Only paginate top-level Tasks/Memories. Drill frames (e.g. tasks of a
+	// project, projects of an org) keep the simple single-page behavior for
+	// now — they're filtered down enough to fit in the default 100.
+	if m.list.depth() != 1 {
+		return nil
+	}
+	switch m.list.cat {
+	case CatTasks:
+		m.list.loadingMore = true
+		m.statusMsg = "↓ loading more tasks…"
+		return loadTasksPage(m.client, m.projectID, m.list.page+1, true)
+	case CatMemories:
+		m.list.loadingMore = true
+		m.statusMsg = "↓ loading more memories…"
+		return loadMemoriesPage(m.client, m.projectID, m.list.page+1, true)
+	}
+	return nil
+}
+
 // loadDetailForSelection issues a detail fetch for whatever's currently
 // highlighted in the list, dispatching by category AND drill-down depth.
 func (m *rootModel) loadDetailForSelection() tea.Cmd {
@@ -338,8 +365,14 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.list.list, cmd = m.list.list.Update(msg)
 			// After cursor moves, refresh the detail pane.
+			// Also: trigger an infinite-scroll page fetch when the cursor
+			// reaches the bottom guard band of a paginated list.
 			if key.Matches(msg, m.keys.Up) || key.Matches(msg, m.keys.Down) {
-				return m, tea.Batch(cmd, m.loadDetailForSelection())
+				cmds := []tea.Cmd{cmd, m.loadDetailForSelection()}
+				if more := m.maybeFetchNextPage(); more != nil {
+					cmds = append(cmds, more)
+				}
+				return m, tea.Batch(cmds...)
 			}
 			if key.Matches(msg, m.keys.Right) || key.Matches(msg, m.keys.Enter) {
 				m.focus = paneDetail
@@ -365,18 +398,38 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tasksLoadedMsg:
 		if msg.err != nil {
+			if msg.append {
+				m.list.loadingMore = false
+				m.statusMsg = "✗ next page failed: " + msg.err.Error()
+				return m, clearStatusAfter(3 * time.Second)
+			}
 			m.list.setError(msg.err)
 			return m, nil
 		}
-		m.list.setTasks(msg.items)
+		if msg.append {
+			m.list.appendTasks(msg.items, msg.page, msg.hasMore)
+			m.statusMsg = fmt.Sprintf("✓ +%d tasks (page %d)", len(msg.items), msg.page)
+			return m, clearStatusAfter(2 * time.Second)
+		}
+		m.list.setTasks(msg.items, msg.page, msg.hasMore)
 		return m, m.loadDetailForSelection()
 
 	case memoriesLoadedMsg:
 		if msg.err != nil {
+			if msg.append {
+				m.list.loadingMore = false
+				m.statusMsg = "✗ next page failed: " + msg.err.Error()
+				return m, clearStatusAfter(3 * time.Second)
+			}
 			m.list.setError(msg.err)
 			return m, nil
 		}
-		m.list.setMemories(msg.items)
+		if msg.append {
+			m.list.appendMemories(msg.items, msg.page, msg.hasMore)
+			m.statusMsg = fmt.Sprintf("✓ +%d memories (page %d)", len(msg.items), msg.page)
+			return m, clearStatusAfter(2 * time.Second)
+		}
+		m.list.setMemories(msg.items, msg.page, msg.hasMore)
 		return m, m.loadDetailForSelection()
 
 	case projectsLoadedMsg:

@@ -464,47 +464,48 @@ func (c *Client) CreateTaskWithMeta(projectID, title, description, priority stri
 	return &task, nil
 }
 
+// ListTasks returns the first page of tasks (default 100). Use ListTasksPage
+// for explicit pagination.
 func (c *Client) ListTasks(projectID, status string) ([]models.Task, error) {
-	const pageSize = 100
-	var all []models.Task
-	for page := 1; ; page++ {
-		params := url.Values{}
-		if projectID != "" {
-			params.Add("project_id", projectID)
-		}
-		if status != "" {
-			params.Add("status", status)
-		}
-		params.Add("page", fmt.Sprintf("%d", page))
-		params.Add("limit", fmt.Sprintf("%d", pageSize))
+	items, _, err := c.ListTasksPage(projectID, status, 1, 100)
+	return items, err
+}
 
-		respBody, err := c.makeRequest("GET", "/tasks?"+params.Encode(), nil)
-		if err != nil {
-			return nil, err
-		}
-
-		// Backend returns {tasks: [], total: N} or a bare array.
-		var wrapped struct {
-			Tasks []models.Task `json:"tasks"`
-			Total int           `json:"total"`
-		}
-		var batch []models.Task
-		if err := json.Unmarshal(respBody, &wrapped); err == nil && wrapped.Tasks != nil {
-			batch = wrapped.Tasks
-		} else if err := json.Unmarshal(respBody, &batch); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-
-		all = append(all, batch...)
-
-		if len(batch) < pageSize {
-			break
-		}
-		if page >= 50 { // 50 * 100 = 5,000 max
-			break
-		}
+// ListTasksPage returns one page of tasks.
+// Returns (items, hasMore, error). hasMore is true when len(items) == pageSize.
+func (c *Client) ListTasksPage(projectID, status string, page, pageSize int) ([]models.Task, bool, error) {
+	if page < 1 {
+		page = 1
 	}
-	return all, nil
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	params := url.Values{}
+	if projectID != "" {
+		params.Add("project_id", projectID)
+	}
+	if status != "" {
+		params.Add("status", status)
+	}
+	params.Add("page", fmt.Sprintf("%d", page))
+	params.Add("limit", fmt.Sprintf("%d", pageSize))
+
+	respBody, err := c.makeRequest("GET", "/tasks?"+params.Encode(), nil)
+	if err != nil {
+		return nil, false, err
+	}
+	var wrapped struct {
+		Tasks []models.Task `json:"tasks"`
+		Total int           `json:"total"`
+	}
+	var batch []models.Task
+	if err := json.Unmarshal(respBody, &wrapped); err == nil && wrapped.Tasks != nil {
+		batch = wrapped.Tasks
+	} else if err := json.Unmarshal(respBody, &batch); err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	hasMore := len(batch) == pageSize
+	return batch, hasMore, nil
 }
 
 func (c *Client) ListTasksQuery(projectID string, status string, q string, priorities []string, tags []string) ([]models.Task, error) {
@@ -1379,42 +1380,43 @@ func (c *Client) CheckViolations(opts CheckViolationsOptions) (*CheckViolationsR
 	return &response, nil
 }
 
+// ListMemories returns the first page of memories (default 100). Use
+// ListMemoriesPage for explicit pagination.
 func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error) {
-	const pageSize = 100
-	var all []models.Memory
-	for page := 1; ; page++ {
-		params := url.Values{}
-		if projectID != "" {
-			params.Add("project_id", projectID)
-		}
-		if search != "" {
-			params.Add("search", search)
-		}
-		params.Add("page", fmt.Sprintf("%d", page))
-		params.Add("limit", fmt.Sprintf("%d", pageSize))
+	items, _, err := c.ListMemoriesPage(projectID, search, 1, 100)
+	return items, err
+}
 
-		respBody, err := c.makeRequest("GET", "/memories?"+params.Encode(), nil)
-		if err != nil {
-			return nil, err
-		}
-
-		var response MemoriesListResponse
-		if err := json.Unmarshal(respBody, &response); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-
-		all = append(all, response.Memories...)
-
-		// Stop when the backend returned a partial page (last page reached).
-		if len(response.Memories) < pageSize {
-			break
-		}
-		// Safety cap: prevent infinite loops if backend ignores pagination.
-		if page >= 50 { // 50 * 100 = 5,000 max
-			break
-		}
+// ListMemoriesPage returns one page of memories.
+// Returns (items, hasMore, error). hasMore is true when len(items) == pageSize,
+// which means another page may exist.
+func (c *Client) ListMemoriesPage(projectID, search string, page, pageSize int) ([]models.Memory, bool, error) {
+	if page < 1 {
+		page = 1
 	}
-	return all, nil
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	params := url.Values{}
+	if projectID != "" {
+		params.Add("project_id", projectID)
+	}
+	if search != "" {
+		params.Add("search", search)
+	}
+	params.Add("page", fmt.Sprintf("%d", page))
+	params.Add("limit", fmt.Sprintf("%d", pageSize))
+
+	respBody, err := c.makeRequest("GET", "/memories?"+params.Encode(), nil)
+	if err != nil {
+		return nil, false, err
+	}
+	var response MemoriesListResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	hasMore := len(response.Memories) == pageSize
+	return response.Memories, hasMore, nil
 }
 
 func (c *Client) DeleteMemory(id string) error {

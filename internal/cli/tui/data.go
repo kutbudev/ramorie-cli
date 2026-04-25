@@ -11,16 +11,23 @@ import (
 
 // ---- Messages -------------------------------------------------------------
 
-// tasksLoadedMsg is fired after ListTasks completes.
+// tasksLoadedMsg is fired after a tasks page fetch completes.
+// page+hasMore drive infinite scroll; append=true means "add to existing list".
 type tasksLoadedMsg struct {
-	items []models.Task
-	err   error
+	items   []models.Task
+	page    int
+	hasMore bool
+	append  bool
+	err     error
 }
 
-// memoriesLoadedMsg is fired after ListMemories completes.
+// memoriesLoadedMsg is fired after a memories page fetch completes.
 type memoriesLoadedMsg struct {
-	items []models.Memory
-	err   error
+	items   []models.Memory
+	page    int
+	hasMore bool
+	append  bool
+	err     error
 }
 
 // taskDetailLoadedMsg is fired after the bundle of detail calls for a task.
@@ -106,20 +113,42 @@ type profileLoadedMsg struct {
 
 // ---- Loaders --------------------------------------------------------------
 
-// loadTasks returns a tea.Cmd that fetches tasks for projectID
-// (empty string = all projects).
+// loadTasks fetches the first page of tasks for projectID (empty = all).
 func loadTasks(c *api.Client, projectID string) tea.Cmd {
+	return loadTasksPage(c, projectID, 1, false)
+}
+
+// loadTasksPage fetches a specific page; append=true tells the model to add
+// to the existing list rather than replace it.
+func loadTasksPage(c *api.Client, projectID string, page int, appendMode bool) tea.Cmd {
 	return func() tea.Msg {
-		items, err := c.ListTasks(projectID, "")
-		return tasksLoadedMsg{items: items, err: err}
+		items, hasMore, err := c.ListTasksPage(projectID, "", page, 100)
+		return tasksLoadedMsg{
+			items:   items,
+			page:    page,
+			hasMore: hasMore,
+			append:  appendMode,
+			err:     err,
+		}
 	}
 }
 
-// loadMemories returns a tea.Cmd that fetches memories for projectID.
+// loadMemories fetches the first page of memories for projectID.
 func loadMemories(c *api.Client, projectID string) tea.Cmd {
+	return loadMemoriesPage(c, projectID, 1, false)
+}
+
+// loadMemoriesPage fetches a specific page; append=true means add not replace.
+func loadMemoriesPage(c *api.Client, projectID string, page int, appendMode bool) tea.Cmd {
 	return func() tea.Msg {
-		items, err := c.ListMemories(projectID, "")
-		return memoriesLoadedMsg{items: items, err: err}
+		items, hasMore, err := c.ListMemoriesPage(projectID, "", page, 100)
+		return memoriesLoadedMsg{
+			items:   items,
+			page:    page,
+			hasMore: hasMore,
+			append:  appendMode,
+			err:     err,
+		}
 	}
 }
 
