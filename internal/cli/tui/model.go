@@ -242,7 +242,7 @@ func (m *rootModel) loadDetailForSelection() tea.Cmd {
 		if item, ok := sel.raw.(models.ActivityItem); ok {
 			it := item
 			m.yankActivity = &it
-			m.detail.setContent(renderActivityDetail(item))
+			return m.detail.setContent(renderActivityDetail(item))
 		}
 		return nil
 	case CatKanban:
@@ -518,10 +518,10 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Cache for future re-renders.
 		mm := msg
 		m.profile = &mm
-		m.detail.setContent(renderProfileDetail(
+		cmd := m.detail.setContent(renderProfileDetail(
 			msg.profile, msg.orgs, msg.agents, msg.stats, msg.oauth,
 		))
-		return m, nil
+		return m, cmd
 
 	case taskDetailLoadedMsg:
 		if msg.taskID != m.lastSelectedID {
@@ -538,10 +538,10 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.yankTaskNotes = msg.annotations
 		m.yankTaskMems = msg.linkedMems
 		m.yankTaskComments = msg.comments
-		m.detail.setContent(renderTaskDetail(
+		cmd := m.detail.setContent(renderTaskDetail(
 			msg.task, msg.subtasks, msg.annotations, msg.linkedMems, msg.comments,
 		))
-		return m, nil
+		return m, cmd
 
 	case memoryDetailLoadedMsg:
 		if msg.memoryID != m.lastSelectedID {
@@ -554,10 +554,10 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.yankMemory = msg.memory
 		m.yankMemoryTasks = msg.linkedTasks
 		m.yankMemoryComments = msg.comments
-		m.detail.setContent(renderMemoryDetail(
+		cmd := m.detail.setContent(renderMemoryDetail(
 			msg.memory, msg.linkedTasks, msg.comments,
 		))
-		return m, nil
+		return m, cmd
 
 	case projectDetailLoadedMsg:
 		if msg.projectID != m.lastSelectedID {
@@ -570,10 +570,10 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.yankProject = msg.project
 		m.yankProjectTasks = msg.tasks
 		m.yankProjectMems = msg.memories
-		m.detail.setContent(renderProjectDetail(
+		cmd := m.detail.setContent(renderProjectDetail(
 			msg.project, msg.tasks, msg.memories,
 		))
-		return m, nil
+		return m, cmd
 
 	case orgDetailLoadedMsg:
 		if msg.orgID != m.lastSelectedID {
@@ -586,13 +586,18 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.yankOrg = msg.org
 		m.yankOrgProjects = msg.projects
 		m.yankOrgEncryption = msg.encryption
-		m.detail.setContent(renderOrgDetail(
+		cmd := m.detail.setContent(renderOrgDetail(
 			msg.org, msg.projects, msg.encryption,
 		))
-		return m, nil
+		return m, cmd
 
 	case clearStatusMsg:
 		m.statusMsg = ""
+		return m, nil
+
+	case renderedMsg:
+		// Async glamour render finished; swap in if still relevant.
+		m.detail.applyRendered(msg.token, msg.output)
 		return m, nil
 	}
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
@@ -35,6 +36,9 @@ type detailModel struct {
 	// Stored so we can re-render on width or theme changes.
 	lastContent    string
 	lastIsMarkdown bool
+	// renderToken increments on every setContent so stale async render
+	// outputs (cursor already moved on) are discarded by applyRendered.
+	renderToken uint64
 }
 
 func newDetail(width, height int) detailModel {
@@ -59,20 +63,82 @@ func (d *detailModel) resize(width, height int) {
 	d.vp.SetContent(d.content)
 }
 
-// setContent treats `s` as markdown source. Stored as lastContent so
-// theme/width changes can re-render.
-func (d *detailModel) setContent(s string) {
+// renderedMsg carries an async glamour render result back to rootModel.
+// rootModel calls detailModel.applyRendered, which drops stale tokens.
+type renderedMsg struct {
+	token  uint64
+	output string
+}
+
+// setContent shows `s` (markdown source) on the right pane.
+//
+// Fast path: if `s` is short, has no markdown markers, OR is already in the
+// glamour output cache, render is synchronous — the user sees the final
+// result instantly.
+//
+// Slow path: heavier markdown (with code fences, long content, …) is shown
+// as RAW text immediately so the cursor never feels blocked, AND a tea.Cmd
+// is returned that runs glamour in a goroutine. When the goroutine produces
+// a renderedMsg, rootModel calls applyRendered to swap in the prettified
+// output. If the cursor moved on before the result arrived, the token
+// mismatches and the result is dropped.
+func (d *detailModel) setContent(s string) tea.Cmd {
 	d.lastContent = s
 	d.lastIsMarkdown = true
-	if s == "" {
-		d.content = ""
-	} else {
-		d.content = d.renderMD(s)
-	}
-	d.vp.SetContent(d.content)
-	d.vp.GotoTop()
+	d.renderToken++
+	tok := d.renderToken
 	d.loading = false
 	d.errMsg = ""
+
+	if s == "" {
+		d.content = ""
+		d.vp.SetContent("")
+		d.vp.GotoTop()
+		return nil
+	}
+
+	// Cache lookup uses the same key shape renderMarkdown uses internally;
+	// we duplicate the lookup here so we can decide sync vs async without
+	// running the renderer.
+	bw := bucketize(d.vp.Width)
+	if bw < widthBucket {
+		bw = widthBucket
+	}
+	if v, ok := mdCache.Load(mdKey(s, bw, d.theme)); ok {
+		d.content = v.(string)
+		d.vp.SetContent(d.content)
+		d.vp.GotoTop()
+		return nil
+	}
+
+	// Trivial content: skip glamour, show raw, no work.
+	if !worthRendering(s) {
+		d.content = s
+		d.vp.SetContent(s)
+		d.vp.GotoTop()
+		return nil
+	}
+
+	// Heavy content: show raw immediately, render in background.
+	d.content = s
+	d.vp.SetContent(s)
+	d.vp.GotoTop()
+	theme := d.theme
+	width := d.vp.Width
+	return func() tea.Msg {
+		out := renderMarkdown(s, width, theme)
+		return renderedMsg{token: tok, output: out}
+	}
+}
+
+// applyRendered swaps in an async render result if the token matches the
+// most recent setContent call. Stale results are dropped.
+func (d *detailModel) applyRendered(token uint64, out string) {
+	if token != d.renderToken {
+		return
+	}
+	d.content = out
+	d.vp.SetContent(out)
 }
 
 // setRawContent feeds pre-formatted (non-markdown) text directly to the
