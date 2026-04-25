@@ -20,11 +20,11 @@ func NewMemoryCommand() *cli.Command {
 		Aliases: []string{"m", "memories"},
 		Usage:   "Manage memories (knowledge base)",
 		Subcommands: []*cli.Command{
-			rememberCmd(),
 			memoriesCmd(),
 			getCmd(),
-			recallCmd(),
 			forgetCmd(),
+			memoryLinkCmd(),
+			memoryLinksCmd(),
 		},
 	}
 }
@@ -146,7 +146,8 @@ func rememberCmd() *cli.Command {
 // memoriesCmd lists all memory items.
 func memoriesCmd() *cli.Command {
 	return &cli.Command{
-		Name:                   "memories",
+		Name:                   "list",
+		Aliases:                []string{"ls"},
 		Usage:                  "List all memories",
 		UseShortOptionHandling: true,
 		Flags: []cli.Flag{
@@ -258,82 +259,6 @@ func memoriesCmd() *cli.Command {
 					tagLine = display.Sep() + display.Tags(tags, 3)
 				}
 
-				fmt.Printf(" %s %s  %s%s%s\n",
-					display.TypeBadge(m.Type),
-					display.Dim.Render(m.ID.String()[:8]),
-					content,
-					display.Sep()+display.Dim.Render(display.Relative(m.UpdatedAt)),
-					tagLine,
-				)
-			}
-			return nil
-		},
-	}
-}
-
-// recallCmd searches memory items.
-func recallCmd() *cli.Command {
-	return &cli.Command{
-		Name:                   "recall",
-		Usage:                  "Search within your memories",
-		ArgsUsage:              "[search-query]",
-		UseShortOptionHandling: true,
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "project",
-				Aliases: []string{"p"},
-				Usage:   "Filter by project ID",
-			},
-			&cli.IntFlag{
-				Name:    "limit",
-				Aliases: []string{"n"},
-				Usage:   "Limit number of results",
-				Value:   20,
-			},
-		},
-		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
-				return fmt.Errorf("a search query is required")
-			}
-			query := c.Args().First()
-			projectID := c.String("project")
-			limit := c.Int("limit")
-
-			client := api.NewClient()
-			memories, err := client.ListMemories(projectID, query)
-			if err != nil {
-				fmt.Println(apierrors.ParseAPIError(err))
-				return err
-			}
-
-			// Apply limit
-			if limit > 0 && len(memories) > limit {
-				memories = memories[:limit]
-			}
-
-			if len(memories) == 0 {
-				fmt.Println(display.Dim.Render(fmt.Sprintf("  no matches for %q", query)))
-				return nil
-			}
-
-			countPart := fmt.Sprintf("🔍 %d match", len(memories))
-			if len(memories) != 1 {
-				countPart += "es"
-			}
-			fmt.Println(display.Header(countPart, fmt.Sprintf("query: %q", query)))
-			fmt.Println()
-
-			contentWidth := display.TerminalWidth() - 60
-			if contentWidth < 30 {
-				contentWidth = 30
-			}
-			for _, m := range memories {
-				content := display.SingleLine(decryptMemoryForCLI(&m))
-				content = display.Truncate(content, contentWidth)
-				tagLine := ""
-				if tags := getTagsAsStrings(m.Tags); len(tags) > 0 {
-					tagLine = display.Sep() + display.Tags(tags, 3)
-				}
 				fmt.Printf(" %s %s  %s%s%s\n",
 					display.TypeBadge(m.Type),
 					display.Dim.Render(m.ID.String()[:8]),
@@ -463,6 +388,69 @@ func getTagsAsStrings(tags interface{}) []string {
 	}
 
 	return nil
+}
+
+// memoryLinkCmd creates a manual memory↔task link from the memory side.
+func memoryLinkCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "link",
+		Usage:     "Link this memory to a task",
+		ArgsUsage: "<memory-id> <task-id>",
+		Action: func(c *cli.Context) error {
+			if c.NArg() < 2 {
+				return fmt.Errorf("usage: ramorie memory link <memory-id> <task-id>")
+			}
+			memoryID := c.Args().Get(0)
+			taskID := c.Args().Get(1)
+			client := api.NewClient()
+			if _, err := client.CreateMemoryTaskLink(taskID, memoryID, ""); err != nil {
+				return fmt.Errorf("failed to link: %w", err)
+			}
+			shortMem := memoryID
+			if len(shortMem) > 8 {
+				shortMem = shortMem[:8]
+			}
+			shortTask := taskID
+			if len(shortTask) > 8 {
+				shortTask = shortTask[:8]
+			}
+			fmt.Printf("✅ Linked memory %s ↔ task %s\n", shortMem, shortTask)
+			return nil
+		},
+	}
+}
+
+// memoryLinksCmd lists tasks linked to a memory.
+func memoryLinksCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "links",
+		Usage:     "List tasks linked to a memory",
+		ArgsUsage: "<memory-id>",
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("memory ID is required")
+			}
+			memoryID := c.Args().First()
+			client := api.NewClient()
+			tasks, err := client.ListMemoryTasks(memoryID)
+			if err != nil {
+				return err
+			}
+			if len(tasks) == 0 {
+				fmt.Println("(no linked tasks)")
+				return nil
+			}
+			for _, t := range tasks {
+				shortID := t.ID.String()
+				if len(shortID) > 8 {
+					shortID = shortID[:8]
+				}
+				title, _ := decryptTaskForCLI(&t)
+				fmt.Printf("  %s  %s\n", shortID, title)
+			}
+			return nil
+		},
+	}
 }
 
 // decryptMemoryForCLI decrypts memory content if encrypted and vault is unlocked.
