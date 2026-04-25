@@ -39,9 +39,13 @@ func (c Category) Label() string {
 	return ""
 }
 
+// CatKanban is intentionally omitted — the TUI's kanban view required a
+// project filter and offered nothing the Tasks tab doesn't already do.
+// The CatKanban constant + handlers stay in the package for now (cheap to
+// keep, easy to re-enable) but no longer appear in the sidebar.
 var allCategories = []Category{
 	CatTasks, CatMemories, CatProjects, CatOrganizations,
-	CatActivity, CatKanban, CatProfile,
+	CatActivity, CatProfile,
 }
 
 // sidebarModel holds focus on a category list. Pure rendering — input dispatch
