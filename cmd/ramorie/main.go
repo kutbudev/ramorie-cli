@@ -65,6 +65,8 @@ func main() {
 			help.SetTier(commands.NewKanbanCmd(), "common"),
 			help.SetTier(commands.NewSubtaskCommand(), "common"),
 			help.SetTier(commands.NewContextCommand(), "common"),
+			help.SetTier(commands.NewStatsCommand(), "common"),
+			help.SetTier(commands.NewActivityCommand(), "common"),
 			help.SetTier(commands.NewReportsCommand(), "common"),
 
 			// 🟢 ADMIN — setup.
