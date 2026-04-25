@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/cli/resolve"
 	"github.com/urfave/cli/v2"
 )
 
@@ -51,7 +52,7 @@ func projectListCmd() *cli.Command {
 
 			for _, p := range projects {
 				fmt.Fprintf(w, "%s\t%s\t%s\n",
-					p.ID.String()[:8],
+					p.ID.String(),
 					p.Name,
 					truncateString(p.Description, 40))
 			}
@@ -105,9 +106,12 @@ func projectShowCmd() *cli.Command {
 			if c.NArg() == 0 {
 				return fmt.Errorf("project ID is required")
 			}
-			projectID := c.Args().First()
-
+			arg := c.Args().First()
 			client := api.NewClient()
+			projectID, err := resolve.ResolveProject(arg, client)
+			if err != nil {
+				return err
+			}
 			project, err := client.GetProject(projectID)
 			if err != nil {
 				fmt.Printf("Error getting project: %v\n", err)
@@ -142,10 +146,13 @@ func projectDeleteCmd() *cli.Command {
 			if c.NArg() == 0 {
 				return fmt.Errorf("project ID is required")
 			}
-			projectID := c.Args().First()
-
+			arg := c.Args().First()
 			client := api.NewClient()
-			err := client.DeleteProject(projectID)
+			projectID, err := resolve.ResolveProject(arg, client)
+			if err != nil {
+				return err
+			}
+			err = client.DeleteProject(projectID)
 			if err != nil {
 				fmt.Printf("Error deleting project: %v\n", err)
 				return err
@@ -187,7 +194,7 @@ func projectUpdateCmd() *cli.Command {
 			if c.NArg() == 0 {
 				return fmt.Errorf("project ID is required")
 			}
-			projectID := c.Args().First()
+			arg := c.Args().First()
 
 			updateData := make(map[string]interface{})
 
@@ -223,6 +230,10 @@ func projectUpdateCmd() *cli.Command {
 			}
 
 			client := api.NewClient()
+			projectID, err := resolve.ResolveProject(arg, client)
+			if err != nil {
+				return err
+			}
 			project, err := client.UpdateProject(projectID, updateData)
 			if err != nil {
 				fmt.Printf("Error updating project: %v\n", err)
