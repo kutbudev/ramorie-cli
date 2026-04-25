@@ -22,6 +22,20 @@ func clearStatusAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return clearStatusMsg{} })
 }
 
+// resizeSettleMsg fires after the WindowSizeMsg burst settles.
+// Carries a generation counter so stale ticks are dropped when a newer
+// resize landed in the meantime — only the latest tick triggers the heavy
+// reflow (markdown re-render at the new width).
+type resizeSettleMsg struct{ gen uint64 }
+
+// resizeDebounce schedules a resizeSettleMsg ~50ms in the future. Multiple
+// rapid WindowSizeMsg events collapse into a single heavy reflow.
+func resizeDebounce(gen uint64) tea.Cmd {
+	return tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
+		return resizeSettleMsg{gen: gen}
+	})
+}
+
 // pane identifies which of the three columns currently has keyboard focus.
 type pane int
 
@@ -83,6 +97,11 @@ type rootModel struct {
 	theme    string
 	helpOpen bool
 	caps     terminalCaps
+
+	// Resize debounce: every WindowSizeMsg bumps resizeGen and schedules a
+	// resizeSettleMsg with that generation. Only the matching settle fires
+	// the heavy reflow (markdown re-render at the new width).
+	resizeGen uint64
 }
 
 func newRootModel(c *api.Client) rootModel {
@@ -292,14 +311,31 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.layout()
 		// Re-render kanban board on resize so its column widths follow.
+		// (Cheap — string formatting only, no glamour.)
 		if m.list.cat == CatKanban && m.detail.content != "" {
 			m.detail.setRawContent(renderKanbanDetail(
 				m.detail.width, m.kanbanTodo, m.kanbanInProgress, m.kanbanCompleted,
 			))
 		}
 		if first {
-			return m, m.loadForCategory()
+			// First sized frame: kick the initial categorical load AND
+			// schedule an initial reflow tick (in case lastContent
+			// arrives before the next resize).
+			m.resizeGen++
+			return m, tea.Batch(m.loadForCategory(), resizeDebounce(m.resizeGen))
 		}
+		// Debounce the heavy markdown reflow until the resize burst settles.
+		m.resizeGen++
+		return m, resizeDebounce(m.resizeGen)
+
+	case resizeSettleMsg:
+		// Drop stale ticks — only the latest generation triggers the
+		// heavy markdown re-render. This collapses interactive-resize
+		// bursts (many WindowSizeMsg events) into a single reflow.
+		if msg.gen != m.resizeGen {
+			return m, nil
+		}
+		m.detail.reflow()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -338,6 +374,12 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focus = (m.focus + 1) % 3
 			m.applyFocus()
 			if m.focus == paneList {
+				// Tab is also a category-commit gesture: if the sidebar
+				// cursor sits on a different category than what's loaded,
+				// fetch its data on the way past.
+				if m.sidebar.selected() != m.loadedCat {
+					return m, m.loadForCategory()
+				}
 				return m, m.loadDetailForSelection()
 			}
 			return m, nil
@@ -373,14 +415,23 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case paneSidebar:
 			switch {
 			case key.Matches(msg, m.keys.Up):
+				// Cursor-only — no backend hit. The category is committed
+				// when the user presses Enter / Right (the explicit
+				// "select" gesture, mirroring mc/ranger/yazi navigators).
 				m.sidebar.movePrev()
-				return m, m.loadForCategory()
+				return m, nil
 			case key.Matches(msg, m.keys.Down):
 				m.sidebar.moveNext()
-				return m, m.loadForCategory()
+				return m, nil
 			case key.Matches(msg, m.keys.Right), key.Matches(msg, m.keys.Enter):
+				// Commit the highlighted category: load its data (only if
+				// it actually changed since the last commit) and move
+				// focus into the list pane.
 				m.focus = paneList
 				m.applyFocus()
+				if m.sidebar.selected() != m.loadedCat {
+					return m, m.loadForCategory()
+				}
 				return m, m.loadDetailForSelection()
 			}
 

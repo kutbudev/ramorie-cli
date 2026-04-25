@@ -104,15 +104,26 @@ func newDetail(width, height int) detailModel {
 	}
 }
 
+// resize updates the pane geometry. It does NOT re-render the cached
+// markdown — that's a heavy glamour call and during interactive resize we
+// get many WindowSizeMsg events in quick succession. The reflow happens
+// later via reflow(), driven by the debounced resizeSettleMsg in rootModel.
 func (d *detailModel) resize(width, height int) {
 	d.width = width
 	d.height = height
 	d.vp.Width = maxInt(width-4, 10)
 	d.vp.Height = maxInt(height-4, 3)
-	// Re-render markdown to the new wrap width.
-	if d.lastIsMarkdown && d.lastContent != "" {
-		d.content = d.renderMD(d.lastContent)
+	d.vp.SetContent(d.content)
+}
+
+// reflow re-renders the cached markdown for the current width. Called after
+// the debounced resize settles. No-op when there's no markdown content to
+// reflow.
+func (d *detailModel) reflow() {
+	if !d.lastIsMarkdown || d.lastContent == "" {
+		return
 	}
+	d.content = d.renderMD(d.lastContent)
 	d.vp.SetContent(d.content)
 }
 
@@ -136,19 +147,26 @@ type renderedMsg struct {
 // output. If the cursor moved on before the result arrived, the token
 // mismatches and the result is dropped.
 func (d *detailModel) setContent(s string) tea.Cmd {
-	d.lastContent = s
-	d.lastIsMarkdown = true
-	d.renderToken++
-	tok := d.renderToken
 	d.loading = false
 	d.errMsg = ""
 
+	// Empty content: short-circuit. We bump renderToken so any in-flight
+	// async render from a previous selection is dropped on arrival, but
+	// we don't kick a new cmd.
 	if s == "" {
+		d.lastContent = ""
+		d.lastIsMarkdown = true
+		d.renderToken++
 		d.content = ""
 		d.vp.SetContent("")
 		d.vp.GotoTop()
 		return nil
 	}
+
+	d.lastContent = s
+	d.lastIsMarkdown = true
+	d.renderToken++
+	tok := d.renderToken
 
 	// Cache lookup uses the same key shape renderMarkdown uses internally;
 	// we duplicate the lookup here so we can decide sync vs async without
