@@ -146,18 +146,28 @@ project scope through tool args (`project:` field on `remember` / `task` /
 |------|---------|
 | Login / setup | `ramorie setup` |
 | Auth status | `ramorie setup status` |
+| Unlock vault | `ramorie unlock` (alias of `setup vault unlock`, since v6.3.5) |
+| Lock vault | `ramorie lock` (alias of `setup vault lock`, since v6.3.5) |
+| Vault status | `ramorie setup vault status` |
 | Create project | `ramorie project create <name>` |
 | List projects | `ramorie project list` |
 | Create task | `ramorie task create "<desc>"` |
 | Start task | `ramorie task start <id>` |
 | Complete task | `ramorie task complete <id>` |
 | Kanban view | `ramorie kanban` |
-| Stats | `ramorie stats` |
-| Activity / burndown | `ramorie activity [--burndown]` |
-| Save memory | `ramorie remember "<content>"` |
+| Stats | `ramorie stats` (auto-JSON when piped) |
+| Activity / burndown | `ramorie activity [--burndown]` (auto-JSON when piped) |
+| Save memory (positional) | `ramorie remember "<content>" -p "<project name>"` |
+| Save memory (stdin pipe) | `echo "<content>" \| ramorie remember -p "<project>"` |
+| Save memory (JSON + tags) | `cat memo.md \| ramorie remember -p ramorie-cli -t cli,docs --json` |
 | Search memories | `ramorie find "<term>"` |
 | List MCP tools | `ramorie mcp tools` |
 | MCP config snippet | `ramorie mcp config` |
+
+> `ramorie remember` (v6.4.0+) accepts content via positional args **or**
+> piped stdin, takes a project **name** (not just UUID), supports
+> comma-separated `-t/--tags`, and prints structured JSON with `--json`
+> for agents/scripts.
 
 ---
 

@@ -1,5 +1,13 @@
 # Ramorie MCP Tool Test Report
 
+> **⚠️ STALE — Historical artifact.** This report was captured against an
+> earlier MCP surface (45+ legacy tools). As of v6.0+ the MCP server
+> ships only **14 tools** (see `README.md` and `AGENT_MCP_GUIDE.md`), and
+> as of v6.3.5 the vault has top-level shortcuts (`ramorie unlock` /
+> `ramorie lock`) instead of `ramorie vault unlock` / `ramorie vault lock`.
+> Refer to **README.md** for the current tool list and command surface;
+> this file is preserved for historical reference only.
+
 **Test Date:** 14 January 2026
 **Tester:** Cascade AI Agent
 **Total Tools Tested:** 45+

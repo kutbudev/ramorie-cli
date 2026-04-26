@@ -82,11 +82,18 @@ Görevin tüm gereksinimleri karşılandığında ve iş bittiğinde:
 
 Çalışma sırasında öğrenilen veya yeniden kullanılabilecek bilgileri saklamak için:
 
-1.  **Bilgiyi Hatırla (Remember):**
+1.  **Bilgiyi Hatırla (Remember):** v6.4.0+ ile `-p` proje adı, kısa ID veya UUID kabul eder; içerik positional argüman ya da pipe ile gelebilir; tag'ler virgülle ayrılır; `--json` ajanlar için yapılandırılmış çıktı üretir.
     ```bash
-    ramorie remember "Uygulamayı kurmak için 'make dev-install' komutu kullanılır."
+    # Positional + proje adı:
+    ramorie remember "Uygulamayı kurmak için 'make dev-install' komutu kullanılır." -p "My Project"
+
+    # Stdin pipe (çok satırlı / üretilmiş içerik için ideal):
+    echo "Deploy komutu: make deploy" | ramorie remember -p "My Project"
+
+    # Tag + JSON çıktı:
+    cat notes.md | ramorie remember -p "My Project" -t setup,devops --json
     ```
-2.  **Bilgiyi Geri Çağır (Find):** Benzer bir problemle karşılaştığında veya bir bilgiye ihtiyaç duyduğunda hafızayı sorgula.
+2.  **Bilgiyi Geri Çağır (Find):** Benzer bir problemle karşılaştığında veya bir bilgiye ihtiyaç duyduğunda hafızayı sorgula. Hibrit pipeline (HyDE + rerank + entity graph) kullanır.
     ```bash
     ramorie find "uygulama kurulumu"
     ```
@@ -120,10 +127,12 @@ Görevin tüm gereksinimleri karşılandığında ve iş bittiğinde:
 
 | Komut | Açıklama | Örnek |
 |-------|----------|-------|
-| `remember` | Bilgi sakla | `ramorie remember "Deploy komutu: make deploy"` |
-| `find` | Bilgi ara (HyDE + rerank) | `ramorie find "deploy"` |
-| `memory list` | Bilgileri listele | `ramorie memory list` |
+| `remember` | Bilgi sakla (positional veya stdin) | `ramorie remember "Deploy: make deploy" -p "My Project"` |
+| `find` | Bilgi ara (HyDE + rerank + entity graph) | `ramorie find "deploy"` |
+| `memory list` | Bilgileri listele (responsive lipgloss tablo, varsayılan: kronolojik artan, en yeni altta; `--limit N` ve `--newest-first` destekler) | `ramorie memory list -p "My Project"` |
 | `memory get` | Bir bilgiyi göster | `ramorie memory get <id>` |
+| `unlock` | Şifreli vault'u aç (v6.3.5 kısa yolu) | `ramorie unlock` |
+| `lock` | Şifreli vault'u kilitle (v6.3.5 kısa yolu) | `ramorie lock` |
 
 ### Project Yönetimi
 

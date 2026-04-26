@@ -127,8 +127,14 @@ ramorie task complete <task-id>
 ### 4. Store Knowledge
 
 ```bash
-# Remember important insights
-ramorie remember "Use bcrypt with 12 rounds for password hashing"
+# Remember important insights (project resolves by name, short id, or UUID)
+ramorie remember "Use bcrypt with 12 rounds for password hashing" -p "My Project"
+
+# Pipe content from stdin (great for multi-line / generated text)
+echo "Use bcrypt with 12 rounds for password hashing" | ramorie remember -p "My Project"
+
+# Comma-separated tags + JSON output for scripts/agents
+cat memo.md | ramorie remember -p "ramorie-cli" -t cli,docs --json
 
 # Search your memories
 ramorie find "password"
@@ -223,16 +229,17 @@ If you prefer, you can set the `GEMINI_API_KEY` environment variable instead of 
 | `ramorie task` | List, create, update, link, note tasks |
 | `ramorie memory` | List, get, link memories |
 | `ramorie project` | Manage projects (accepts name, short id, or UUID) |
-| `ramorie remember <text>` | Quick memory create (auto-detects type) |
-| `ramorie find <term>` | Hybrid memory search (HyDE + rerank) |
+| `ramorie remember <text>` | Quick memory create (auto-detects type, supports stdin pipe + `--json`) |
+| `ramorie find <term>` | Hybrid memory search (HyDE + rerank + entity graph) |
+| `ramorie ui` | Interactive 3-pane TUI navigator (Yazi-style) |
 
 ### 🟡 Common — frequent
 
 | Command | Purpose |
 |---|---|
 | `ramorie kanban -p <project>` | Beautified three-column board |
-| `ramorie stats` | Task counts (todo / in-progress / done) |
-| `ramorie activity [--burndown]` | Activity feed or burndown report |
+| `ramorie stats` | Task counts (todo / in-progress / done) — auto-JSON when piped |
+| `ramorie activity [--burndown]` | Activity feed or burndown report — auto-JSON when piped |
 | `ramorie subtask` | Manage subtasks |
 | `ramorie context` | Manage contexts and packs |
 
@@ -240,13 +247,20 @@ If you prefer, you can set the `GEMINI_API_KEY` environment variable instead of 
 
 | Command | Purpose |
 |---|---|
-| `ramorie setup` | Interactive auth + `vault unlock\|lock\|status` |
+| `ramorie setup` | Interactive auth + `vault unlock\|lock\|status` subgroup |
+| `ramorie unlock` | Unlock the encrypted vault (alias of `setup vault unlock`, since v6.3.5) |
+| `ramorie lock` | Lock the encrypted vault (alias of `setup vault lock`, since v6.3.5) |
 | `ramorie config` | Show config, set API key, set Gemini key |
 | `ramorie mcp` | MCP server management |
 | `ramorie hook` | Claude Code PreToolUse hook |
 | `ramorie org` | Organizations + `vault` + `encryption` subgroups |
 
 > Project / org / task arguments accept name, 8-char short ID, or full UUID.
+>
+> **List commands** (`task list`, `memory list`, `activity`) render as
+> responsive lipgloss tables. Default order is **chronological ascending**
+> (newest at the bottom), with a `"N of M · ↓ newest"` subtitle. Use
+> `--limit N` to cap rows and `--newest-first` to flip the order.
 
 ## 🤖 AI Agent Decision Guide
 
@@ -275,11 +289,14 @@ ramorie task create "Deploy version 2.1 to production"
 
 ```bash
 # Examples of GOOD remember usage:
-ramorie remember "OAuth requires redirect_uri to match exactly - case sensitive"
-ramorie remember "Use bcrypt with 12 rounds for password hashing - good performance/security balance"
-ramorie remember "Redis connection pooling reduces latency by 40% in high-traffic scenarios"
-ramorie remember "Avoid using SELECT * in production queries - causes performance issues"
+ramorie remember "OAuth requires redirect_uri to match exactly - case sensitive" -p "My Project"
+ramorie remember "Use bcrypt with 12 rounds for password hashing" -p "My Project" -t auth,security
+echo "Redis connection pooling reduces latency by 40%" | ramorie remember -p "My Project"
+cat lessons.md | ramorie remember -p "My Project" -t perf --json
 ```
+
+> `-p` accepts project **name**, 8-char short ID, or full UUID. Content
+> can come from positional args **or** piped stdin (v6.4.0+).
 
 #### Use `task note` for:
 - ✅ **Progress updates** on existing tasks
@@ -314,7 +331,7 @@ ramorie kanban
 ramorie task progress <task-id> 50
 
 # 6. Store learnings
-ramorie remember "OAuth requires redirect_uri to match exactly - case sensitive"
+ramorie remember "OAuth requires redirect_uri to match exactly - case sensitive" -p my-app
 
 # 7. Complete task
 ramorie task complete <task-id>
@@ -631,7 +648,10 @@ ramorie task create "Description"        # New task
 ramorie task show <id>                   # Task details
 ramorie task start <id>                  # Begin working
 ramorie task note <id> "Note"            # Add progress note
-ramorie remember "Insight"               # Store knowledge
+ramorie remember "Insight" -p <project>  # Store knowledge (or pipe via stdin)
+ramorie find "term"                      # Hybrid memory search
+ramorie unlock                           # Unlock encrypted vault (alias of `setup vault unlock`)
+ramorie lock                             # Lock encrypted vault (alias of `setup vault lock`)
 ramorie task complete <id>               # Complete task
 
 # Decision Guide
