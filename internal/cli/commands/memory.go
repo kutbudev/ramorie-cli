@@ -292,9 +292,11 @@ func memoriesCmd() *cli.Command {
 				return nil
 			}
 
-			// Apply limit if specified (slice the newest N from DESC backend response)
-			if limit > 0 && len(memories) > limit {
+			total := len(memories)
+			truncated := false
+			if limit > 0 && total > limit {
 				memories = memories[:limit]
+				truncated = true
 			}
 
 			// Default: chronological asc — oldest at top, newest at bottom
@@ -310,9 +312,13 @@ func memoriesCmd() *cli.Command {
 			} else {
 				countPart += "ies"
 			}
-			subtitle := "oldest first"
+			direction := "newest at bottom"
 			if newestFirst {
-				subtitle = "newest first"
+				direction = "newest at top"
+			}
+			subtitle := direction
+			if truncated {
+				subtitle = fmt.Sprintf("newest %d of %d · %s", len(memories), total, direction)
 			}
 			fmt.Println(display.Header(countPart, subtitle))
 			fmt.Println()

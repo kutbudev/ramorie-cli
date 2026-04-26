@@ -93,9 +93,11 @@ func taskListCmd() *cli.Command {
 				return nil
 			}
 
-			// Apply limit if specified (slice the newest N from DESC backend response)
-			if limit > 0 && len(tasks) > limit {
+			total := len(tasks)
+			truncated := false
+			if limit > 0 && total > limit {
 				tasks = tasks[:limit]
+				truncated = true
 			}
 
 			// Default: chronological asc — oldest at top, newest at bottom (pipe to `tail`).
@@ -118,10 +120,14 @@ func taskListCmd() *cli.Command {
 			if subtitle != "" {
 				subtitle += " · "
 			}
+			direction := "newest at bottom"
 			if newestFirst {
-				subtitle += "newest first"
+				direction = "newest at top"
+			}
+			if truncated {
+				subtitle += fmt.Sprintf("newest %d of %d · %s", len(tasks), total, direction)
 			} else {
-				subtitle += "oldest first"
+				subtitle += direction
 			}
 			countPart := fmt.Sprintf("🗂  %d task", len(tasks))
 			if len(tasks) != 1 {
