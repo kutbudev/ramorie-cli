@@ -120,12 +120,12 @@ func taskListCmd() *cli.Command {
 			if subtitle != "" {
 				subtitle += " · "
 			}
-			direction := "newest at bottom"
+			direction := "↓ newest"
 			if newestFirst {
-				direction = "newest at top"
+				direction = "↑ newest"
 			}
 			if truncated {
-				subtitle += fmt.Sprintf("newest %d of %d · %s", len(tasks), total, direction)
+				subtitle += fmt.Sprintf("%d of %d · %s", len(tasks), total, direction)
 			} else {
 				subtitle += direction
 			}

@@ -312,13 +312,13 @@ func memoriesCmd() *cli.Command {
 			} else {
 				countPart += "ies"
 			}
-			direction := "newest at bottom"
+			direction := "↓ newest"
 			if newestFirst {
-				direction = "newest at top"
+				direction = "↑ newest"
 			}
 			subtitle := direction
 			if truncated {
-				subtitle = fmt.Sprintf("newest %d of %d · %s", len(memories), total, direction)
+				subtitle = fmt.Sprintf("%d of %d · %s", len(memories), total, direction)
 			}
 			fmt.Println(display.Header(countPart, subtitle))
 			fmt.Println()
