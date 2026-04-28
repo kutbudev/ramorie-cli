@@ -2966,6 +2966,21 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 		}
 	}
 
+	// Defensive fallback: ListProjects is cached (5 min TTL); a project created
+	// moments ago may not appear yet. /projects/suggest is uncached and queries
+	// the DB live, so it sees freshly-written rows. If the user named a project
+	// that exists in DB but not in the cached list, surface it here instead of
+	// failing.
+	if suggestion, sErr := client.SuggestProjects(projectIdentifier, ""); sErr == nil && suggestion != nil && suggestion.ExactMatch != nil {
+		SetSessionLastProject(suggestion.ExactMatch.ID)
+		pid := suggestion.ExactMatch.ID.String()
+		oid := ""
+		if suggestion.ExactMatch.OrganizationID != nil {
+			oid = suggestion.ExactMatch.OrganizationID.String()
+		}
+		return pid, oid, nil
+	}
+
 	// Build helpful error message with available projects
 	if len(projects) == 0 {
 		return "", "", fmt.Errorf("❌ Project '%s' not found.\n\n"+
