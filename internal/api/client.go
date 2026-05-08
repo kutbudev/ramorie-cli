@@ -1164,6 +1164,21 @@ type FindMeta struct {
 	// agents see why the cheap path was chosen vs. an explicit FastMode.
 	AutoRouted bool `json:"auto_routed,omitempty"`
 
+	// Provider observability (PR1: provider-aware embedding). Populated by
+	// the backend so agents can tell whether semantic search ran or the
+	// LLM-free smart hybrid path served the response.
+	//
+	// SemanticAvailable=false → retrieval still produced results, but the
+	// vector path was skipped. FallbackReason explains why
+	// (provider_unhealthy / no_indexed_corpus / embed_error /
+	// embed_empty / dim_mismatch / no_match_recency_feed).
+	EmbeddingProvider string  `json:"embedding_provider,omitempty"`
+	EmbeddingModel    string  `json:"embedding_model,omitempty"`
+	VectorSpace       string  `json:"vector_space,omitempty"`
+	SemanticAvailable bool    `json:"semantic_available"`
+	FallbackReason    string  `json:"fallback_reason,omitempty"`
+	CoveragePct       float64 `json:"coverage_pct,omitempty"`
+
 	// Debug is populated only when FindMemoriesOptions.Debug == true. Nil
 	// on the default path so wire format stays byte-identical for callers
 	// who didn't opt in.
