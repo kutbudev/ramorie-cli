@@ -1179,6 +1179,17 @@ type FindMeta struct {
 	FallbackReason    string  `json:"fallback_reason,omitempty"`
 	CoveragePct       float64 `json:"coverage_pct,omitempty"`
 
+	// PR3 observability — which fusion algorithm scored the result and
+	// which LLM provider/model handled rerank/HyDE. EmbeddingTable shows
+	// whether the legacy memories.embedding column or the new
+	// memory_embeddings table served the semantic JOIN.
+	RankingFusion  string  `json:"ranking_fusion,omitempty"` // weighted | rrf_pure | rrf_blend
+	RRFAlpha       float64 `json:"rrf_alpha,omitempty"`
+	RerankProvider string  `json:"rerank_provider,omitempty"`
+	RerankModel    string  `json:"rerank_model,omitempty"`
+	HyDEProvider   string  `json:"hyde_provider,omitempty"`
+	EmbeddingTable string  `json:"embedding_table,omitempty"`
+
 	// Debug is populated only when FindMemoriesOptions.Debug == true. Nil
 	// on the default path so wire format stays byte-identical for callers
 	// who didn't opt in.
