@@ -1958,7 +1958,17 @@ func (c *Client) RemoveTaskFromPack(packID, taskID string) error {
 // available for callers that want to walk the structured form.
 
 // AssembleOptions are the request knobs forwarded to /assemble.
+//
+// Mode (PR5, mayis 2026):
+//   "manifest" (default) — body-less index of pack items. Agent fetches
+//                          bodies on demand via get_memory(id) /
+//                          get_task(id). ~85-90% smaller payload than
+//                          inline. Mirrors Claude Code's Glob+Read.
+//   "full"     — legacy inline render (bundle string with previews).
+//                          Use for small packs (<2K tokens) or when the
+//                          caller explicitly wants the whole thing now.
 type AssembleOptions struct {
+	Mode            string   `json:"mode,omitempty"`
 	Format          string   `json:"format,omitempty"`
 	MaxTokens       int      `json:"max_tokens,omitempty"`
 	Sections        []string `json:"sections,omitempty"`
@@ -2002,11 +2012,31 @@ type AssembleMeta struct {
 	Format                string `json:"format"`
 }
 
+// AssembleResponse — manifest mode populates ManifestItems + Instruction;
+// full mode populates Bundle + Items. Mode echoes the server's choice.
 type AssembleResponse struct {
-	Pack   AssembledPack    `json:"pack"`
-	Bundle string           `json:"bundle"`
-	Items  []AssembledItem  `json:"items"`
-	Meta   AssembleMeta     `json:"_meta"`
+	Pack          AssembledPack       `json:"pack"`
+	Mode          string              `json:"mode"`
+	Bundle        string              `json:"bundle,omitempty"`
+	Items         []AssembledItem     `json:"items,omitempty"`
+	ManifestItems []AssembledManifest `json:"manifest,omitempty"`
+	Instruction   string              `json:"instruction,omitempty"`
+	Meta          AssembleMeta        `json:"_meta"`
+}
+
+// AssembledManifest is the body-less projection of a pack member used
+// in manifest mode. Tokens estimates the cost of fetching the full
+// body via get_memory(id) / get_task(id), letting the agent budget
+// before issuing follow-ups.
+type AssembledManifest struct {
+	Kind      string   `json:"kind"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Tokens    int      `json:"tokens"`
+	Tags      []string `json:"tags,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Pinned    bool     `json:"pinned,omitempty"`
+	Encrypted bool     `json:"encrypted,omitempty"`
 }
 
 // AssembleContextPack POST /context-packs/{packID}/assemble.

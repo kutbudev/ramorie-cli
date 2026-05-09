@@ -342,7 +342,7 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 	// scope: load the pre-curated bundle in a single tool call.
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "load_context_pack",
-		Description: "🔵 ESSENTIAL | Load full context pack (memories+tasks+contexts) into the agent in one call. Returns assembled, token-budgeted bundle ready for the context window. Use at session start when working on a known scope. REQUIRED: pack_id (UUID or unique name). Optional: format (xml|json|markdown), budget_tokens, sections, include_archived.",
+		Description: "🔵 ESSENTIAL | Load context pack INDEX (titles + tags + token estimates per item, no bodies). Default mode=\"manifest\" — context-safe, mirrors Glob+Read pattern. Then call get_memory(id) / get_task(id) ONLY for items you actually need. Use mode=\"full\" only for small packs (<2K tokens) when you want the inline bundle now. REQUIRED: pack_id (UUID or unique pack name). Optional: mode (manifest|full), format (xml|json|markdown — full mode only), budget_tokens, sections, include_archived.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Load Context Pack",
 			ReadOnlyHint:  true,
@@ -2501,7 +2501,8 @@ func handleImportContextPack(ctx context.Context, req *mcp.CallToolRequest, inpu
 
 type LoadContextPackInput struct {
 	PackID          string   `json:"pack_id"`           // REQUIRED — UUID or unique pack name
-	Format          string   `json:"format,omitempty"`  // xml (default) | json | markdown
+	Mode            string   `json:"mode,omitempty"`    // "manifest" (default) | "full"
+	Format          string   `json:"format,omitempty"`  // full mode: xml (default) | json | markdown
 	BudgetTokens    int      `json:"budget_tokens,omitempty"`
 	Sections        []string `json:"sections,omitempty"` // memories | tasks | contexts (default all)
 	IncludeArchived bool     `json:"include_archived,omitempty"`
@@ -2528,7 +2529,13 @@ func handleLoadContextPack(ctx context.Context, req *mcp.CallToolRequest, input 
 		packIdent = pack.ID
 	}
 
+	mode := strings.ToLower(strings.TrimSpace(input.Mode))
+	if mode == "" {
+		mode = "manifest" // PR5 default — context-safe
+	}
+
 	resp, err := apiClient.AssembleContextPack(packIdent, api.AssembleOptions{
+		Mode:            mode,
 		Format:          input.Format,
 		MaxTokens:       input.BudgetTokens,
 		Sections:        input.Sections,
@@ -2538,23 +2545,35 @@ func handleLoadContextPack(ctx context.Context, req *mcp.CallToolRequest, input 
 		return nil, nil, err
 	}
 
-	// MCP result: deliver the bundle as the primary text content (agent
-	// drops it into context). Attach structured payload so the agent /
-	// caller can also read item-level metadata + token usage.
+	// MCP result is shaped per mode:
+	//   manifest → pack header + manifest items + instruction. NO bodies.
+	//              Agent reads titles/tags/tokens, then calls
+	//              get_memory(id) / get_task(id) for items it actually
+	//              needs. Mirrors Claude Code's Glob+Read pattern.
+	//   full     → bundle string (XML/JSON/MD) + structured items + meta.
+	//              Legacy PR4 v6.6.0 shape; back-compat for callers that
+	//              passed mode="full" explicitly.
 	result := map[string]interface{}{
-		"bundle": resp.Bundle,
-		"pack":   resp.Pack,
-		"items":  resp.Items,
-		"_meta":  resp.Meta,
+		"pack":  resp.Pack,
+		"mode":  resp.Mode,
+		"_meta": resp.Meta,
 	}
-	if resp.Meta.Truncated {
-		result["_warning"] = fmt.Sprintf(
-			"Bundle was truncated to fit %d-token budget (full pack had %d items, %d returned). Increase budget_tokens to include more.",
-			resp.Meta.TokenBudget, resp.Meta.ItemsTotal, resp.Meta.ItemsReturned)
+	if resp.Mode == "manifest" {
+		result["manifest"] = resp.ManifestItems
+		result["instruction"] = resp.Instruction
+		result["_workflow_hint"] = "Manifest only. Pick items by title/tags, then call get_memory(id) or get_task(id) for body. Don't call load_context_pack again — same id returns the same manifest."
+	} else {
+		result["bundle"] = resp.Bundle
+		result["items"] = resp.Items
+		if resp.Meta.Truncated {
+			result["_warning"] = fmt.Sprintf(
+				"Bundle was truncated to fit %d-token budget (full pack had %d items, %d returned). Increase budget_tokens to include more, or switch to mode=\"manifest\" for index-only loading.",
+				resp.Meta.TokenBudget, resp.Meta.ItemsTotal, resp.Meta.ItemsReturned)
+		}
 	}
 	if resp.Meta.ItemsSkippedEncrypted > 0 {
 		result["_encryption_note"] = fmt.Sprintf(
-			"%d items were encrypted and returned as envelopes (server never decrypts). Use the vault key client-side to decrypt.",
+			"%d items are encrypted (server never decrypts). Use the vault key client-side to decrypt.",
 			resp.Meta.ItemsSkippedEncrypted)
 	}
 	if resp.Meta.CacheHit {
@@ -2747,7 +2766,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "create_task", Description: "🔴 ESSENTIAL | Create a new task."},
 		{Name: "remember", Description: "🔴 ESSENTIAL | Ultra-simple memory storage with auto-detection."},
 		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
-		{Name: "load_context_pack", Description: "🔵 ESSENTIAL | Load full context pack (memories+tasks+contexts) into the agent in one call. Token-budgeted, structured bundle. Use at session start with known scope."},
+		{Name: "load_context_pack", Description: "🔵 ESSENTIAL | Load context pack INDEX (titles + tokens + tags). Default mode=manifest — bodies fetched on demand via get_memory(id) / get_task(id). Use mode=full only for small packs."},
 		{Name: "surface_skills", Description: "🟡 COMMON | Find relevant procedural skills based on context."},
 		// ============================================================================
 		// 🟡 COMMON (12 tools)

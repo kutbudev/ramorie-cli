@@ -116,17 +116,39 @@ Retrieve with `find("deploy production")`.
 
 ---
 
-## Context Packs (the "Gemini Gem" pattern, v6.6.0+)
+## Context Packs (the "Gemini Gem" pattern, v6.6.0+ / manifest mode v6.7.0+)
 
 Context packs group related memories + tasks + contexts into a curated
-bundle. The agent loads the entire bundle in **one tool call** instead
-of issuing 5–10 ad-hoc `find()` queries — same idea as Gemini Gems or
-ChatGPT custom GPTs, but built from your own Ramorie data.
+bundle. Same idea as Gemini Gems or ChatGPT custom GPTs, but built from
+your own Ramorie data.
 
-**MCP tools (v6.6.0+):**
-- `load_context_pack(pack_id, format?, budget_tokens?, sections?)` — 🔵 ESSENTIAL.
-  Loads the assembled, token-budgeted bundle into the agent context. Use
-  at session start with a known scope.
+**Two access modes (PR5, v6.7.0):**
+
+The MCP tool exposes a **manifest mode (default)** that mirrors how
+Claude Code already handles large codebases — `Glob` to list, `Read`
+on demand. You never load the universe into context.
+
+| Mode | What returns | Cost | When |
+|------|--------------|------|------|
+| `manifest` (default) | item titles + tokens + tags + status, **no bodies** | ~500-1500 tokens for 50 items | session start, scope discovery |
+| `full` | rendered XML/JSON/MD bundle with previews | proportional to pack size | small packs, single-shot use |
+
+**Manifest workflow (recommended)**:
+1. `load_context_pack(pack_id="auth-refactor")` → manifest of items
+2. Agent reads titles + tags, decides which 3-5 items it actually needs
+3. `get_memory(id)` / `get_task(id)` for each chosen item — single body
+   per call, no waste
+4. Done. Total context cost = manifest (~1K) + selected items (~3-5K)
+   instead of full pack (~30-50K).
+
+This is exactly the pattern Claude Code uses against your filesystem:
+`Glob("*.tsx")` returns 200 paths, then `Read("path")` opens just the
+files actually touched.
+
+**MCP tools:**
+- `load_context_pack(pack_id, mode?, format?, budget_tokens?, sections?)` — 🔵 ESSENTIAL.
+  Default `mode="manifest"` returns body-less index. Use `mode="full"`
+  only for small packs when you really want everything inline.
 - `list_context_packs(...)` — discover packs by type/status/query.
 - `manage_context_pack(action, ...)` — create / update / link / clone.
   Bulk actions: `link_memories`, `link_tasks`, `unlink_memories`,
@@ -139,10 +161,12 @@ ChatGPT custom GPTs, but built from your own Ramorie data.
 - `ramorie://context-packs/{id}/assembled` — XML bundle ready for context
 
 **Workflow — when to use `load_context_pack`:**
-1. **Session start with a known scope** — `load_context_pack(pack_id="auth-refactor")` once. The bundle replaces 5–10 individual `find()` calls.
+1. **Session start with a known scope** — `load_context_pack(pack_id="auth-refactor")` returns manifest. Pick the items you need; fetch with `get_memory(id)` / `get_task(id)`.
 2. **Switching scopes** — `manage_context_pack(action="set_active", ...)` then `load_context_pack` again.
 3. **After remembering important facts** — `manage_context_pack(action="link_memories", memoryIds=[...])` to keep the pack current.
 4. **Don't** — call `load_context_pack` mid-task for unrelated topics; use `find()` for ad-hoc queries.
+5. **Don't fetch everything** — manifest tells you tokens per item. Skip 8K-token memories if you only need a 500-token answer.
+6. **Don't re-load the same pack** — manifest is deterministic for a given pack id; the agent already has it in earlier context.
 
 **CLI:**
 ```bash

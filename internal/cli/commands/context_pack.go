@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 
@@ -162,11 +163,12 @@ func contextPackUseCmd() *cli.Command {
 		Usage:     "Assemble a context pack and print the bundle (XML/JSON/MD) to stdout",
 		ArgsUsage: "[pack-id-or-name]",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "format", Aliases: []string{"f"}, Value: "xml", Usage: "Output format: xml, json, markdown"},
-			&cli.IntFlag{Name: "budget", Aliases: []string{"b"}, Value: 4000, Usage: "Token budget for the bundle"},
+			&cli.StringFlag{Name: "mode", Aliases: []string{"M"}, Value: "manifest", Usage: "manifest (default, body-less index) | full (legacy inline bundle)"},
+			&cli.StringFlag{Name: "format", Aliases: []string{"f"}, Value: "xml", Usage: "Output format (full mode only): xml, json, markdown"},
+			&cli.IntFlag{Name: "budget", Aliases: []string{"b"}, Value: 4000, Usage: "Token budget for the bundle (full mode)"},
 			&cli.StringSliceFlag{Name: "section", Usage: "Sections to include: memories, tasks, contexts (default all)"},
 			&cli.BoolFlag{Name: "include-archived", Usage: "Include archived items"},
-			&cli.BoolFlag{Name: "no-cache", Usage: "Skip the 6h render cache"},
+			&cli.BoolFlag{Name: "no-cache", Usage: "Skip the 6h render cache (full mode)"},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() == 0 {
@@ -186,6 +188,7 @@ func contextPackUseCmd() *cli.Command {
 
 			useCache := !c.Bool("no-cache")
 			opts := api.AssembleOptions{
+				Mode:            c.String("mode"),
 				Format:          c.String("format"),
 				MaxTokens:       c.Int("budget"),
 				Sections:        c.StringSlice("section"),
@@ -197,6 +200,19 @@ func contextPackUseCmd() *cli.Command {
 				return fmt.Errorf("assemble: %w", err)
 			}
 
+			if resp.Mode == "manifest" {
+				// Manifest stdout: structured JSON for piping (jq, agents,
+				// scripts). Stderr carries the human byline.
+				out, _ := json.MarshalIndent(map[string]interface{}{
+					"pack":        resp.Pack,
+					"manifest":    resp.ManifestItems,
+					"instruction": resp.Instruction,
+				}, "", "  ")
+				fmt.Println(string(out))
+				fmt.Fprintf(c.App.ErrWriter, "─── manifest: %d items, ~%d tokens if all expanded, %dms ───\n",
+					resp.Meta.ItemsTotal, resp.Meta.TokensEst, resp.Meta.LatencyMs)
+				return nil
+			}
 			fmt.Print(resp.Bundle)
 			fmt.Println()
 			fmt.Fprintf(c.App.ErrWriter, "─── %d/%d items, %d/%d tokens, cache %v, %dms ───\n",
