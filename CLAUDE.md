@@ -85,6 +85,16 @@ ve workflow için `AGENT_MCP_GUIDE.md` "Context Packs" bölümüne bakın.
 **ESSENTIAL tool**: `load_context_pack(pack_id, format?, budget_tokens?, sections?)`
 **CLI**: `ramorie pack use <id-or-name>` → stdout XML bundle
 
+## Skills (v6.8.0+, procedural memory rendering)
+
+Bir skill memory'yi tek çağrıda Claude Code formatında (YAML
+frontmatter + markdown body) agent context'ine yükler. `load_skill`
+araç olarak `load_context_pack`'in prosedürel ikizidir.
+
+**ESSENTIAL tool**: `load_skill(skill_id)` — UUID veya benzersiz isim.
+**CLI**: `ramorie skill use <id-or-name>` → stdout markdown body
+(`--json` ile tam response).
+
 ## Distribution
 - **Homebrew**: `brew install kutbudev/tap/ramorie`
 - **GoReleaser**: Automated GitHub releases

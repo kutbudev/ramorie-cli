@@ -350,6 +350,20 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 		},
 	}, handleLoadContextPack)
 
+	// PR6 (v6.8.0): one-call skill delivery — the procedural counterpart
+	// to load_context_pack. Renders a single skill memory as a Claude
+	// Code-format markdown document (frontmatter + body) ready to drop
+	// into the agent's context.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "load_skill",
+		Description: "🔵 ESSENTIAL | Load skill markdown into agent context. Returns Claude Code-format skill (frontmatter + body) ready to apply. Use when agent needs procedural how-to. REQUIRED: skill_id (UUID or unique skill name).",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Load Skill",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleLoadSkill)
+
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
 		Description: "🟡 COMMON | Record an architectural decision (ADR). REQUIRED: title, project. Optional: description, status, area, context, consequences.",
@@ -2584,6 +2598,76 @@ func handleLoadContextPack(ctx context.Context, req *mcp.CallToolRequest, input 
 }
 
 // ============================================================================
+// LOAD SKILL — PR6 (v6.8.0), procedural memory delivered as a Claude Code skill
+// ============================================================================
+//
+// load_skill is the procedural counterpart to load_context_pack. Given
+// a single skill memory (UUID or unique name), it returns the
+// rendered Claude Code-format markdown (YAML frontmatter + body) so
+// the agent can apply the skill verbatim. Two MCP content items come
+// back: (1) the body as plain text — the model treats it like any
+// inlined instruction document — and (2) a JSON envelope with header
+// + source + meta for tooling that wants to inspect the skill.
+
+type LoadSkillInput struct {
+	SkillID string `json:"skill_id"` // REQUIRED — UUID or unique skill name
+}
+
+func handleLoadSkill(ctx context.Context, req *mcp.CallToolRequest, input LoadSkillInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("load_skill"); err != nil {
+		return nil, nil, err
+	}
+	ident := strings.TrimSpace(input.SkillID)
+	if ident == "" {
+		return nil, nil, errors.New("skill_id is required (UUID or unique skill name)")
+	}
+
+	// Name resolution lives inside LoadSkill — the API client knows how
+	// to walk /memories?search=… and narrow to type=skill. Keeps the
+	// MCP handler thin and avoids duplicate lookup logic between the
+	// CLI command and the tool.
+	resp, err := apiClient.LoadSkill(ident)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Two-content payload, mirroring how Claude Code returns file
+	// contents alongside metadata:
+	//   1. Plain markdown body — first content item, what the model
+	//      reads as instruction.
+	//   2. Structured JSON — header + source + meta for tooling /
+	//      observability. Order matters: agents that only consume the
+	//      first content slot still get the actionable skill body.
+	envelope := map[string]interface{}{
+		"skill":  resp.Skill,
+		"source": resp.Source,
+		"_meta":  resp.Meta,
+	}
+	envelopeJSON, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal skill envelope: %w", err)
+	}
+
+	// Encrypted body guard — never hand cipher text back to the agent
+	// as if it were markdown instruction. Slot 0 is what the model
+	// reads; replace it with a clear unlock prompt. Slot 1 still
+	// carries `_meta.encrypted=true` so tooling can detect the state.
+	body := resp.Body
+	if encVal, ok := resp.Meta["encrypted"]; ok {
+		if enc, _ := encVal.(bool); enc {
+			body = "⚠ Skill is encrypted. Unlock vault and retry."
+		}
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: body},
+			&mcp.TextContent{Text: string(envelopeJSON)},
+		},
+	}, nil, nil
+}
+
+// ============================================================================
 // ORGANIZATION HANDLERS
 // ============================================================================
 
@@ -2767,6 +2851,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "remember", Description: "🔴 ESSENTIAL | Ultra-simple memory storage with auto-detection."},
 		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
 		{Name: "load_context_pack", Description: "🔵 ESSENTIAL | Load context pack INDEX (titles + tokens + tags). Default mode=manifest — bodies fetched on demand via get_memory(id) / get_task(id). Use mode=full only for small packs."},
+		{Name: "load_skill", Description: "🔵 ESSENTIAL | Load skill markdown into agent context. Returns Claude Code-format skill (frontmatter + body) ready to apply. Use when agent needs procedural how-to."},
 		{Name: "surface_skills", Description: "🟡 COMMON | Find relevant procedural skills based on context."},
 		// ============================================================================
 		// 🟡 COMMON (12 tools)

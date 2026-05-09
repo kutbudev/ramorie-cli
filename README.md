@@ -476,7 +476,7 @@ Add to your MCP configuration:
 }
 ```
 
-### Available MCP Tools (v5.0.0 — 14 tools)
+### Available MCP Tools (v6.8.0 — 15 tools)
 
 | Tool | Tier | Description |
 |------|------|-------------|
@@ -486,6 +486,7 @@ Add to your MCP configuration:
 | `find` | Core | Hybrid semantic + lexical search (HyDE + rerank) |
 | `recall` | Core | FTS search; `precision: true` routes to `find` |
 | `task` | Core | Unified task ops: list/get/create/start/complete/stop/progress/note/move |
+| `load_skill` | Core | Render a skill memory as Claude Code-format markdown (frontmatter + body) |
 | `memory` | Common | Unified memory ops + skill generation via `goal` |
 | `get_stats` | Common | Task statistics |
 | `get_agent_activity` | Common | Agent timeline query |
@@ -619,7 +620,7 @@ Restart Codex CLI (or the Codex app) after editing so it reloads the MCP setting
 
 ### Available MCP Tools
 
-See the full 14-tool table above (v5.0.0). For a live list straight from the binary:
+See the full 15-tool table above (v6.8.0). For a live list straight from the binary:
 
 ```bash
 ramorie mcp tools

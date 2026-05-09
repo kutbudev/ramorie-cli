@@ -14,7 +14,7 @@ import (
 )
 
 // Version is set during build with ldflags.
-var Version = "6.0.0"
+var Version = "6.8.0"
 
 func main() {
 	cli.AppHelpTemplate = help.AppHelpTemplate()
@@ -59,6 +59,7 @@ func main() {
 			help.SetTier(commands.NewRememberCommand(), "essential"),
 			help.SetTier(commands.NewFindCommand(), "essential"),
 			help.SetTier(commands.NewUICommand(), "essential"),
+			help.SetTier(commands.NewSkillCommand(), "essential"),
 
 			// 🟡 COMMON — frequent.
 			help.SetTier(commands.NewKanbanCmd(), "common"),

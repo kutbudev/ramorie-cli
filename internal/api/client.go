@@ -2124,6 +2124,137 @@ func (c *Client) CloneContextPack(packID, newName string) (*ContextPack, error) 
 	return &pack, nil
 }
 
+// ============================================================================
+// SKILL RENDER — PR6 (v6.8.0), Claude Code-format skill delivery
+// ============================================================================
+//
+// LoadSkill fetches a single procedural memory and renders it as a
+// Claude Code-style skill (YAML frontmatter + markdown body). Backend
+// endpoint: GET /v1/memories/{id}/skill-render. The agent (or CLI)
+// pipes the body straight into its context — same shape it would
+// expect from a `.claude/skills/<name>/SKILL.md` file on disk.
+//
+// Name resolution: callers may pass a UUID or a kebab-case skill slug
+// / partial title. Non-UUID inputs are routed through ListMemories
+// with a search filter, then narrowed to type=skill on the client side
+// (the /memories endpoint does not currently take a `types` filter).
+// Single match → rendered. Zero or >1 → error so the caller can
+// disambiguate via `ramorie find` / `list_memories`.
+
+// SkillRenderHeader is the compact skill summary returned alongside
+// the rendered body. Mirrors the backend payload — keep field tags
+// in sync with /v1/memories/{id}/skill-render.
+type SkillRenderHeader struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+	Trigger     string `json:"trigger"`
+	StepsCount  int    `json:"steps_count"`
+}
+
+// SkillRenderSource carries provenance hints for skills synced from
+// disk. SyncHash/SyncedAt are nil for skills that originated in the
+// app (PR6 baseline); PR7 will populate them for `.claude/skills/`
+// uploads.
+type SkillRenderSource struct {
+	SyncHash *string    `json:"sync_hash"`
+	SyncedAt *time.Time `json:"synced_at"`
+}
+
+// SkillRenderResponse is the GET /memories/{id}/skill-render payload.
+// Body is the full Claude Code-format skill (frontmatter + markdown)
+// ready to drop into an agent's context window. Meta carries token
+// estimates and the encryption flag (encrypted skills come back with
+// body unrendered — the CLI must decrypt the underlying memory first).
+type SkillRenderResponse struct {
+	Skill  SkillRenderHeader      `json:"skill"`
+	Body   string                 `json:"body"`
+	Source SkillRenderSource     `json:"source"`
+	Meta   map[string]interface{} `json:"_meta"`
+}
+
+// LoadSkill renders a skill memory by id or name. Non-UUID input is
+// resolved server-side via the search-by-content path on /memories.
+func (c *Client) LoadSkill(skillIDOrName string) (*SkillRenderResponse, error) {
+	ident := strings.TrimSpace(skillIDOrName)
+	if ident == "" {
+		return nil, fmt.Errorf("skill id or name is required")
+	}
+
+	if !looksLikeUUIDClient(ident) {
+		resolved, err := c.ResolveSkillByName(ident)
+		if err != nil {
+			return nil, err
+		}
+		ident = resolved.ID.String()
+	}
+
+	endpoint := fmt.Sprintf("/memories/%s/skill-render", ident)
+	respBody, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp SkillRenderResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal skill render response: %w", err)
+	}
+	return &resp, nil
+}
+
+// ResolveSkillByName looks up a skill memory by name/title fragment.
+// Strategy: hit /memories?search=<name>&limit=5, then filter to
+// type="skill" on the client. Backends that add a `types` filter to
+// /memories should let this become a server-side query.
+//
+// Returns (memory, nil) on a unique match. Errors when zero or
+// multiple skill candidates remain so the caller can disambiguate.
+func (c *Client) ResolveSkillByName(name string) (*models.Memory, error) {
+	// Page size 25 — gives the type=skill filter enough headroom when
+	// the search hit list is dominated by non-skill memories (notes /
+	// decisions / references). PR7 should swap this for a server-side
+	// `types=skill` filter so the page size doesn't matter.
+	candidates, _, err := c.ListMemoriesPage("", name, 1, 25)
+	if err != nil {
+		return nil, fmt.Errorf("resolve skill: %w", err)
+	}
+	skills := make([]models.Memory, 0, len(candidates))
+	for _, m := range candidates {
+		if strings.EqualFold(m.Type, "skill") {
+			skills = append(skills, m)
+		}
+	}
+	if len(skills) == 0 {
+		return nil, fmt.Errorf("no skill memory matches name %q (searched top 25 hits — try a fuller name or pass UUID)", name)
+	}
+	if len(skills) > 1 {
+		return nil, fmt.Errorf("multiple skills match name %q (%d found); use full UUID", name, len(skills))
+	}
+	return &skills[0], nil
+}
+
+// looksLikeUUIDClient is the api package's local UUID heuristic.
+// Avoids importing google/uuid just to gate name resolution.
+func looksLikeUUIDClient(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // ResolvePackByName looks up a pack by name (server-side resolution).
 // Used by load_context_pack tool when pack_id arg is not a UUID.
 // Returns the FIRST match — caller should disambiguate when ambiguous

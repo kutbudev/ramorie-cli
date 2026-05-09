@@ -1,6 +1,6 @@
 # Ramorie MCP Agent Guide
 
-> Quick reference for AI agents using the Ramorie MCP server (v5.0.0, 14 tools).
+> Quick reference for AI agents using the Ramorie MCP server (v6.8.0, 15 tools).
 > For full CLI docs, see https://ramorie.com/docs/cli or run `ramorie mcp tools`.
 
 ## Setup
@@ -23,14 +23,18 @@ ramorie setup login     # interactive email + password, writes ~/.ramorie/config
 ramorie setup status    # verify
 ```
 
-> **v5.0.0 upgrade:** Old tools (`create_task`, `add_memory`, `search_memories`,
+> **v6.x:** v5.0.0'dan beri legacy tools (`create_task`, `add_memory`, `search_memories`,
 > `create_decision`, `activate_context_pack`, `get_active_task`, `manage_focus`,
-> `skill`, `decision`) are removed. Use the 14 tools below instead. Restart your
-> MCP client (Claude Code / Cursor / Windsurf) after upgrading.
+> `skill`, `decision`) kaldırıldı. Use the 15 tools below. Restart your MCP client
+> (Claude Code / Cursor / Windsurf) after upgrading from v5.x.
+>
+> **v6.8.0 (PR6):** New `load_skill` tool — Claude Code-format skill
+> rendering on demand. Mirrors `load_context_pack`: one call returns
+> the procedural memory as ready-to-apply markdown.
 
 ---
 
-## The 14 Tools
+## The 15 Tools
 
 ### Core (always use)
 
@@ -42,24 +46,25 @@ ramorie setup status    # verify
 | 4 | `find` | Hybrid semantic + lexical search (HyDE + rerank). Best for fuzzy queries. |
 | 5 | `recall` | FTS search; pass `precision: true` to route to `find`. |
 | 6 | `task` | Unified task ops. `action`: `list` / `get` / `create` / `start` / `complete` / `stop` / `progress` / `note` / `move`. |
+| 7 | `load_skill` | Load a skill into context (frontmatter + markdown body, ready to apply). |
 
 ### Common
 
 | # | Tool | Purpose |
 |---|------|---------|
-| 7 | `memory` | Unified memory ops (`list`, `get`), or skill generation via `goal` param. |
-| 8 | `get_stats` | Task counts per project / status. |
-| 9 | `get_agent_activity` | Agent timeline query. |
-| 10 | `surface_context` | File/domain-scoped context surfacing for the active task. |
+| 8 | `memory` | Unified memory ops (`list`, `get`), or skill generation via `goal` param. |
+| 9 | `get_stats` | Task counts per project / status. |
+| 10 | `get_agent_activity` | Agent timeline query. |
+| 11 | `surface_context` | File/domain-scoped context surfacing for the active task. |
 
 ### Advanced
 
 | # | Tool | Purpose |
 |---|------|---------|
-| 11 | `create_project` | Create a project. |
-| 12 | `manage_subtasks` | Subtask CRUD. |
-| 13 | `entity` | Knowledge graph (10 actions: `create`, `link`, `list`, `search`, etc.). |
-| 14 | `admin` | `consolidate` / `cleanup` / `orgs` / `export` / `import` / `plan` / `analyze`. |
+| 12 | `create_project` | Create a project. |
+| 13 | `manage_subtasks` | Subtask CRUD. |
+| 14 | `entity` | Knowledge graph (10 actions: `create`, `link`, `list`, `search`, etc.). |
+| 15 | `admin` | `consolidate` / `cleanup` / `orgs` / `export` / `import` / `plan` / `analyze`. |
 
 ---
 
@@ -113,6 +118,35 @@ remember("When deploying to prod: 1) yarn test --ci 2) yarn build 3) verify bund
 ```
 
 Retrieve with `find("deploy production")`.
+
+### Loading a skill into context (v6.8.0+)
+
+Use `load_skill(skill_id)` when the agent needs the **full procedural
+markdown** ready to apply — same shape Claude Code expects from a
+`.claude/skills/<name>/SKILL.md` file. Counterpart to
+`load_context_pack`: one tool call, instruction inlined.
+
+```
+load_skill(skill_id="deploy-prod")
+# returns: (1) markdown body (frontmatter + steps) — read as instruction
+#          (2) JSON envelope { skill, source, _meta } for tooling
+```
+
+`skill_id` accepts a UUID or a unique skill name. Ambiguous names
+error out so the agent can disambiguate via `recall(type="skill")`.
+
+**Workflow:**
+1. `recall(query="deploy", type="skill")` or `find("deploy prod")` → discover skill ids
+2. `load_skill(skill_id="<id-or-name>")` → render the skill into context
+3. Apply the steps verbatim. Skip `load_skill` for trivia queries — use `find()`.
+
+**CLI:**
+```bash
+ramorie skill use deploy-prod                # markdown body to stdout
+ramorie skill use deploy-prod --json         # full response JSON
+ramorie skill use deploy-prod > SKILL.md     # snapshot to file
+ramorie skill use deploy-prod | pbcopy       # paste into chat
+```
 
 ---
 
@@ -226,4 +260,4 @@ needed. `_meta.items_skipped_encrypted` reports the skip count.
 
 ---
 
-*Ramorie MCP v6.0.0. Source: https://github.com/kutbudev/ramorie-cli*
+*Ramorie MCP v6.8.0. Source: https://github.com/kutbudev/ramorie-cli*
