@@ -33,3 +33,5 @@ dist/
 .cursor/
 *.swp
 *~
+# SuperClaude / superpowers tool outputs
+docs/superpowers/

@@ -116,18 +116,49 @@ Retrieve with `find("deploy production")`.
 
 ---
 
-## Context Packs
+## Context Packs (the "Gemini Gem" pattern, v6.6.0+)
 
-Context packs group related memories/tasks. Manage them via the CLI:
+Context packs group related memories + tasks + contexts into a curated
+bundle. The agent loads the entire bundle in **one tool call** instead
+of issuing 5–10 ad-hoc `find()` queries — same idea as Gemini Gems or
+ChatGPT custom GPTs, but built from your own Ramorie data.
 
+**MCP tools (v6.6.0+):**
+- `load_context_pack(pack_id, format?, budget_tokens?, sections?)` — 🔵 ESSENTIAL.
+  Loads the assembled, token-budgeted bundle into the agent context. Use
+  at session start with a known scope.
+- `list_context_packs(...)` — discover packs by type/status/query.
+- `manage_context_pack(action, ...)` — create / update / link / clone.
+  Bulk actions: `link_memories`, `link_tasks`, `unlink_memories`,
+  `unlink_tasks`, `clone`, `set_active`.
+- `get_context_pack(packId)` — pack details (members + metadata).
+- `export_context_pack` / `import_context_pack` — portable JSON bundles.
+
+**Resource templates (sidebar-aware clients):**
+- `ramorie://context-packs/{id}` — pack details (JSON)
+- `ramorie://context-packs/{id}/assembled` — XML bundle ready for context
+
+**Workflow — when to use `load_context_pack`:**
+1. **Session start with a known scope** — `load_context_pack(pack_id="auth-refactor")` once. The bundle replaces 5–10 individual `find()` calls.
+2. **Switching scopes** — `manage_context_pack(action="set_active", ...)` then `load_context_pack` again.
+3. **After remembering important facts** — `manage_context_pack(action="link_memories", memoryIds=[...])` to keep the pack current.
+4. **Don't** — call `load_context_pack` mid-task for unrelated topics; use `find()` for ad-hoc queries.
+
+**CLI:**
 ```bash
-ramorie context list
-ramorie context create "feature-auth"
+ramorie pack list
+ramorie pack create "feature-auth"
+ramorie pack use auth-refactor                    # assemble + stdout
+ramorie pack add <pack> --memory id1 id2 --task id3
+ramorie pack remove <pack> --memory id1
+ramorie pack clone <pack> --name "billing-flow"
+ramorie pack render <pack> --format json --budget 8000
 ```
 
-There is no MCP tool for pack activation in v6.0.0 — the agent passes
-project scope through tool args (`project:` field on `remember` / `task` /
-`find`).
+**Encryption:** server never decrypts (zero-knowledge). Encrypted
+memories/tasks come back as envelopes (id + `kind="encrypted"`) so the
+agent knows the row exists; the CLI/client decrypts via vault key when
+needed. `_meta.items_skipped_encrypted` reports the skip count.
 
 ---
 

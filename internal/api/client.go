@@ -1947,6 +1947,171 @@ func (c *Client) RemoveTaskFromPack(packID, taskID string) error {
 	return err
 }
 
+// =============================================================================
+// PR4 (mayis 2026) — Pack assemble + bulk + clone
+// =============================================================================
+//
+// AssembleContextPack delivers the entire pack content to the agent in a
+// single request. This is the "Gemini Gem" pattern — see CLAUDE.md /
+// AGENT_MCP_GUIDE.md for when to use it. Bundle is a pre-rendered XML/
+// JSON/Markdown string ready to drop into context; Items + Meta are
+// available for callers that want to walk the structured form.
+
+// AssembleOptions are the request knobs forwarded to /assemble.
+type AssembleOptions struct {
+	Format          string   `json:"format,omitempty"`
+	MaxTokens       int      `json:"max_tokens,omitempty"`
+	Sections        []string `json:"sections,omitempty"`
+	IncludeArchived bool     `json:"include_archived,omitempty"`
+	UseCache        *bool    `json:"use_cache,omitempty"`
+}
+
+// AssembledItem mirrors backend memoryretrieve.FindItem fields the CLI
+// cares about. We don't need score breakdowns here — those are nice for
+// debug screens, not for piping into a tool.
+type AssembledItem struct {
+	ID        string  `json:"id"`
+	Type      string  `json:"type"` // memory | task | context
+	Kind      string  `json:"kind,omitempty"`
+	Title     string  `json:"title"`
+	Preview   string  `json:"preview,omitempty"`
+	Score     float64 `json:"score"`
+	Project   string  `json:"project,omitempty"`
+	CreatedAt string  `json:"created_at,omitempty"`
+}
+
+type AssembledPack struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Status     string `json:"status"`
+	Version    int    `json:"version"`
+	TotalItems int    `json:"total_items"`
+}
+
+type AssembleMeta struct {
+	TokenBudget           int    `json:"token_budget"`
+	TokensEst             int    `json:"tokens_est"`
+	Truncated             bool   `json:"truncated"`
+	ItemsTotal            int    `json:"items_total"`
+	ItemsReturned         int    `json:"items_returned"`
+	ItemsSkippedEncrypted int    `json:"items_skipped_encrypted"`
+	DedupCount            int    `json:"dedup_count"`
+	CacheHit              bool   `json:"cache_hit"`
+	LatencyMs             int64  `json:"latency_ms"`
+	Format                string `json:"format"`
+}
+
+type AssembleResponse struct {
+	Pack   AssembledPack    `json:"pack"`
+	Bundle string           `json:"bundle"`
+	Items  []AssembledItem  `json:"items"`
+	Meta   AssembleMeta     `json:"_meta"`
+}
+
+// AssembleContextPack POST /context-packs/{packID}/assemble.
+// packID accepts a full UUID or short prefix (backend resolves).
+func (c *Client) AssembleContextPack(packID string, opts AssembleOptions) (*AssembleResponse, error) {
+	endpoint := fmt.Sprintf("/context-packs/%s/assemble", packID)
+	body, err := json.Marshal(opts)
+	if err != nil {
+		return nil, fmt.Errorf("marshal assemble options: %w", err)
+	}
+	respBody, err := c.makeRequest("POST", endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	var resp AssembleResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal assemble response: %w", err)
+	}
+	return &resp, nil
+}
+
+// BulkAddMemoriesToPack links N memories in one call. Each ID must be
+// a UUID; backend silently skips invalid/foreign IDs.
+func (c *Client) BulkAddMemoriesToPack(packID string, memoryIDs []string) (*ContextPack, error) {
+	return c.bulkPackMembers(packID, "POST", "memories", memoryIDs, nil)
+}
+
+func (c *Client) BulkAddTasksToPack(packID string, taskIDs []string) (*ContextPack, error) {
+	return c.bulkPackMembers(packID, "POST", "tasks", nil, taskIDs)
+}
+
+func (c *Client) BulkRemoveMemoriesFromPack(packID string, memoryIDs []string) error {
+	_, err := c.bulkPackMembers(packID, "DELETE", "memories", memoryIDs, nil)
+	return err
+}
+
+func (c *Client) BulkRemoveTasksFromPack(packID string, taskIDs []string) error {
+	_, err := c.bulkPackMembers(packID, "DELETE", "tasks", nil, taskIDs)
+	return err
+}
+
+func (c *Client) bulkPackMembers(packID, method, kind string, memoryIDs, taskIDs []string) (*ContextPack, error) {
+	endpoint := fmt.Sprintf("/context-packs/%s/%s/bulk", packID, kind)
+	payload := map[string]interface{}{}
+	if memoryIDs != nil {
+		payload["memory_ids"] = memoryIDs
+	}
+	if taskIDs != nil {
+		payload["task_ids"] = taskIDs
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal bulk payload: %w", err)
+	}
+	respBody, err := c.makeRequest(method, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	// Response shape: { pack, changed, op, kind } — extract pack.
+	var wrapper struct {
+		Pack ContextPack `json:"pack"`
+	}
+	if err := json.Unmarshal(respBody, &wrapper); err != nil {
+		return nil, fmt.Errorf("unmarshal bulk response: %w", err)
+	}
+	return &wrapper.Pack, nil
+}
+
+// CloneContextPack POST /context-packs/{id}/clone with optional name
+// override. Name="" → backend picks "<source> (copy)".
+func (c *Client) CloneContextPack(packID, newName string) (*ContextPack, error) {
+	endpoint := fmt.Sprintf("/context-packs/%s/clone", packID)
+	body, err := json.Marshal(map[string]string{"name": newName})
+	if err != nil {
+		return nil, fmt.Errorf("marshal clone payload: %w", err)
+	}
+	respBody, err := c.makeRequest("POST", endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	var pack ContextPack
+	if err := json.Unmarshal(respBody, &pack); err != nil {
+		return nil, fmt.Errorf("unmarshal clone response: %w", err)
+	}
+	return &pack, nil
+}
+
+// ResolvePackByName looks up a pack by name (server-side resolution).
+// Used by load_context_pack tool when pack_id arg is not a UUID.
+// Returns the FIRST match — caller should disambiguate when ambiguous
+// is risky (we expose ListContextPacks for that).
+func (c *Client) ResolvePackByName(name string) (*ContextPack, error) {
+	resp, err := c.ListContextPacks("", "", name, 5, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.ContextPacks) == 0 {
+		return nil, fmt.Errorf("no context pack matches name %q", name)
+	}
+	if len(resp.ContextPacks) > 1 {
+		return nil, fmt.Errorf("multiple packs match name %q (%d found); use full UUID", name, len(resp.ContextPacks))
+	}
+	return &resp.ContextPacks[0], nil
+}
+
 // Organization API methods
 
 // Organization represents an organization

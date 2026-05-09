@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
@@ -308,7 +309,7 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "manage_context_pack",
-		Description: "🟡 COMMON | Create, update, or link items to a context pack. REQUIRED: action (create|update|link_memory|link_task). For create: name, type required. For update: packId required. For link_memory/link_task: packId and memoryId/taskId required.",
+		Description: "🟡 COMMON | Manage context packs. REQUIRED: action. Actions: create (name, type required); update (packId required); link_memory/link_task (single, packId+memoryId/taskId); link_memories/link_tasks (bulk, packId+memoryIds[]/taskIds[]); unlink_memories/unlink_tasks (bulk remove); clone (packId required, name optional).",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Manage Context Pack",
 			DestructiveHint: boolPtr(false),
@@ -335,6 +336,19 @@ Example: recall(term: "React", entity_hops: 2) - finds React memories + memories
 			OpenWorldHint:   boolPtr(false),
 		},
 	}, handleImportContextPack)
+
+	// PR4 (mayis 2026): one-call pack delivery — the "Gemini Gem" pattern.
+	// Replaces 5–10 ad-hoc find() calls when an agent already knows the
+	// scope: load the pre-curated bundle in a single tool call.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "load_context_pack",
+		Description: "🔵 ESSENTIAL | Load full context pack (memories+tasks+contexts) into the agent in one call. Returns assembled, token-budgeted bundle ready for the context window. Use at session start when working on a known scope. REQUIRED: pack_id (UUID or unique name). Optional: format (xml|json|markdown), budget_tokens, sections, include_archived.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:         "Load Context Pack",
+			ReadOnlyHint:  true,
+			OpenWorldHint: boolPtr(false),
+		},
+	}, handleLoadContextPack)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_decision",
@@ -2470,6 +2484,87 @@ func handleImportContextPack(ctx context.Context, req *mcp.CallToolRequest, inpu
 }
 
 // ============================================================================
+// LOAD CONTEXT PACK — PR4 (mayis 2026), the "Gemini Gem" pattern
+// ============================================================================
+//
+// load_context_pack delivers the full pack content (memories + tasks +
+// contexts) to the agent in one tool call. Backend assembles a
+// token-budgeted, structured (XML/JSON/Markdown) bundle ready for the
+// context window. Use at session start when the scope is known —
+// replaces 5-10 ad-hoc find() roundtrips.
+//
+// Encryption: server never decrypts (zero-knowledge). Encrypted memories/
+// tasks come back as envelopes (id + kind="encrypted") so the agent
+// knows the row exists; the CLI/client decrypts via vault key when
+// needed. items_skipped_encrypted in _meta tells the agent how many
+// rows it didn't see.
+
+type LoadContextPackInput struct {
+	PackID          string   `json:"pack_id"`           // REQUIRED — UUID or unique pack name
+	Format          string   `json:"format,omitempty"`  // xml (default) | json | markdown
+	BudgetTokens    int      `json:"budget_tokens,omitempty"`
+	Sections        []string `json:"sections,omitempty"` // memories | tasks | contexts (default all)
+	IncludeArchived bool     `json:"include_archived,omitempty"`
+}
+
+func handleLoadContextPack(ctx context.Context, req *mcp.CallToolRequest, input LoadContextPackInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("load_context_pack"); err != nil {
+		return nil, nil, err
+	}
+	packIdent := strings.TrimSpace(input.PackID)
+	if packIdent == "" {
+		return nil, nil, errors.New("pack_id is required (UUID or unique pack name)")
+	}
+
+	// Name resolution: try as UUID first; if that fails, fall through to
+	// name lookup. ResolvePackByName handles ambiguity by erroring out
+	// with the candidate count so the caller can disambiguate via
+	// list_context_packs.
+	if _, err := uuid.Parse(packIdent); err != nil {
+		pack, resolveErr := apiClient.ResolvePackByName(packIdent)
+		if resolveErr != nil {
+			return nil, nil, resolveErr
+		}
+		packIdent = pack.ID
+	}
+
+	resp, err := apiClient.AssembleContextPack(packIdent, api.AssembleOptions{
+		Format:          input.Format,
+		MaxTokens:       input.BudgetTokens,
+		Sections:        input.Sections,
+		IncludeArchived: input.IncludeArchived,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// MCP result: deliver the bundle as the primary text content (agent
+	// drops it into context). Attach structured payload so the agent /
+	// caller can also read item-level metadata + token usage.
+	result := map[string]interface{}{
+		"bundle": resp.Bundle,
+		"pack":   resp.Pack,
+		"items":  resp.Items,
+		"_meta":  resp.Meta,
+	}
+	if resp.Meta.Truncated {
+		result["_warning"] = fmt.Sprintf(
+			"Bundle was truncated to fit %d-token budget (full pack had %d items, %d returned). Increase budget_tokens to include more.",
+			resp.Meta.TokenBudget, resp.Meta.ItemsTotal, resp.Meta.ItemsReturned)
+	}
+	if resp.Meta.ItemsSkippedEncrypted > 0 {
+		result["_encryption_note"] = fmt.Sprintf(
+			"%d items were encrypted and returned as envelopes (server never decrypts). Use the vault key client-side to decrypt.",
+			resp.Meta.ItemsSkippedEncrypted)
+	}
+	if resp.Meta.CacheHit {
+		result["_cache"] = "served from 6h cache (use_cache=false to refresh)"
+	}
+
+	return mustTextResult(result), nil, nil
+}
+
+// ============================================================================
 // ORGANIZATION HANDLERS
 // ============================================================================
 
@@ -2634,7 +2729,7 @@ type toolDef struct {
 func ToolDefinitions() []toolDef {
 	return []toolDef{
 		// ============================================================================
-		// 🔴 ESSENTIAL (7 tools)
+		// 🔴 ESSENTIAL (8 tools)
 		// ============================================================================
 		{
 			Name:        "setup_agent",
@@ -2652,6 +2747,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "create_task", Description: "🔴 ESSENTIAL | Create a new task."},
 		{Name: "remember", Description: "🔴 ESSENTIAL | Ultra-simple memory storage with auto-detection."},
 		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
+		{Name: "load_context_pack", Description: "🔵 ESSENTIAL | Load full context pack (memories+tasks+contexts) into the agent in one call. Token-budgeted, structured bundle. Use at session start with known scope."},
 		{Name: "surface_skills", Description: "🟡 COMMON | Find relevant procedural skills based on context."},
 		// ============================================================================
 		// 🟡 COMMON (12 tools)
@@ -2663,7 +2759,7 @@ func ToolDefinitions() []toolDef {
 		{Name: "get_memory", Description: "🟡 COMMON | Get memory details by ID."},
 		{Name: "list_context_packs", Description: "🟡 COMMON | List all context packs."},
 		{Name: "get_context_pack", Description: "🟡 COMMON | Get detailed context pack info."},
-		{Name: "manage_context_pack", Description: "🟡 COMMON | Create/update/link_memory/link_task to context packs."},
+		{Name: "manage_context_pack", Description: "🟡 COMMON | Manage context packs. Actions: create, update, link_memory, link_task, link_memories, link_tasks, unlink_memories, unlink_tasks, clone."},
 		{Name: "create_decision", Description: "🟡 COMMON | Record an architectural decision (ADR)."},
 		{Name: "list_decisions", Description: "🟡 COMMON | List architectural decisions."},
 		{Name: "get_stats", Description: "🟡 COMMON | Get task statistics and completion rates."},

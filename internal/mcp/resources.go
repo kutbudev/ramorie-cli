@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -66,6 +67,18 @@ func registerResources(server *mcp.Server) {
 		Description: "Context pack details with linked memories and tasks",
 		MIMEType:    "application/json",
 	}, handleContextPackResource)
+
+	// PR4 (mayis 2026): assembled view of a pack — token-budgeted XML
+	// bundle ready to drop into an agent's context window. Some
+	// resource-aware clients (Claude Desktop) expose templates in
+	// their sidebar; this surface gives them a single click to load
+	// "the pack" without going through the load_context_pack tool.
+	server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "ramorie://context-packs/{id}/assembled",
+		Name:        "context-pack-assembled",
+		Description: "Assembled, token-budgeted view of a context pack ready for agent context.",
+		MIMEType:    "application/xml",
+	}, handleContextPackAssembledResource)
 }
 
 // extractIDFromURI extracts the {id} portion from a resource URI
@@ -261,6 +274,32 @@ func handleContextPackResource(_ context.Context, req *mcp.ReadResourceRequest) 
 			URI:      req.Params.URI,
 			MIMEType: "application/json",
 			Text:     string(data),
+		}},
+	}, nil
+}
+
+// handleContextPackAssembledResource — PR4 resource template for the
+// `ramorie://context-packs/{id}/assembled` URI. Returns the XML bundle
+// produced by /assemble. Default budget = 4000; resource clients (Claude
+// Desktop) typically don't pass query strings, so we keep this surface
+// minimal and use defaults. For programmatic control use the
+// `load_context_pack` tool instead.
+func handleContextPackAssembledResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	id := extractIDFromURI(req.Params.URI, "ramorie://context-packs/", "/assembled")
+	if id == "" {
+		return nil, mcp.ResourceNotFoundError(req.Params.URI)
+	}
+
+	resp, err := apiClient.AssembleContextPack(id, api.AssembleOptions{Format: "xml"})
+	if err != nil {
+		return nil, mcp.ResourceNotFoundError(req.Params.URI)
+	}
+
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{{
+			URI:      req.Params.URI,
+			MIMEType: "application/xml",
+			Text:     resp.Bundle,
 		}},
 	}, nil
 }

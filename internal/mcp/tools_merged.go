@@ -76,15 +76,21 @@ func handleManageTask(ctx context.Context, req *mcp.CallToolRequest, input Manag
 // --- manage_context_pack: create/update/link_memory/link_task ---
 
 type ManageContextPackInput struct {
-	Action      string   `json:"action"`                // create, update, link_memory, link_task
-	PackID      string   `json:"packId,omitempty"`      // Required for update/link_memory/link_task
-	Name        string   `json:"name,omitempty"`        // For create/update
+	Action      string   `json:"action"`                // create|update|link_memory|link_task|link_memories|link_tasks|unlink_memories|unlink_tasks|clone
+	PackID      string   `json:"packId,omitempty"`      // Required for update/link_*/unlink_*/clone
+	Name        string   `json:"name,omitempty"`        // For create/update/clone
 	Type        string   `json:"type,omitempty"`        // For create (project, integration, decision, custom)
 	Description string   `json:"description,omitempty"` // For create/update
 	Status      string   `json:"status,omitempty"`      // For update
 	Tags        []string `json:"tags,omitempty"`        // For create
-	MemoryID    string   `json:"memoryId,omitempty"`    // For link_memory
-	TaskID      string   `json:"taskId,omitempty"`      // For link_task
+	MemoryID    string   `json:"memoryId,omitempty"`    // For link_memory (single)
+	TaskID      string   `json:"taskId,omitempty"`      // For link_task (single)
+
+	// PR4 (mayis 2026) — bulk member ops + clone. Single-item link_memory
+	// / link_task stay for back-compat; *_memories / *_tasks are the
+	// preferred path when an agent is wiring multiple items.
+	MemoryIDs []string `json:"memoryIds,omitempty"` // For link_memories / unlink_memories
+	TaskIDs   []string `json:"taskIds,omitempty"`   // For link_tasks / unlink_tasks
 }
 
 func handleManageContextPack(ctx context.Context, req *mcp.CallToolRequest, input ManageContextPackInput) (*mcp.CallToolResult, interface{}, error) {
@@ -185,8 +191,71 @@ func handleManageContextPack(ctx context.Context, req *mcp.CallToolRequest, inpu
 		}
 		return mustTextResult(result), nil, nil
 
+	case "link_memories":
+		packID := strings.TrimSpace(input.PackID)
+		if packID == "" || len(input.MemoryIDs) == 0 {
+			return nil, nil, errors.New("packId and memoryIds are required for link_memories action")
+		}
+		result, err := apiClient.BulkAddMemoriesToPack(packID, input.MemoryIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return mustTextResult(result), nil, nil
+
+	case "link_tasks":
+		packID := strings.TrimSpace(input.PackID)
+		if packID == "" || len(input.TaskIDs) == 0 {
+			return nil, nil, errors.New("packId and taskIds are required for link_tasks action")
+		}
+		result, err := apiClient.BulkAddTasksToPack(packID, input.TaskIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return mustTextResult(result), nil, nil
+
+	case "unlink_memories":
+		packID := strings.TrimSpace(input.PackID)
+		if packID == "" || len(input.MemoryIDs) == 0 {
+			return nil, nil, errors.New("packId and memoryIds are required for unlink_memories action")
+		}
+		if err := apiClient.BulkRemoveMemoriesFromPack(packID, input.MemoryIDs); err != nil {
+			return nil, nil, err
+		}
+		return mustTextResult(map[string]interface{}{
+			"status":   "ok",
+			"action":   "unlink_memories",
+			"packId":   packID,
+			"removed":  len(input.MemoryIDs),
+		}), nil, nil
+
+	case "unlink_tasks":
+		packID := strings.TrimSpace(input.PackID)
+		if packID == "" || len(input.TaskIDs) == 0 {
+			return nil, nil, errors.New("packId and taskIds are required for unlink_tasks action")
+		}
+		if err := apiClient.BulkRemoveTasksFromPack(packID, input.TaskIDs); err != nil {
+			return nil, nil, err
+		}
+		return mustTextResult(map[string]interface{}{
+			"status":  "ok",
+			"action":  "unlink_tasks",
+			"packId":  packID,
+			"removed": len(input.TaskIDs),
+		}), nil, nil
+
+	case "clone":
+		packID := strings.TrimSpace(input.PackID)
+		if packID == "" {
+			return nil, nil, errors.New("packId is required for clone action")
+		}
+		clone, err := apiClient.CloneContextPack(packID, strings.TrimSpace(input.Name))
+		if err != nil {
+			return nil, nil, err
+		}
+		return mustTextResult(clone), nil, nil
+
 	default:
-		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: create, update, link_memory, or link_task", action)
+		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: create, update, link_memory, link_task, link_memories, link_tasks, unlink_memories, unlink_tasks, or clone", action)
 	}
 }
 

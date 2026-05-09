@@ -76,6 +76,15 @@ internal/errors/              → Error parsing
 ramorie mcp serve    # Start MCP stdio server
 ```
 
+## Context Packs (v6.6.0+, "Gemini Gem" pattern)
+
+Tek tool çağrısıyla pack içeriği (memories + tasks + contexts) agent
+context'ine yüklenir — 5-10 ad-hoc `find()` yerine. Detaylı kullanım
+ve workflow için `AGENT_MCP_GUIDE.md` "Context Packs" bölümüne bakın.
+
+**ESSENTIAL tool**: `load_context_pack(pack_id, format?, budget_tokens?, sections?)`
+**CLI**: `ramorie pack use <id-or-name>` → stdout XML bundle
+
 ## Distribution
 - **Homebrew**: `brew install kutbudev/tap/ramorie`
 - **GoReleaser**: Automated GitHub releases

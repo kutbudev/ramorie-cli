@@ -146,3 +146,193 @@ func contextPackDeleteCmd() *cli.Command {
 		},
 	}
 }
+
+// =============================================================================
+// PR4 (mayis 2026) — Pack assemble + bulk ops + clone CLI commands
+// =============================================================================
+
+// contextPackUseCmd assembles a pack and prints the bundle to stdout.
+// "Gemini Gem"-style: pipe into your agent or copy/paste manually.
+//
+//	ramorie pack use <id-or-name> --format xml --budget 4000
+func contextPackUseCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "use",
+		Aliases:   []string{"render"},
+		Usage:     "Assemble a context pack and print the bundle (XML/JSON/MD) to stdout",
+		ArgsUsage: "[pack-id-or-name]",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "format", Aliases: []string{"f"}, Value: "xml", Usage: "Output format: xml, json, markdown"},
+			&cli.IntFlag{Name: "budget", Aliases: []string{"b"}, Value: 4000, Usage: "Token budget for the bundle"},
+			&cli.StringSliceFlag{Name: "section", Usage: "Sections to include: memories, tasks, contexts (default all)"},
+			&cli.BoolFlag{Name: "include-archived", Usage: "Include archived items"},
+			&cli.BoolFlag{Name: "no-cache", Usage: "Skip the 6h render cache"},
+		},
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("pack id or name required")
+			}
+			ident := c.Args().First()
+			client := api.NewClient()
+
+			// Resolve name → id when arg is not a UUID.
+			if !looksLikeUUID(ident) {
+				resolved, err := client.ResolvePackByName(ident)
+				if err != nil {
+					return fmt.Errorf("resolve pack: %w", err)
+				}
+				ident = resolved.ID
+			}
+
+			useCache := !c.Bool("no-cache")
+			opts := api.AssembleOptions{
+				Format:          c.String("format"),
+				MaxTokens:       c.Int("budget"),
+				Sections:        c.StringSlice("section"),
+				IncludeArchived: c.Bool("include-archived"),
+				UseCache:        &useCache,
+			}
+			resp, err := client.AssembleContextPack(ident, opts)
+			if err != nil {
+				return fmt.Errorf("assemble: %w", err)
+			}
+
+			fmt.Print(resp.Bundle)
+			fmt.Println()
+			fmt.Fprintf(c.App.ErrWriter, "─── %d/%d items, %d/%d tokens, cache %v, %dms ───\n",
+				resp.Meta.ItemsReturned, resp.Meta.ItemsTotal,
+				resp.Meta.TokensEst, resp.Meta.TokenBudget,
+				resp.Meta.CacheHit, resp.Meta.LatencyMs)
+			return nil
+		},
+	}
+}
+
+// contextPackAddCmd bulk-links memories or tasks to a pack.
+//
+//	ramorie pack add <pack> --memory id1 id2  --task id3 id4
+func contextPackAddCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "add",
+		Usage:     "Add memories and/or tasks to a context pack (bulk)",
+		ArgsUsage: "[pack-id]",
+		Flags: []cli.Flag{
+			&cli.StringSliceFlag{Name: "memory", Aliases: []string{"m"}, Usage: "Memory IDs to link (repeat for multiple)"},
+			&cli.StringSliceFlag{Name: "task", Aliases: []string{"t"}, Usage: "Task IDs to link (repeat for multiple)"},
+		},
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("pack id required")
+			}
+			packID := c.Args().First()
+			memIDs := c.StringSlice("memory")
+			taskIDs := c.StringSlice("task")
+			if len(memIDs) == 0 && len(taskIDs) == 0 {
+				return fmt.Errorf("at least one --memory or --task required")
+			}
+			client := api.NewClient()
+			if len(memIDs) > 0 {
+				if _, err := client.BulkAddMemoriesToPack(packID, memIDs); err != nil {
+					return fmt.Errorf("add memories: %w", err)
+				}
+				fmt.Printf("✅ Linked %d memories to pack %s\n", len(memIDs), packID[:8])
+			}
+			if len(taskIDs) > 0 {
+				if _, err := client.BulkAddTasksToPack(packID, taskIDs); err != nil {
+					return fmt.Errorf("add tasks: %w", err)
+				}
+				fmt.Printf("✅ Linked %d tasks to pack %s\n", len(taskIDs), packID[:8])
+			}
+			return nil
+		},
+	}
+}
+
+// contextPackRemoveCmd bulk-unlinks memories or tasks.
+//
+//	ramorie pack remove <pack> --memory id1 id2
+func contextPackRemoveCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "remove",
+		Aliases:   []string{"unlink"},
+		Usage:     "Remove memories and/or tasks from a context pack (bulk)",
+		ArgsUsage: "[pack-id]",
+		Flags: []cli.Flag{
+			&cli.StringSliceFlag{Name: "memory", Aliases: []string{"m"}, Usage: "Memory IDs to unlink"},
+			&cli.StringSliceFlag{Name: "task", Aliases: []string{"t"}, Usage: "Task IDs to unlink"},
+		},
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("pack id required")
+			}
+			packID := c.Args().First()
+			memIDs := c.StringSlice("memory")
+			taskIDs := c.StringSlice("task")
+			if len(memIDs) == 0 && len(taskIDs) == 0 {
+				return fmt.Errorf("at least one --memory or --task required")
+			}
+			client := api.NewClient()
+			if len(memIDs) > 0 {
+				if err := client.BulkRemoveMemoriesFromPack(packID, memIDs); err != nil {
+					return fmt.Errorf("remove memories: %w", err)
+				}
+				fmt.Printf("🗑️  Unlinked %d memories from pack %s\n", len(memIDs), packID[:8])
+			}
+			if len(taskIDs) > 0 {
+				if err := client.BulkRemoveTasksFromPack(packID, taskIDs); err != nil {
+					return fmt.Errorf("remove tasks: %w", err)
+				}
+				fmt.Printf("🗑️  Unlinked %d tasks from pack %s\n", len(taskIDs), packID[:8])
+			}
+			return nil
+		},
+	}
+}
+
+// contextPackCloneCmd clones a pack into a fresh draft.
+//
+//	ramorie pack clone <id> --name "yeni isim"
+func contextPackCloneCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "clone",
+		Usage:     "Clone an existing context pack",
+		ArgsUsage: "[pack-id]",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "name", Aliases: []string{"n"}, Usage: "Name for the cloned pack (default: '<source> (copy)')"},
+		},
+		Action: func(c *cli.Context) error {
+			if c.NArg() == 0 {
+				return fmt.Errorf("pack id required")
+			}
+			packID := c.Args().First()
+			client := api.NewClient()
+			clone, err := client.CloneContextPack(packID, c.String("name"))
+			if err != nil {
+				return fmt.Errorf("clone: %w", err)
+			}
+			fmt.Printf("✅ Cloned to '%s' (id %s)\n", clone.Name, clone.ID[:8])
+			return nil
+		},
+	}
+}
+
+// looksLikeUUID — naive shape check (8-4-4-4-12). Avoids importing
+// google/uuid here when we just need a heuristic to gate name resolution.
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
