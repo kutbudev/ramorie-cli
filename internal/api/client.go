@@ -1113,6 +1113,7 @@ type FindMemoriesOptions struct {
 	Intent            string // "auto" (default) | "how_to" | "why" | "recent" | "owner" | "generic"
 	EntityHops        int    // 0 = direct only; 1-3 = multi-hop entity expansion
 	IncludeSuperseded bool   // default false — include memories marked superseded
+	ScoringMode       string // "weighted" (default) | "rrf_pure" | "rrf_blend" — rank fusion algorithm
 
 	// FastMode forces HyDE + rerank off. Beats HyDE/Rerank knobs. Use for
 	// literal queries (UUIDs, error codes) where HyDE expansion wastes ~5s.
@@ -1248,6 +1249,9 @@ func (c *Client) FindMemories(opts FindMemoriesOptions) (*FindResponse, error) {
 	}
 	if opts.IncludeSuperseded {
 		body["include_superseded"] = true
+	}
+	if opts.ScoringMode != "" {
+		body["scoring_mode"] = opts.ScoringMode
 	}
 	if opts.FastMode {
 		body["fast_mode"] = true

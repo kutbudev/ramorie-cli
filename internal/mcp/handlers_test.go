@@ -470,6 +470,38 @@ func TestHandleFind_BodyForwardingAndProjectHint(t *testing.T) {
 	}
 }
 
+func TestHandleFind_ForwardsScoringMode(t *testing.T) {
+	var capturedBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/memory/find" {
+			b, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(b, &capturedBody)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"items":[],"_meta":{"ranking_fusion":"rrf_blend"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	// Force a chdir to a no-match dir to skip cwd auto-hint noise.
+	origCwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+	_ = os.Chdir(t.TempDir())
+
+	_, _, err := handleFind(context.Background(), nil, FindInput{
+		Term:        "rrf test",
+		ScoringMode: "rrf_blend",
+	})
+	if err != nil {
+		t.Fatalf("handleFind: %v", err)
+	}
+	if got := capturedBody["scoring_mode"]; got != "rrf_blend" {
+		t.Errorf("scoring_mode not forwarded from MCP input to API body: got %v want %q", got, "rrf_blend")
+	}
+}
+
 func TestHandleFind_MissingTermErrors(t *testing.T) {
 	_, _, err := handleFind(context.Background(), nil, FindInput{Term: "   "})
 	if err == nil {

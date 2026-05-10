@@ -3393,6 +3393,7 @@ type FindInput struct {
 	Intent            string `json:"intent,omitempty"`             // "auto" (default) | "how_to" | "why" | "recent" | "owner" | "generic"
 	EntityHops        int    `json:"entity_hops,omitempty"`        // 0 = direct-match only; 1-3 = multi-hop entity expansion
 	IncludeSuperseded bool   `json:"include_superseded,omitempty"` // default false — omit memories marked superseded
+	ScoringMode       string `json:"scoring_mode,omitempty"`       // "weighted" (default) | "rrf_pure" | "rrf_blend" — rank fusion algorithm
 
 	// FastMode forces HyDE + rerank off for this request (beats HyDE/Rerank
 	// string knobs). Use for UUIDs, error codes, symbol names — anything
@@ -3440,6 +3441,7 @@ func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) 
 		Intent:            input.Intent,
 		EntityHops:        input.EntityHops,
 		IncludeSuperseded: input.IncludeSuperseded,
+		ScoringMode:       strings.TrimSpace(input.ScoringMode),
 		Purpose:           strings.TrimSpace(input.Purpose),
 		FastMode:          input.FastMode,
 		Debug:             input.Debug,

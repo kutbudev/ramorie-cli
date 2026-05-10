@@ -196,6 +196,36 @@ func TestFindMemories_OmitsZeroValueFields(t *testing.T) {
 	}
 }
 
+func TestFindMemories_ForwardsScoringMode(t *testing.T) {
+	var capturedBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"_meta":{"ranking_fusion":"rrf_pure"}}`))
+	}))
+	defer ts.Close()
+	c := newTestClient(ts)
+
+	_, err := c.FindMemories(FindMemoriesOptions{Term: "x", ScoringMode: "rrf_pure"})
+	if err != nil {
+		t.Fatalf("FindMemories: %v", err)
+	}
+	if got := capturedBody["scoring_mode"]; got != "rrf_pure" {
+		t.Errorf("scoring_mode not forwarded: got %v want %q", got, "rrf_pure")
+	}
+
+	// Empty ScoringMode must be omitted so the backend default ("weighted") applies.
+	capturedBody = nil
+	_, err = c.FindMemories(FindMemoriesOptions{Term: "x"})
+	if err != nil {
+		t.Fatalf("FindMemories: %v", err)
+	}
+	if _, present := capturedBody["scoring_mode"]; present {
+		t.Errorf("scoring_mode must be omitted when empty; got %v", capturedBody["scoring_mode"])
+	}
+}
+
 func TestFindMemories_InvalidJSONResponseSurfacesAsError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`not json at all`))

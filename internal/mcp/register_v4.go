@@ -129,6 +129,7 @@ OPTIONAL (tuning):
 - intent ("auto" | "how_to" | "why" | "recent" | "owner" | "generic") — pin intent.
 - entity_hops (0-3) — multi-hop entity expansion. 0 = direct matches only.
 - include_superseded (bool) — show memories marked superseded (audit/debug).
+- scoring_mode ("weighted" (default) | "rrf_pure" | "rrf_blend") — RRF rank fusion vs weighted sum.
 
 Returns: {items[], _meta: {total, intent, hyde_used, rerank_used, ranking_mode, latency_ms, ...}}
 Each item: {id, type, title, preview, score, breakdown, access_count, project}
