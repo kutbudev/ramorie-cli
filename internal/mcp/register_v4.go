@@ -105,7 +105,7 @@ Example:
 
 	// 3b. auto_remember - Atomic find+remember (PREFERRED post-PR10).
 	// Sub-agent return, bug fix, deploy success, preference statement → call this.
-	// Internally: find() with similarity threshold 0.85 → matched_existing OR remember().
+	// Internally: find() with Jaccard similarity threshold 0.60 → matched_existing OR remember().
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "auto_remember",
 		Description: `🔴 REQUIRED after: sub-agent return, bug fix application, deploy success, user preference statement. Atomik find→remember replacement.
@@ -117,7 +117,7 @@ Trigger keywords auto-detect type:
 - "pattern" / "convention" → pattern
 - Default → general
 
-Internally: Jaccard 0.85 word-set similarity check (distinct lowercase tokens) → if match returns existing memory ID + warning, else creates new.
+Internally: Jaccard 0.60 word-set similarity check (distinct lowercase tokens) → if match returns existing memory ID + warning, else creates new. 0.60 captures meaningful same-topic duplicates (≈60% word overlap); was 0.85 pre-v7.0.1 but prod smoke test showed real duplicates at 0.77 slipping through.
 
 REQUIRED: content
 OPTIONAL: project, type_override`,

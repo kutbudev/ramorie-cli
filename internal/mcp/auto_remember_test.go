@@ -3,8 +3,9 @@ package mcp
 // PR10 — tests for auto_remember (atomic find+remember) and the shared
 // protocol-reminder helper. The handler covers three observable behaviors:
 //   1. Type inference — keyword classifier mirrors handleRemember's logic.
-//   2. Duplicate detection — Jaccard similarity ≥ 0.85 short-circuits to
-//      matched_existing without creating a new memory.
+//   2. Duplicate detection — Jaccard similarity ≥ 0.60 short-circuits to
+//      matched_existing without creating a new memory. (Was 0.85 pre-v7.0.1
+//      — prod smoke test caught real duplicates at 0.77 slipping through.)
 //   3. No match — fall through to /memories POST and return action=created.
 //
 // We stub the backend with httptest so the tests stay hermetic; the apiClient
@@ -70,9 +71,10 @@ func TestAutoRemember_TypeInference(t *testing.T) {
 
 // TestAutoRemember_DuplicateDetection_MatchesExisting verifies the
 // matched_existing path: when the backend returns a memory whose content has
-// Jaccard similarity ≥ 0.85 with the requested content, the handler must
+// Jaccard similarity ≥ 0.60 with the requested content, the handler must
 // return action="matched_existing" with the existing id and MUST NOT issue a
-// POST /memories request.
+// POST /memories request. Existing fixture is identical content (Jaccard 1.0)
+// so this case is unaffected by the v7.0.1 threshold drop from 0.85 → 0.60.
 func TestAutoRemember_DuplicateDetection_MatchesExisting(t *testing.T) {
 	withInitializedSession(t)
 
@@ -88,7 +90,7 @@ func TestAutoRemember_DuplicateDetection_MatchesExisting(t *testing.T) {
 			_, _ = w.Write(b)
 		case r.URL.Path == "/memories" && r.Method == http.MethodGet:
 			// ListMemories — return a memory whose content is identical to the
-			// auto_remember input so Jaccard ≥ 0.85. Backend shape wraps the
+			// auto_remember input so Jaccard ≥ 0.60. Backend shape wraps the
 			// list in a {memories, total, limit, offset} envelope.
 			b, _ := json.Marshal(map[string]interface{}{
 				"memories": []map[string]interface{}{{
@@ -157,6 +159,151 @@ func TestAutoRemember_DuplicateDetection_MatchesExisting(t *testing.T) {
 	// Sub-op routing: matched_existing must NOT carry the "Saved." reminder.
 	if got, _ := meta["protocol_reminder"].(string); strings.Contains(got, "Saved.") {
 		t.Errorf("matched_existing reminder leaked 'Saved.' wording: %q", got)
+	}
+}
+
+// TestAutoRemember_Jaccard_0_60_BoundaryCase verifies the v7.0.1 threshold drop:
+// a memory whose Jaccard similarity is in the (0.60, 0.85) band — duplicates
+// that the old 0.85 threshold missed in prod (PR10 smoke test, ≈0.77) — must
+// now be caught and short-circuit to matched_existing. Fixture math:
+//   existing tokens: {alpha, beta, gamma, delta, epsilon} (5)
+//   new tokens:      {alpha, beta, gamma, delta, zeta}    (5)
+//   intersection = 4, union = 6 → Jaccard = 4/6 ≈ 0.667
+// This is ≥ 0.60 (matches) and < 0.85 (would have missed pre-v7.0.1).
+func TestAutoRemember_Jaccard_0_60_BoundaryCase(t *testing.T) {
+	withInitializedSession(t)
+
+	projectID := uuid.New()
+	existingID := uuid.New()
+	createCalls := 0
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/projects"):
+			b, _ := json.Marshal([]stubProject{{ID: projectID, Name: "PR10Test"}})
+			_, _ = w.Write(b)
+		case r.URL.Path == "/memories" && r.Method == http.MethodGet:
+			b, _ := json.Marshal(map[string]interface{}{
+				"memories": []map[string]interface{}{{
+					"id":         existingID.String(),
+					"project_id": projectID.String(),
+					"content":    "alpha beta gamma delta epsilon",
+					"type":       "general",
+				}},
+				"total":  1,
+				"limit":  100,
+				"offset": 0,
+			})
+			_, _ = w.Write(b)
+		case r.URL.Path == "/memories" && r.Method == http.MethodPost:
+			createCalls++
+			b, _ := json.Marshal(map[string]interface{}{
+				"id":         uuid.New().String(),
+				"project_id": projectID.String(),
+				"content":    "should-not-be-created",
+			})
+			_, _ = w.Write(b)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	res, _, err := handleAutoRemember(context.Background(), nil, AutoRememberInput{
+		Content: "alpha beta gamma delta zeta",
+		Project: "PR10Test",
+	})
+	if err != nil {
+		t.Fatalf("handleAutoRemember: %v", err)
+	}
+	if createCalls != 0 {
+		t.Fatalf("0.60-band duplicate must NOT call POST /memories; got %d call(s)", createCalls)
+	}
+
+	envelopeText := extractText(t, res, 1)
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(envelopeText), &envelope); err != nil {
+		t.Fatalf("envelope slot must be JSON: %v\n%s", err, envelopeText)
+	}
+	if envelope["action"] != "matched_existing" {
+		t.Errorf("action: got %v, want matched_existing (Jaccard ≈ 0.667 must match)", envelope["action"])
+	}
+	// Sanity: the similarity surfaced should be in the (0.60, 0.85) band that
+	// motivated this fix — if this drifts, the fixture math is wrong.
+	sim, _ := envelope["similarity"].(float64)
+	if sim < 0.60 || sim >= 0.85 {
+		t.Errorf("similarity %.4f outside expected (0.60, 0.85) boundary band — fixture drifted", sim)
+	}
+}
+
+// TestAutoRemember_Jaccard_BelowThreshold_Creates verifies the lower bound: a
+// memory whose Jaccard similarity is < 0.60 (incidental overlap, not a true
+// duplicate) must fall through to creation. Fixture math:
+//   existing tokens: {alpha, beta, gamma, delta, epsilon} (5)
+//   new tokens:      {alpha, beta, omega, sigma, kappa}   (5)
+//   intersection = 2, union = 8 → Jaccard = 2/8 = 0.25
+// This guards against over-aggressive dedupe after the 0.85 → 0.60 drop.
+func TestAutoRemember_Jaccard_BelowThreshold_Creates(t *testing.T) {
+	withInitializedSession(t)
+
+	projectID := uuid.New()
+	newID := uuid.New()
+	postCalled := false
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/projects"):
+			b, _ := json.Marshal([]stubProject{{ID: projectID, Name: "PR10Test"}})
+			_, _ = w.Write(b)
+		case r.URL.Path == "/memories" && r.Method == http.MethodGet:
+			b, _ := json.Marshal(map[string]interface{}{
+				"memories": []map[string]interface{}{{
+					"id":         uuid.New().String(),
+					"project_id": projectID.String(),
+					"content":    "alpha beta gamma delta epsilon",
+					"type":       "general",
+				}},
+				"total":  1,
+				"limit":  100,
+				"offset": 0,
+			})
+			_, _ = w.Write(b)
+		case r.URL.Path == "/memories" && r.Method == http.MethodPost:
+			postCalled = true
+			b, _ := json.Marshal(map[string]interface{}{
+				"id":         newID.String(),
+				"project_id": projectID.String(),
+				"content":    "alpha beta omega sigma kappa",
+				"type":       "general",
+			})
+			_, _ = w.Write(b)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	res, _, err := handleAutoRemember(context.Background(), nil, AutoRememberInput{
+		Content: "alpha beta omega sigma kappa",
+		Project: "PR10Test",
+	})
+	if err != nil {
+		t.Fatalf("handleAutoRemember: %v", err)
+	}
+	if !postCalled {
+		t.Fatal("Jaccard < 0.60 must fall through to POST /memories")
+	}
+	envelopeText := extractText(t, res, 1)
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(envelopeText), &envelope); err != nil {
+		t.Fatalf("envelope slot must be JSON: %v\n%s", err, envelopeText)
+	}
+	if envelope["action"] != "created" {
+		t.Errorf("action: got %v, want created (Jaccard 0.25 should not match)", envelope["action"])
 	}
 }
 

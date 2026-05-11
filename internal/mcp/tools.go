@@ -4615,13 +4615,17 @@ func protocolReminderForOp(op string) string {
 	}
 }
 
-// autoRememberSimilarityThreshold is the Jaccard 0.85 (word set intersection
-// — distinct lowercase tokens) score above which auto_remember reports
-// `matched_existing` instead of creating a duplicate. The check runs via
-// CheckSimilarMemories → JaccardSimilarity (similarity.go), NOT cosine.
-// Higher than handleRemember's 0.80 floor — auto_remember is the no-questions
-// fast path, so we only block on very near duplicates.
-const autoRememberSimilarityThreshold = 0.85
+// autoRememberSimilarityThreshold is the Jaccard 0.60 — captures meaningful
+// duplicates (~60% word overlap). Lower than 0.85 (too strict for prod content
+// — PR10 v7.0.0 smoke test showed 0.7693 same-topic memories slipping through),
+// higher than 0.40 (false positives on incidental word overlap). The check runs
+// via CheckSimilarMemories → JaccardSimilarity (similarity.go), NOT cosine —
+// Jaccard is word-set intersection over distinct lowercase tokens, so 0.60 is
+// notably stricter than the same score on cosine would be. Above this threshold
+// auto_remember reports `matched_existing` and skips creation; below, it
+// creates a new memory. Callers wanting unconditional save should use
+// remember() directly.
+const autoRememberSimilarityThreshold = 0.60
 
 // inferAutoRememberType is a thin wrapper over DetectMemoryType. It mirrors the
 // auto-detection rules documented in the auto_remember tool description so
@@ -4645,9 +4649,12 @@ type AutoRememberInput struct {
 // agents don't have to chain two calls (and inevitably skip one). Flow:
 //   1. Resolve project (explicit → cwd auto-detect).
 //   2. Run a similarity check via existing checkForSimilarMemories (Jaccard).
-//      The 0.85 threshold matches AutoMergeThreshold in similarity.go.
+//      The 0.60 threshold (autoRememberSimilarityThreshold) catches meaningful
+//      same-topic duplicates that 0.85 missed in prod (PR10 v7.0.0 smoke test).
 //   3. If a near-duplicate exists → return action="matched_existing" with the
-//      existing memory id. No new memory is created.
+//      existing memory id. No new memory is created. This is the canonical
+//      dedupe path — callers wanting unconditional save should use remember()
+//      directly (which only warns, never blocks).
 //   4. Otherwise → call CreateMemoryWithOptionsFull and return action="created".
 //
 // Response is a two-content payload:
@@ -4679,10 +4686,9 @@ func handleAutoRemember(ctx context.Context, req *mcp.CallToolRequest, input Aut
 		return nil, nil, err
 	}
 
-	// Duplicate check at the auto_remember-specific 0.85 threshold. We rely on
-	// the existing Jaccard-based path (similarity.go) so behavior stays
-	// consistent with handleRemember's duplicate guard; only the threshold is
-	// stricter here.
+	// Duplicate check at the auto_remember-specific 0.60 threshold. We rely on
+	// the existing Jaccard-based path (similarity.go); auto_remember is the
+	// only path that *blocks* on similarity — handleRemember only warns.
 	memories, listErr := apiClient.ListMemories(projectID, "")
 	if listErr == nil {
 		similar := CheckSimilarMemories(memories, content, autoRememberSimilarityThreshold)
