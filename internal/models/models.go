@@ -24,8 +24,13 @@ type Project struct {
 	Configuration  map[string]interface{} `json:"configuration,omitempty"`
 	OrganizationID *uuid.UUID             `json:"organization_id,omitempty"`
 	Organization   *Organization          `json:"organization,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	// PR11 v8.0.0: per-project encryption enforcement (mirrors backend
+	// projects.encryption_required). The CLI reads this to decide whether
+	// a rootless write can fall back to the "workflow" scratch project
+	// without an unlocked vault.
+	EncryptionRequired bool      `json:"encryption_required"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // Task represents a task in the system

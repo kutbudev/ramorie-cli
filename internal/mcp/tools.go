@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,36 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// detectGitRemoteRepo runs `git config --get remote.origin.url` under a
+// hard 500ms ctx deadline and extracts the repo name segment (the last
+// path/colon-separated chunk, .git stripped). Empty string when not in a
+// git repo, no remote, or git is missing.
+//
+// Why a 500ms timeout instead of relying on git's own behavior?
+//   - macOS LuLu / corporate firewall plugins intercept git's TCP probes
+//     (origin.url is local config, but git may still hit auth_helpers in
+//     some setups) and the command can hang indefinitely waiting for a
+//     UI prompt the MCP server can never answer. See memory 6c32b7d1.
+//   - 500ms is well under any reasonable user-perceptible delay; if the
+//     real git lookup takes longer it almost certainly hit a hang.
+func detectGitRemoteRepo() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "config", "--get", "remote.origin.url").Output()
+	if err != nil {
+		return ""
+	}
+	url := strings.TrimSpace(string(out))
+	if url == "" {
+		return ""
+	}
+	url = strings.TrimSuffix(url, ".git")
+	if i := strings.LastIndexAny(url, "/:"); i >= 0 {
+		url = url[i+1:]
+	}
+	return url
+}
 
 // ============================================================================
 // Encryption Helper Functions for Zero-Knowledge Decryption
@@ -2992,6 +3023,22 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 			}
 		}
 
+		// Try 2.5 (PR11 v8.0.0): git remote URL → matched project.
+		// When cwd doesn't lexically match a project name but the user is
+		// inside a git repo, the remote.origin.url is usually a strong
+		// signal (e.g. cwd /tmp/scratch but origin = ramorie-frontend).
+		// Bounded by detectGitRemoteRepo's 500ms timeout — safe to call
+		// on every rootless write.
+		if repo := detectGitRemoteRepo(); repo != "" {
+			repoNorm := normalizeForMatch(strings.ToLower(repo))
+			for _, p := range projects {
+				if normalizeForMatch(strings.ToLower(p.Name)) == repoNorm {
+					SetSessionLastProject(p.ID)
+					return p.ID.String(), nil
+				}
+			}
+		}
+
 		// Try 3: Use single project if user has only one
 		if len(projects) == 1 {
 			projectID := projects[0].ID.String()
@@ -3000,7 +3047,27 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 			return projectID, nil
 		}
 
-		// No auto-detection possible - require explicit project
+		// Try 4 (PR11 v8.0.0): workflow scratch fallback.
+		// At this point we've exhausted explicit/last/cwd/git-remote
+		// signals. Instead of erroring (which forced agents to fail
+		// rootless writes pre-PR11), fall through to a personal
+		// "workflow" project — using an existing one if found, or
+		// creating one via EnsureWorkflowProject (idempotent, 409-safe).
+		for _, p := range projects {
+			if strings.EqualFold(p.Name, "workflow") && p.OrganizationID == nil {
+				SetSessionLastProject(p.ID)
+				return p.ID.String(), nil
+			}
+		}
+		if wf, err := client.EnsureWorkflowProject(); err == nil && wf != nil {
+			SetSessionLastProject(wf.ID)
+			return wf.ID.String(), nil
+		}
+
+		// Hard error: list+create both failed (network down, auth, etc.).
+		// We could surface "available projects" but the user explicitly
+		// did not specify one and we couldn't auto-detect; the previous
+		// behaviour was an opaque fail anyway.
 		if len(projects) == 0 {
 			return "", errors.New("❌ Project not specified and no projects found.\n\n" +
 				"Create a project first:\n" +
@@ -3132,6 +3199,23 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 			}
 		}
 
+		// Try 2.5 (PR11 v8.0.0): git remote URL → matched project.
+		// Mirrors resolveProjectID. detectGitRemoteRepo is bounded by a
+		// 500ms ctx timeout (firewall/LuLu hang protection).
+		if repo := detectGitRemoteRepo(); repo != "" {
+			repoNorm := normalizeForMatch(strings.ToLower(repo))
+			for _, p := range projects {
+				if normalizeForMatch(strings.ToLower(p.Name)) == repoNorm {
+					SetSessionLastProject(p.ID)
+					oid := ""
+					if p.OrganizationID != nil {
+						oid = p.OrganizationID.String()
+					}
+					return p.ID.String(), oid, nil
+				}
+			}
+		}
+
 		// Try 3: Use single project if user has only one
 		if len(projects) == 1 {
 			p := projects[0]
@@ -3142,6 +3226,22 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 				oid = p.OrganizationID.String()
 			}
 			return p.ID.String(), oid, nil
+		}
+
+		// Try 4 (PR11 v8.0.0): workflow scratch fallback.
+		// Personal scope only — org-shared "workflow" rows aren't a
+		// substitute (different encryption semantics). EnsureWorkflowProject
+		// is idempotent + 409-safe so a concurrent setup_agent on another
+		// shell won't double-create.
+		for _, p := range projects {
+			if strings.EqualFold(p.Name, "workflow") && p.OrganizationID == nil {
+				SetSessionLastProject(p.ID)
+				return p.ID.String(), "", nil
+			}
+		}
+		if wf, err := client.EnsureWorkflowProject(); err == nil && wf != nil {
+			SetSessionLastProject(wf.ID)
+			return wf.ID.String(), "", nil
 		}
 
 		// No auto-detection possible - require explicit project
@@ -4686,14 +4786,18 @@ func handleAutoRemember(ctx context.Context, req *mcp.CallToolRequest, input Aut
 	}
 
 	// Resolve project (explicit > cwd auto-detect via resolveProjectWithOrg).
+	// PR11 v8.0.0: removed the hard "project is required" error fall-through.
+	// resolveProjectWithOrg now has a workflow scratch fallback (auto-creates
+	// a personal encryption_required=false project on first call) so rootless
+	// writes never fail — we always resolve to *some* project. If both the
+	// cwd detect and the resolver fail, that signals a backend outage, which
+	// surfaces as a list-projects / create-projects API error rather than a
+	// helper "specify a project" message that the agent can't act on.
 	projectIdent := strings.TrimSpace(input.Project)
 	if projectIdent == "" {
 		if detected, _, _ := detectCwdProject(apiClient); detected != nil {
 			projectIdent = detected.Name
 		}
-	}
-	if projectIdent == "" {
-		return nil, nil, errors.New("project is required and could not be auto-detected from cwd")
 	}
 	projectID, _, err := resolveProjectWithOrg(apiClient, projectIdent)
 	if err != nil {

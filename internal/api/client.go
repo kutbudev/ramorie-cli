@@ -192,6 +192,56 @@ func (c *Client) CreateProject(name, description string) (*models.Project, error
 	return &project, nil
 }
 
+// EnsureWorkflowProject is the idempotent CLI bootstrap call (PR11 v8.0.0).
+// Tries to POST /projects with name="workflow" and encryption_required=false.
+// If the project already exists the backend returns 409 — in that case we
+// recover by listing personal projects and finding the workflow row.
+//
+// Why not GET /projects?name=workflow first?
+//   - Avoid a round-trip on the cold path. The 99% case is "row exists";
+//     once we've called this once per session SetSessionLastProject caches
+//     the resolution and we never hit the network again.
+//   - ListProjects() is cached 5 minutes upstream; a fresh setup_agent
+//     after a project delete would see stale data. POST-then-recover lets
+//     us drop straight back to the live state.
+func (c *Client) EnsureWorkflowProject() (*models.Project, error) {
+	encryptionRequired := false
+	reqBody := map[string]interface{}{
+		"name":                "workflow",
+		"description":         "Scratch workspace for memories without a project (auto-created)",
+		"encryption_required": &encryptionRequired,
+	}
+	respBody, err := c.makeRequest("POST", "/projects", reqBody)
+	if err == nil {
+		var project models.Project
+		if jerr := json.Unmarshal(respBody, &project); jerr != nil {
+			return nil, fmt.Errorf("failed to unmarshal workflow project: %w", jerr)
+		}
+		return &project, nil
+	}
+
+	// 409 Conflict → row already exists. The makeRequest helper folds
+	// status into the error string; substring match is the cheapest way to
+	// detect without restructuring the error surface.
+	errStr := err.Error()
+	if !strings.Contains(errStr, "status 409") && !strings.Contains(errStr, "duplicate_project") {
+		return nil, err
+	}
+
+	// Recover: list personal projects (no org filter) and find by name.
+	projects, listErr := c.ListProjects("")
+	if listErr != nil {
+		return nil, fmt.Errorf("workflow project create conflicted but list failed: %w (original: %v)", listErr, err)
+	}
+	for i := range projects {
+		p := projects[i]
+		if strings.EqualFold(p.Name, "workflow") && p.OrganizationID == nil {
+			return &p, nil
+		}
+	}
+	return nil, fmt.Errorf("workflow project create returned 409 but no workflow row found in list (original: %v)", err)
+}
+
 func (c *Client) ListProjects(orgID ...string) ([]models.Project, error) {
 	endpoint := "/projects"
 	if len(orgID) > 0 && orgID[0] != "" {

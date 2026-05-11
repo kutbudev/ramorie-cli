@@ -14,7 +14,7 @@ import (
 )
 
 // Version is set during build with ldflags.
-var Version = "7.1.0"
+var Version = "8.0.0"
 
 func main() {
 	cli.AppHelpTemplate = help.AppHelpTemplate()

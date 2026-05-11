@@ -5,6 +5,50 @@ All notable changes to the Ramorie CLI are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [8.0.0] — 2026-05-11
+
+### BREAKING
+
+- **Encryption enforcement moved from user-level to project-level.** Previously
+  the `users.encryption_enabled` flag forced every write to be encrypted; this
+  blocked CLI/MCP agents from saving rootless memories (no cwd match → no
+  project → unconditional 400). The new model uses `projects.encryption_required`
+  so users can keep account-wide encryption ON while opting specific projects
+  (notably the auto-created `workflow` scratch project) OUT. Behavior change for
+  third-party API consumers: a 400 `ENCRYPTION_REQUIRED` response now depends
+  on the target project, not the account. Requires backend migration 079
+  applied alongside this CLI release.
+- **Rootless writes no longer fail with "project is required".** `auto_remember`,
+  `remember`, and other tools that fall through to `resolveProjectWithOrg`
+  now create-or-reuse a personal `workflow` project on the fly. Callers that
+  relied on the old error message to detect "no project selected" must check
+  for an explicit project ID in the response instead.
+
+### Added
+
+- `Project.EncryptionRequired` field on the CLI model surface (mirrors the
+  backend `projects.encryption_required` column).
+- `api.Client.EnsureWorkflowProject()` — idempotent bootstrap that POSTs the
+  personal `workflow` scratch project with `encryption_required=false`, and
+  recovers from 409 Conflict by listing personal projects.
+- `detectGitRemoteRepo()` in `internal/mcp/tools.go` — bounded (500ms ctx
+  timeout) helper that extracts the repo name from `git config --get
+  remote.origin.url`. Used by `resolveProjectID` / `resolveProjectWithOrg`
+  as a "Try 2.5" between cwd fuzzy match and single-project fallback. The
+  hard timeout protects against LuLu/firewall hangs (see memory ref
+  `6c32b7d1`).
+- `resolveProjectID` / `resolveProjectWithOrg` now have a "Try 4" workflow
+  scratch fallback: if every other auto-detect step fails, resolve to (or
+  auto-create) the personal `workflow` project instead of erroring.
+
+### Changed
+
+- `cmd/ramorie/main.go::Version` bumped to `8.0.0`.
+- `npm/package.json::version` bumped to `8.0.0`.
+- `handleAutoRemember` no longer short-circuits with a "project is required"
+  error when cwd detection fails — the resolver's workflow fallback takes
+  over.
+
 ## [7.1.0] — 2026-05-11
 
 ### Added
