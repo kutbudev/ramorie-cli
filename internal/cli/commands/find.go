@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -39,13 +40,20 @@ header (cwd-derived project name).`,
 			&cli.BoolFlag{Name: "fast", Usage: "Force HyDE + rerank off (literal queries)"},
 		},
 		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
+			parsedArgs, err := parseFindArgs(c.Args().Slice())
+			if err != nil {
+				return err
+			}
+			if len(parsedArgs.TermParts) == 0 {
 				return fmt.Errorf("search term is required. Usage: ramorie find \"yarn rule\"")
 			}
-			term := strings.Join(c.Args().Slice(), " ")
+			term := strings.Join(parsedArgs.TermParts, " ")
 			client := api.NewClient()
 
 			projectArg := c.String("project")
+			if parsedArgs.Project != nil {
+				projectArg = *parsedArgs.Project
+			}
 			var projectID string
 			if projectArg != "" {
 				resolved, err := resolve.ResolveProject(projectArg, client)
@@ -55,19 +63,56 @@ header (cwd-derived project name).`,
 				projectID = resolved
 			}
 
+			types := append([]string{}, c.StringSlice("types")...)
+			types = append(types, parsedArgs.Types...)
+			tags := append([]string{}, c.StringSlice("tags")...)
+			tags = append(tags, parsedArgs.Tags...)
+			limit := c.Int("limit")
+			if parsedArgs.Limit != nil {
+				limit = *parsedArgs.Limit
+			}
+			budget := c.Int("budget")
+			if parsedArgs.Budget != nil {
+				budget = *parsedArgs.Budget
+			}
+			hyde := c.String("hyde")
+			if parsedArgs.HyDE != nil {
+				hyde = *parsedArgs.HyDE
+			}
+			rerank := c.String("rerank")
+			if parsedArgs.Rerank != nil {
+				rerank = *parsedArgs.Rerank
+			}
+			intent := c.String("intent")
+			if parsedArgs.Intent != nil {
+				intent = *parsedArgs.Intent
+			}
+			entityHops := c.Int("entity-hops")
+			if parsedArgs.EntityHops != nil {
+				entityHops = *parsedArgs.EntityHops
+			}
+			includeSuperseded := c.Bool("include-superseded")
+			if parsedArgs.IncludeSuperseded != nil {
+				includeSuperseded = *parsedArgs.IncludeSuperseded
+			}
+			fastMode := c.Bool("fast")
+			if parsedArgs.FastMode != nil {
+				fastMode = *parsedArgs.FastMode
+			}
+
 			opts := api.FindMemoriesOptions{
 				Term:              term,
 				Project:           projectID,
-				Types:             c.StringSlice("types"),
-				Tags:              c.StringSlice("tags"),
-				Limit:             c.Int("limit"),
-				BudgetTokens:      c.Int("budget"),
-				HyDE:              c.String("hyde"),
-				Rerank:            c.String("rerank"),
-				Intent:            c.String("intent"),
-				EntityHops:        c.Int("entity-hops"),
-				IncludeSuperseded: c.Bool("include-superseded"),
-				FastMode:          c.Bool("fast"),
+				Types:             types,
+				Tags:              tags,
+				Limit:             limit,
+				BudgetTokens:      budget,
+				HyDE:              hyde,
+				Rerank:            rerank,
+				Intent:            intent,
+				EntityHops:        entityHops,
+				IncludeSuperseded: includeSuperseded,
+				FastMode:          fastMode,
 				IncludeDecisions:  true,
 			}
 
@@ -113,4 +158,152 @@ header (cwd-derived project name).`,
 			return nil
 		},
 	}
+}
+
+type findParsedArgs struct {
+	TermParts         []string
+	Project           *string
+	Types             []string
+	Tags              []string
+	Limit             *int
+	Budget            *int
+	HyDE              *string
+	Rerank            *string
+	Intent            *string
+	EntityHops        *int
+	IncludeSuperseded *bool
+	FastMode          *bool
+}
+
+func parseFindArgs(args []string) (findParsedArgs, error) {
+	var out findParsedArgs
+	for i := 0; i < len(args); i++ {
+		token := args[i]
+		if token == "--" {
+			out.TermParts = append(out.TermParts, args[i+1:]...)
+			break
+		}
+		if token == "-" || !strings.HasPrefix(token, "-") {
+			out.TermParts = append(out.TermParts, token)
+			continue
+		}
+
+		name, value, hasValue := splitFindFlag(token)
+		switch name {
+		case "project", "p":
+			v, err := consumeFindFlagValue(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.Project = &v
+		case "types", "t":
+			v, err := consumeFindFlagValue(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.Types = append(out.Types, v)
+		case "tags":
+			v, err := consumeFindFlagValue(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.Tags = append(out.Tags, v)
+		case "limit", "n":
+			v, err := consumeFindIntFlag(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.Limit = &v
+		case "budget", "b":
+			v, err := consumeFindIntFlag(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.Budget = &v
+		case "hyde":
+			v, err := consumeFindFlagValue(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.HyDE = &v
+		case "rerank":
+			v, err := consumeFindFlagValue(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.Rerank = &v
+		case "intent":
+			v, err := consumeFindFlagValue(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.Intent = &v
+		case "entity-hops":
+			v, err := consumeFindIntFlag(name, value, hasValue, args, &i)
+			if err != nil {
+				return out, err
+			}
+			out.EntityHops = &v
+		case "include-superseded":
+			v, err := parseFindBoolFlag(name, value, hasValue)
+			if err != nil {
+				return out, err
+			}
+			out.IncludeSuperseded = &v
+		case "fast":
+			v, err := parseFindBoolFlag(name, value, hasValue)
+			if err != nil {
+				return out, err
+			}
+			out.FastMode = &v
+		default:
+			return out, fmt.Errorf("unknown find flag %q; put literal flag-like search text after --", token)
+		}
+	}
+	return out, nil
+}
+
+func splitFindFlag(token string) (name, value string, hasValue bool) {
+	name = strings.TrimLeft(token, "-")
+	if before, after, ok := strings.Cut(name, "="); ok {
+		return before, after, true
+	}
+	return name, "", false
+}
+
+func consumeFindFlagValue(name, value string, hasValue bool, args []string, index *int) (string, error) {
+	if hasValue {
+		if value == "" {
+			return "", fmt.Errorf("flag --%s requires a value", name)
+		}
+		return value, nil
+	}
+	if *index+1 >= len(args) || strings.HasPrefix(args[*index+1], "-") {
+		return "", fmt.Errorf("flag --%s requires a value", name)
+	}
+	*index = *index + 1
+	return args[*index], nil
+}
+
+func consumeFindIntFlag(name, value string, hasValue bool, args []string, index *int) (int, error) {
+	raw, err := consumeFindFlagValue(name, value, hasValue, args, index)
+	if err != nil {
+		return 0, err
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("flag --%s expects an integer, got %q", name, raw)
+	}
+	return parsed, nil
+}
+
+func parseFindBoolFlag(name, value string, hasValue bool) (bool, error) {
+	if !hasValue {
+		return true, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("flag --%s expects a boolean, got %q", name, value)
+	}
+	return parsed, nil
 }
