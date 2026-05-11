@@ -41,28 +41,41 @@ func handleUnifiedTask(ctx context.Context, req *mcp.CallToolRequest, input Unif
 		action = "list" // Default to list
 	}
 
+	var (
+		res *mcp.CallToolResult
+		raw interface{}
+		err error
+	)
+
 	switch action {
 	case "list":
-		return handleTaskList(ctx, input)
+		res, raw, err = handleTaskList(ctx, input)
 	case "get":
-		return handleTaskGet(ctx, input)
+		res, raw, err = handleTaskGet(ctx, input)
 	case "create":
-		return handleTaskCreate(ctx, input)
+		res, raw, err = handleTaskCreate(ctx, input)
 	case "start":
-		return handleTaskStart(ctx, input)
+		res, raw, err = handleTaskStart(ctx, input)
 	case "complete":
-		return handleTaskComplete(ctx, input)
+		res, raw, err = handleTaskComplete(ctx, input)
 	case "stop":
-		return handleTaskStop(ctx, input)
+		res, raw, err = handleTaskStop(ctx, input)
 	case "progress":
-		return handleTaskProgress(ctx, input)
+		res, raw, err = handleTaskProgress(ctx, input)
 	case "note":
-		return handleTaskNote(ctx, input)
+		res, raw, err = handleTaskNote(ctx, input)
 	case "move":
-		return handleTaskMove(ctx, input)
+		res, raw, err = handleTaskMove(ctx, input)
 	default:
 		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: list, get, create, start, complete, stop, progress, note, or move", action)
 	}
+	if err != nil {
+		return nil, nil, err
+	}
+	// PR10 — protocol reminder injection. Re-parse the JSON payload the child
+	// handler emitted and add `_meta.protocol_reminder`. We use the existing
+	// textResult shape (slot 0 = JSON) so reminder injection is one helper call.
+	return withProtocolReminder(res, "task"), raw, nil
 }
 
 func handleTaskList(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToolResult, interface{}, error) {
@@ -372,7 +385,11 @@ func serializeSkillMarkdown(fm api.SkillFrontmatter, body string) string {
 func handleUnifiedMemory(ctx context.Context, req *mcp.CallToolRequest, input UnifiedMemoryInput) (*mcp.CallToolResult, interface{}, error) {
 	// Skill-generation branch: when goal is set, run the generate-skill chain.
 	if strings.TrimSpace(input.Goal) != "" {
-		return handleMemoryGenerateSkill(ctx, input)
+		res, raw, err := handleMemoryGenerateSkill(ctx, input)
+		if err != nil {
+			return nil, nil, err
+		}
+		return withProtocolReminder(res, "memory"), raw, nil
 	}
 
 	action := strings.TrimSpace(strings.ToLower(input.Action))
@@ -380,6 +397,16 @@ func handleUnifiedMemory(ctx context.Context, req *mcp.CallToolRequest, input Un
 		action = "list"
 	}
 
+	res, raw, err := dispatchUnifiedMemoryAction(action, input)
+	if err != nil {
+		return nil, nil, err
+	}
+	return withProtocolReminder(res, "memory"), raw, nil
+}
+
+// dispatchUnifiedMemoryAction is the original switch body, lifted out so the
+// outer handler can apply protocol-reminder injection in one place.
+func dispatchUnifiedMemoryAction(action string, input UnifiedMemoryInput) (*mcp.CallToolResult, interface{}, error) {
 	switch action {
 	case "list":
 		if strings.TrimSpace(input.Project) == "" {

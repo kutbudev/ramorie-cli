@@ -14,7 +14,7 @@ import (
 )
 
 // Version is set during build with ldflags.
-var Version = "6.9.0"
+var Version = "7.0.0"
 
 func main() {
 	cli.AppHelpTemplate = help.AppHelpTemplate()
@@ -70,6 +70,8 @@ func main() {
 
 			// 🟢 ADMIN — setup.
 			help.SetTier(commands.NewSetupCommand(), "admin"),
+			help.SetTier(commands.NewSetupHooksCommand(), "admin"),
+			help.SetTier(commands.NewDoctorCommand(), "admin"),
 			help.SetTier(commands.NewUnlockCommand(), "admin"),
 			help.SetTier(commands.NewLockCommand(), "admin"),
 			help.SetTier(commands.NewConfigCommand(), "admin"),

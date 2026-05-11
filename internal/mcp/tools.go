@@ -1567,6 +1567,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 						"2. Call remember(..., force=true) to save anyway", len(similarMemories)),
 					"_action": "Either skip saving (duplicate) or use force=true to save anyway",
 					"_hint":   "💡 Best practice: Always call recall(term) BEFORE remember() to check existing knowledge",
+					"_meta":   map[string]interface{}{"protocol_reminder": protocolReminderForOp("remember")},
 				}), nil, nil
 			}
 		}
@@ -1609,6 +1610,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 					"message":   "📋 Created task instead of memory (detected TODO)",
 					"task":      task,
 					"encrypted": true,
+					"_meta":     map[string]interface{}{"protocol_reminder": protocolReminderForOp("task")},
 				}), nil, nil
 			}
 		}
@@ -1623,6 +1625,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 			"action":  "task_created",
 			"message": "📋 Created task instead of memory (detected TODO)",
 			"task":    task,
+			"_meta":   map[string]interface{}{"protocol_reminder": protocolReminderForOp("task")},
 		}), nil, nil
 	}
 
@@ -1659,6 +1662,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 				"auto_detected": true,
 				"encrypted":     true,
 				"project_id":    projectID,
+				"_meta":         map[string]interface{}{"protocol_reminder": protocolReminderForOp("remember")},
 			}), nil, nil
 		}
 	}
@@ -1684,6 +1688,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		"type":          memoryType,
 		"auto_detected": true,
 		"project_id":    projectID,
+		"_meta":         map[string]interface{}{"protocol_reminder": protocolReminderForOp("remember")},
 	}
 	if len(resp.SimilarMemories) > 0 {
 		result["similar_memories"] = resp.SimilarMemories
@@ -3476,7 +3481,76 @@ func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) 
 		return nil, nil, err
 	}
 
-	return mustTextResult(resp), nil, nil
+	// PR10 — inject protocol reminder into _meta so the agent sees the
+	// next-required-action nudge on every find result. We re-marshal through a
+	// generic map rather than mutating the typed FindResponse, which keeps the
+	// API client wire shape clean and reminder injection purely MCP-side.
+	wrapped := injectProtocolReminder(resp, "find")
+	return mustTextResult(wrapped), nil, nil
+}
+
+// withProtocolReminder rewrites slot 0 of a CallToolResult so the JSON
+// payload carries `_meta.protocol_reminder`. If slot 0 isn't valid JSON we
+// leave the result untouched — multi-content responses (e.g. load_skill's
+// markdown body + envelope) shouldn't have their first slot rewritten.
+func withProtocolReminder(res *mcp.CallToolResult, op string) *mcp.CallToolResult {
+	if res == nil || len(res.Content) == 0 {
+		return res
+	}
+	tc, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		return res
+	}
+	trimmed := strings.TrimSpace(tc.Text)
+	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[') {
+		// Not a JSON object/array — likely a status string for a 2-slot
+		// payload. Leave it alone; the envelope slot already carries _meta.
+		return res
+	}
+	var payload interface{}
+	if err := json.Unmarshal([]byte(tc.Text), &payload); err != nil {
+		return res
+	}
+	wrapped := injectProtocolReminder(payload, op)
+	newJSON, err := json.MarshalIndent(wrapped, "", "  ")
+	if err != nil {
+		return res
+	}
+	tc.Text = string(newJSON)
+	return res
+}
+
+// injectProtocolReminder copies a typed response into a generic map and merges
+// `protocol_reminder` into the `_meta` block. Handles both shapes we use:
+//   - Top-level `_meta` object (FindResponse) — add field in place.
+//   - No `_meta` at all — create one with just the reminder.
+//
+// We deliberately re-encode through json.Marshal so we don't have to know each
+// concrete response type; any struct with `_meta` JSON tags merges correctly.
+func injectProtocolReminder(payload any, op string) map[string]interface{} {
+	reminder := protocolReminderForOp(op)
+
+	b, err := json.Marshal(payload)
+	if err != nil || len(b) == 0 || string(b) == "null" {
+		return map[string]interface{}{
+			"_meta": map[string]interface{}{"protocol_reminder": reminder},
+		}
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(b, &out); err != nil || out == nil {
+		// Non-object payload (array, scalar) — wrap it.
+		return map[string]interface{}{
+			"data":  payload,
+			"_meta": map[string]interface{}{"protocol_reminder": reminder},
+		}
+	}
+	meta, _ := out["_meta"].(map[string]interface{})
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["protocol_reminder"] = reminder
+	out["_meta"] = meta
+	return out
 }
 
 // ============================================================================
@@ -4510,4 +4584,185 @@ func handleSurfaceContext(ctx context.Context, req *mcp.CallToolRequest, input S
 	}
 
 	return mustTextResult(response), nil, nil
+}
+
+// ============================================================================
+// PR10 — Protocol Hardening
+// ============================================================================
+
+// protocolReminderForOp returns the short post-call reminder string that gets
+// injected into the response under `_meta.protocol_reminder`. The point is to
+// keep the durable protocol in front of the agent on every tool result, not
+// just once at SessionStart. Each branch nudges the next required action.
+//
+// Sub-ops let one tool emit different reminders depending on the path it took
+// (e.g. auto_remember has separate "created" vs "matched_existing" outcomes —
+// the latter must NOT say "Saved." because nothing was written).
+func protocolReminderForOp(op string) string {
+	switch op {
+	case "find":
+		return "If subagent return detected → auto_remember() required next."
+	case "remember", "auto_remember", "auto_remember_created":
+		return "Saved. Continue without asking user permission for future saves."
+	case "auto_remember_matched":
+		return "Memory already exists — protocol satisfied. No save needed."
+	case "task":
+		return "Task tracked. If decision/bug_fix learned from this task → remember()."
+	case "memory", "surface_skills":
+		return "Ramorie protocol: subagent return → find() → auto_remember()."
+	default:
+		return "Ramorie protocol: subagent return → find() → auto_remember()."
+	}
+}
+
+// autoRememberSimilarityThreshold is the Jaccard 0.85 (word set intersection
+// — distinct lowercase tokens) score above which auto_remember reports
+// `matched_existing` instead of creating a duplicate. The check runs via
+// CheckSimilarMemories → JaccardSimilarity (similarity.go), NOT cosine.
+// Higher than handleRemember's 0.80 floor — auto_remember is the no-questions
+// fast path, so we only block on very near duplicates.
+const autoRememberSimilarityThreshold = 0.85
+
+// inferAutoRememberType is a thin wrapper over DetectMemoryType. It mirrors the
+// auto-detection rules documented in the auto_remember tool description so
+// callers/tests have a single reference point. Kept separate so we can add
+// auto_remember-specific heuristics later without touching DetectMemoryType.
+func inferAutoRememberType(content string) string {
+	return DetectMemoryType(content)
+}
+
+// AutoRememberInput is the MCP tool input for auto_remember. Project is
+// optional — when blank we fall back to the cwd-detected project (handled by
+// resolveProjectWithOrg). TypeOverride bypasses inferAutoRememberType when the
+// caller has stronger context about classification.
+type AutoRememberInput struct {
+	Content      string `json:"content"`                 // REQUIRED — what to remember
+	Project      string `json:"project,omitempty"`       // OPTIONAL — name or UUID
+	TypeOverride string `json:"type_override,omitempty"` // OPTIONAL — pin a type
+}
+
+// handleAutoRemember is the atomic find()+remember() entry point. It exists so
+// agents don't have to chain two calls (and inevitably skip one). Flow:
+//   1. Resolve project (explicit → cwd auto-detect).
+//   2. Run a similarity check via existing checkForSimilarMemories (Jaccard).
+//      The 0.85 threshold matches AutoMergeThreshold in similarity.go.
+//   3. If a near-duplicate exists → return action="matched_existing" with the
+//      existing memory id. No new memory is created.
+//   4. Otherwise → call CreateMemoryWithOptionsFull and return action="created".
+//
+// Response is a two-content payload:
+//   - Slot 0: plain text status line so agents reading only the first content
+//     item still get an actionable message.
+//   - Slot 1: JSON envelope with structured fields + _meta.protocol_reminder.
+func handleAutoRemember(ctx context.Context, req *mcp.CallToolRequest, input AutoRememberInput) (*mcp.CallToolResult, any, error) {
+	if err := checkSessionInit("auto_remember"); err != nil {
+		return nil, nil, err
+	}
+
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return nil, nil, errors.New("content is required - tell me what to remember")
+	}
+
+	// Resolve project (explicit > cwd auto-detect via resolveProjectWithOrg).
+	projectIdent := strings.TrimSpace(input.Project)
+	if projectIdent == "" {
+		if detected, _, _ := detectCwdProject(apiClient); detected != nil {
+			projectIdent = detected.Name
+		}
+	}
+	if projectIdent == "" {
+		return nil, nil, errors.New("project is required and could not be auto-detected from cwd")
+	}
+	projectID, _, err := resolveProjectWithOrg(apiClient, projectIdent)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Duplicate check at the auto_remember-specific 0.85 threshold. We rely on
+	// the existing Jaccard-based path (similarity.go) so behavior stays
+	// consistent with handleRemember's duplicate guard; only the threshold is
+	// stricter here.
+	memories, listErr := apiClient.ListMemories(projectID, "")
+	if listErr == nil {
+		similar := CheckSimilarMemories(memories, content, autoRememberSimilarityThreshold)
+		if len(similar) > 0 {
+			top := similar[0]
+			memType := input.TypeOverride
+			if memType == "" {
+				memType = inferAutoRememberType(content)
+			}
+			envelope := map[string]interface{}{
+				"action":      "matched_existing",
+				"memory_id":   top.MemoryID,
+				"type":        memType,
+				"similarity":  top.Similarity,
+				"next_action": "continue — protocol satisfied",
+				"warning": fmt.Sprintf("⚠ Similar memory exists (similarity %.2f). "+
+					"Returning existing memory_id without creating duplicate. "+
+					"Pass type_override or call remember(force=true) to save anyway.",
+					top.Similarity),
+				"_meta": map[string]interface{}{
+					"protocol_reminder": protocolReminderForOp("auto_remember_matched"),
+				},
+			}
+			envelopeJSON, jerr := json.MarshalIndent(envelope, "", "  ")
+			if jerr != nil {
+				return nil, nil, fmt.Errorf("marshal auto_remember envelope: %w", jerr)
+			}
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: fmt.Sprintf(
+						"⚠ Similar memory exists: %s (similarity %.2f). Not creating duplicate.",
+						top.MemoryID, top.Similarity)},
+					&mcp.TextContent{Text: string(envelopeJSON)},
+				},
+			}, nil, nil
+		}
+	}
+	// List errors are non-fatal — fall through to create. We never want a
+	// transient backend hiccup to silently drop a save the agent already
+	// committed to making.
+
+	// Type detection: explicit override > content-based auto-detect.
+	memType := input.TypeOverride
+	autoDetected := false
+	if memType == "" {
+		memType = inferAutoRememberType(content)
+		autoDetected = true
+	}
+
+	resp, err := apiClient.CreateMemoryWithOptionsFull(api.CreateMemoryOptions{
+		ProjectID: projectID,
+		Content:   content,
+		Type:      memType,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	envelope := map[string]interface{}{
+		"action":        "created",
+		"memory_id":     resp.Memory.ID.String(),
+		"type":          memType,
+		"auto_detected": autoDetected,
+		"project_id":    projectID,
+		"next_action":   "continue — memory saved",
+		"_meta": map[string]interface{}{
+			"protocol_reminder": protocolReminderForOp("auto_remember_created"),
+		},
+	}
+	if len(resp.SimilarMemories) > 0 {
+		envelope["similar_memories"] = resp.SimilarMemories
+	}
+	envelopeJSON, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal auto_remember envelope: %w", err)
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: fmt.Sprintf("✓ Saved as %s: %s", memType, resp.Memory.ID.String())},
+			&mcp.TextContent{Text: string(envelopeJSON)},
+		},
+	}, nil, nil
 }

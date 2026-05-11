@@ -4,8 +4,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerToolsV4 registers 14 simplified MCP tools (down from 49)
-// This is the v4 tool set optimized for agent compliance.
+// registerToolsV4 registers 15 simplified MCP tools (down from 49) via
+// mcp.AddTool — this is the v4 tool set optimized for agent compliance.
+// PR10: + auto_remember (atomic find+remember). The current AddTool count is
+// 15: setup_agent, list_projects, remember, auto_remember, find, recall, task,
+// memory, get_stats, get_agent_activity, surface_context, create_project,
+// manage_subtasks, entity, admin.
 // Removed in this revision (active-state concepts not part of user workflow):
 //   - decision (deprecated stub) → use remember()/memory
 //   - skill (deprecated stub) → use remember()/memory
@@ -19,7 +23,9 @@ func registerToolsV4(server *mcp.Server) {
 	// 1. setup_agent - Initialize session (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "setup_agent",
-		Description: `🔴 ESSENTIAL | Initialize the agent session. ⚠️ CALL THIS FIRST every conversation.
+		Description: `🔴 REQUIRED FIRST CALL every session. No exceptions. Returns project context + active preferences.
+
+⚠️ Not optional. ⚠️ Not "best practice". The protocol requires this as the first MCP call every conversation so the agent loads cwd-detected project, active rules, and task stats before doing any work.
 
 Returns a compact session context (~500 tokens):
 - session info + agent tracking identity
@@ -61,7 +67,9 @@ OPTIONAL:
 	// 3. remember - Store memories (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "remember",
-		Description: `🔴 ESSENTIAL | Store a memory (durable fact / decision / pattern / preference).
+		Description: `🔴 REQUIRED: call find() first for duplicate check. MUST be called after: sub-agent return, bug fix application, deploy success, user preference statement. Not optional.
+
+Prefer auto_remember() — it does find()+remember() atomically and never skips the duplicate check.
 
 REQUIRED: content, project (name or ID)
 OPTIONAL: force (bool) — skip similarity check and save anyway
@@ -81,7 +89,7 @@ To force task creation, explicitly open the content with "todo:" (or call task(a
 Duplicate prevention: if cosine similarity to an existing memory is >0.9, a warning
 is returned with the existing memory instead of creating a duplicate. Override with force=true.
 
-Best practice: find(term) BEFORE remember() to check existing knowledge. The backend also
+Required protocol: call find(term) BEFORE remember() to check existing knowledge. The backend also
 runs a post-write contradiction check — if your new memory supersedes an older one, the
 older is marked superseded and hidden from default searches.
 
@@ -95,10 +103,38 @@ Example:
 		},
 	}, handleRemember)
 
+	// 3b. auto_remember - Atomic find+remember (PREFERRED post-PR10).
+	// Sub-agent return, bug fix, deploy success, preference statement → call this.
+	// Internally: find() with similarity threshold 0.85 → matched_existing OR remember().
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "auto_remember",
+		Description: `🔴 REQUIRED after: sub-agent return, bug fix application, deploy success, user preference statement. Atomik find→remember replacement.
+
+Trigger keywords auto-detect type:
+- "decided X" / "chose X" → decision
+- "fixed bug" / "root cause" → bug_fix
+- "always X" / "never X" / "prefer X" → preference
+- "pattern" / "convention" → pattern
+- Default → general
+
+Internally: Jaccard 0.85 word-set similarity check (distinct lowercase tokens) → if match returns existing memory ID + warning, else creates new.
+
+REQUIRED: content
+OPTIONAL: project, type_override`,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Auto-Remember (atomic find+remember)",
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  false, // creates new memory each call unless similar exists
+		},
+	}, handleAutoRemember)
+
 	// 4. find - Hybrid search (semantic + lexical) — preferred in v4.
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "find",
 		Description: `🔴 ESSENTIAL | Hybrid memory + decision retrieval — preferred over recall().
+
+🔴 MUST run BEFORE remember() (duplicate check) and BEFORE responding to user (re-discover context).
+Subagent return → find() → auto_remember(). No skipping.
 
 Under the hood the server runs a multi-stage pipeline and picks what to apply per query:
   1. HyDE — query is rewritten into a hypothetical answer first, then embedded (catches queries that share no keywords with the memory)

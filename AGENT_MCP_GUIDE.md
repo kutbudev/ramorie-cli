@@ -1,9 +1,23 @@
 # Ramorie MCP Agent Guide
 
-> Quick reference for AI agents using the Ramorie MCP server (v6.9.0, 15 tools).
+> Quick reference for AI agents using the Ramorie MCP server (v7.0.0, 16 tools).
 > For full CLI docs, see https://ramorie.com/docs/cli or run `ramorie mcp tools`.
 
 ## Setup
+
+The fastest path is the one-command installer — it handles auth, MCP config
+for every detected client (Claude Code, Codex, Cursor, Windsurf, VS Code,
+Zed), and the new Persistent Memory Protocol hooks/rules in a single step:
+
+```bash
+ramorie setup               # full install: auth + MCP + hooks + rules + vault + doctor
+ramorie doctor              # re-run the health check at any time
+ramorie setup-hooks status  # see which clients have the protocol installed
+```
+
+The legacy interactive picker is still available via `ramorie setup --legacy`.
+
+Manual MCP config (if you'd rather wire it yourself):
 
 ```json
 {
@@ -22,6 +36,27 @@ Authenticate the CLI first so the MCP server has an API key:
 ramorie setup login     # interactive email + password, writes ~/.ramorie/config.json
 ramorie setup status    # verify
 ```
+
+### v7.0.0 — Persistent Memory Protocol hardening
+
+PR10 introduces a stronger protocol surface so agents stop skipping
+`remember()` after sub-agent returns:
+
+- **`auto_remember` tool** (#16) — atomic `find()`+`remember()` with
+  similarity gating. Use this instead of separate `find`+`remember` calls
+  whenever a sub-agent returns or a decision/bug-fix/preference lands.
+- **`_meta.protocol_reminder`** — every tool response now carries an
+  op-specific nudge so the protocol fires mid-turn, not just at session
+  start.
+- **Hook installer** — `ramorie setup-hooks install` writes 4 hooks into
+  Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`):
+  `SessionStart`, `PostToolUse(Agent)`, `SubagentStop`, `Stop`.
+- **Rules-file installer** — for editors without hook support (Cursor,
+  Windsurf), the same protocol text is written into a managed markdown
+  block inside `.cursor/rules/ramorie-memory-protocol.mdc` and
+  `~/.codeium/windsurf/memories/global_rules.md`.
+- **`ramorie doctor`** — health check for config / vault / MCP / hooks /
+  rules surfaces. Exits 1 on any ✗ result so it's CI-friendly.
 
 > **v6.x:** v5.0.0'dan beri legacy tools (`create_task`, `add_memory`, `search_memories`,
 > `create_decision`, `activate_context_pack`, `get_active_task`, `manage_focus`,

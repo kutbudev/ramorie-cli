@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
+	"github.com/kutbudev/ramorie-cli/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -35,68 +36,9 @@ func ServeStdio(client *api.Client) error {
 		},
 		&mcp.ServerOptions{
 			CompletionHandler: completionHandler,
-			Instructions: `🧠 RAMORIE — Persistent Memory for AI Agents
-
-Memories persist across sessions and are shared with other agents. Use
-Ramorie proactively — don't wait to be asked.
-
-## The 3 rules
-
-1. FIND FIRST — call ` + "`find(term, [project])`" + ` BEFORE any response.
-   The server runs a full retrieval pipeline (HyDE expansion → hybrid
-   scan → entity graph → propositional boost → intent routing → LLM
-   rerank → supersede filter) and returns a compact, token-budgeted
-   payload (≤2000 tokens default). Auto-scopes to cwd project via an
-   ` + "`X-Project-Hint`" + ` header. ` + "`recall`" + ` is legacy lexical-only.
-
-2. REMEMBER ALWAYS — ` + "`remember(content, project)`" + ` without asking.
-   Type is auto-detected. Server auto-detects contradictions and sets
-   supersede pointers — you don't manage history by hand.
-
-   Specific trigger moments that MUST save a memory (do not pause to ask):
-   • User states a rule/preference — "always X", "never Y", "prefer Z"
-     → save verbatim as an imperative note. type=preference.
-   • Bug is solved — save problem statement + root cause + fix location.
-     type=bug_fix.
-   • Architectural/technical choice — "we'll use X because Y", "decided
-     to migrate from A to B" → type=decision.
-   • Non-obvious pattern copy-pasted more than twice → type=pattern.
-   • Domain context the user expects you to know next session (names,
-     URLs, constraints, org conventions) → type=reference.
-   • Reusable how-to you just worked out → type=skill.
-   Heuristic: if a future session would be worse without this fact, save it.
-
-3. TASK EVERYTHING — ` + "`task(action=create, project, description)`" + `
-   when the user says "do X", "fix Y", "later", or defers work. Or start
-   a remember() call with a prefix like ` + "`todo:`" + ` / ` + "`later:`" + ` / ` + "`task:`" + ` —
-   the content gets promoted to a task automatically.
-
-## Session start
-
-- ` + "`setup_agent`" + ` returns a compact session payload by default (~500 token):
-  session info, cwd-detected project, top-5 active preferences, task stats.
-  Pass ` + "`full: true`" + ` only when you specifically want recent_memories,
-  workflow_pattern, recommended_actions.
-- ` + "`list_projects`" + ` returns [{id, name, org}] by default. Pass
-  ` + "`verbose: true`" + ` for full nested metadata.
-
-## When to use which retrieval tool
-
-- ` + "`find(term)`" + ` — you have a concrete question or topic
-- ` + "`surface_context(file_paths|domains|code_patterns)`" + ` — you're opening a file
-  and want to see what's been decided/learned about that module
-- ` + "`recall(term)`" + ` — only for replicating pre-v4 behavior or benchmarking
-  lexical baseline
-
-## Auto-surfacing (optional)
-
-If you install the Claude Code hook (` + "`ramorie hook install`" + `), the
-system calls find-related for every Edit/Write/Read and injects a short
-summary as a system-reminder — you see related memories without calling
-find manually.
-
-⚠️ DO NOT ask "should I save this?" — just save it.
-⚠️ DO NOT forget to find() before answering.`,
+			// Single source of truth for protocol language across MCP, hooks,
+			// and rules installers. See internal/protocol/text.go.
+			Instructions: protocol.SessionStartText,
 		},
 	)
 

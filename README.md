@@ -89,17 +89,31 @@ go build -o ramorie ./cmd/jbraincli
 
 ## 🏁 Quick Start
 
-### 1. Authenticate
+### 1. One-command full install (v7.0.0+)
 
-Run the interactive setup menu (it can register a new account or log in to an existing one):
+`ramorie setup` is now a complete onboarding flow — auth + MCP install for
+every detected client + Persistent Memory Protocol hooks (Claude Code,
+Codex) + protocol rules-files (Cursor, Windsurf) + vault check + doctor
+health-check, all in one run:
 
 ```bash
-ramorie setup            # interactive: Login / Register / API key / status
-# or directly:
-ramorie setup login      # email + password
+ramorie setup            # full install (idempotent — re-run anytime)
+ramorie doctor           # health check across config / vault / MCP / hooks / rules
+ramorie setup-hooks status   # see protocol install state per client
 ```
 
+The legacy interactive menu is still available via `ramorie setup --legacy`.
+
 Credentials are written to `~/.ramorie/config.json`.
+
+If you only want auth without the protocol surface, the per-step commands
+remain:
+
+```bash
+ramorie setup login      # email + password only
+ramorie mcp install      # MCP TUI only
+ramorie setup-hooks install --client claude-code  # one client at a time
+```
 
 ### 2. Create Your First Project
 

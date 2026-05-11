@@ -13,6 +13,10 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
+	"github.com/kutbudev/ramorie-cli/internal/hooks"
+	"github.com/kutbudev/ramorie-cli/internal/mcpinstall"
+	"github.com/kutbudev/ramorie-cli/internal/protocol"
+	"github.com/kutbudev/ramorie-cli/internal/rules"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/term"
 )
@@ -93,10 +97,274 @@ func NewSetupCommand() *cli.Command {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			// Default action - interactive setup
-			return handleInteractiveSetup()
+			// Default action — full one-command setup orchestrator. Falls
+			// back to the legacy interactive picker when --legacy is set.
+			if c.Bool("legacy") {
+				return handleInteractiveSetup()
+			}
+			return runFullSetup(c)
+		},
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "legacy",
+				Usage: "Use the legacy interactive picker (login/api-key/register)",
+			},
+			&cli.BoolFlag{
+				Name:  "skip-mcp",
+				Usage: "Skip MCP server install step",
+			},
+			&cli.BoolFlag{
+				Name:  "skip-hooks",
+				Usage: "Skip hook installation (Claude Code, Codex)",
+			},
+			&cli.BoolFlag{
+				Name:  "skip-rules",
+				Usage: "Skip rules-file installation (Cursor, Windsurf)",
+			},
 		},
 	}
+}
+
+// runFullSetup performs the complete Ramorie onboarding in 6 steps:
+//
+//  1. Auth — login or skip if already authenticated.
+//  2. MCP install — every detected client (Claude Code, Claude Desktop,
+//     Cursor, Windsurf, VS Code, Zed).
+//  3. Hook install — Claude Code + Codex (shell-command hooks).
+//  4. Rules-file install — Cursor + Windsurf (managed markdown blocks).
+//  5. Vault unlock — prompt if encryption is enabled but vault is locked.
+//  6. Diagnostic — quick health check summary.
+//
+// Idempotent: re-running emits "already configured" markers for completed
+// steps. Per-step failures degrade gracefully — a warning is printed and the
+// next step still runs.
+func runFullSetup(c *cli.Context) error {
+	fmt.Println()
+	fmt.Println("🚀 Ramorie Setup — One-command full install")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+
+	// 1. Auth
+	if isAuthConfigured() {
+		fmt.Println("✓ Step 1/6 — Already authenticated")
+	} else {
+		fmt.Println("🔐 Step 1/6 — Authentication")
+		if err := handleInteractiveSetup(); err != nil {
+			return fmt.Errorf("auth step failed: %w", err)
+		}
+		// Re-check; if user bailed out of the interactive picker we should
+		// still try to continue with the other steps that don't need auth
+		// (hooks/rules), but warn that the MCP install may fail.
+		if !isAuthConfigured() {
+			warn("authentication not completed — continuing with best-effort install")
+		}
+	}
+
+	// 2. MCP install — requires auth (the installer writes per-user MCP entries
+	// that reference the saved API key). If auth still isn't configured at this
+	// point (user bailed in Step 1), skip with a clear note instead of letting
+	// the installer emit a less-obvious warning later.
+	switch {
+	case c.Bool("skip-mcp"):
+		fmt.Println("\n✓ Step 2/6 — Skipped (--skip-mcp)")
+	case !isAuthConfigured():
+		fmt.Println()
+		fmt.Println("📦 Step 2/6 — MCP server installation")
+		warn("MCP install requires auth — skipping (use --skip-mcp to silence)")
+	default:
+		fmt.Println()
+		fmt.Println("📦 Step 2/6 — MCP server installation")
+		if err := installMCPForAllDetected(); err != nil {
+			warn(fmt.Sprintf("mcp install: %v", err))
+		}
+	}
+
+	// 3. Hook install (hook-capable clients)
+	if !c.Bool("skip-hooks") {
+		fmt.Println()
+		fmt.Println("🪝 Step 3/6 — Hook installation (Claude Code, Codex)")
+		if err := installHooksForAllDetected(false); err != nil {
+			warn(fmt.Sprintf("hook install: %v", err))
+		}
+	} else {
+		fmt.Println("\n✓ Step 3/6 — Skipped (--skip-hooks)")
+	}
+
+	// 4. Rules install (rules-only clients)
+	if !c.Bool("skip-rules") {
+		fmt.Println()
+		fmt.Println("📜 Step 4/6 — Rules-file installation (Cursor, Windsurf)")
+		if err := installRulesForAllDetected(false); err != nil {
+			warn(fmt.Sprintf("rules install: %v", err))
+		}
+	} else {
+		fmt.Println("\n✓ Step 4/6 — Skipped (--skip-rules)")
+	}
+
+	// 5. Vault unlock
+	fmt.Println()
+	fmt.Println("🔓 Step 5/6 — Vault status")
+	if err := promptVaultUnlockIfNeeded(); err != nil {
+		warn(fmt.Sprintf("vault step: %v", err))
+	}
+
+	// 6. Diagnostic — propagate failure as exit 1 so CI / shell-conditional
+	// callers can detect a broken install. The earlier steps already print
+	// per-surface warnings; we just need the final verdict here.
+	fmt.Println()
+	fmt.Println("🩺 Step 6/6 — Health check")
+	doctorFailed := runQuickDoctor()
+
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	if doctorFailed {
+		fmt.Println("⚠ Setup completed with errors. Run `ramorie doctor` for details.")
+		fmt.Println()
+		return cli.Exit("setup completed with errors", 1)
+	}
+
+	fmt.Println("✨ Ramorie ready. Restart your MCP clients to pick up new config.")
+	fmt.Println()
+	fmt.Println("Useful next commands:")
+	fmt.Println("  ramorie doctor          — re-run the health check")
+	fmt.Println("  ramorie setup hooks     — manage protocol hooks")
+	fmt.Println("  ramorie project list    — list your projects")
+	fmt.Println()
+	return nil
+}
+
+// isAuthConfigured returns true when the config file already holds a non-
+// empty API key. Used by runFullSetup to short-circuit the login step.
+func isAuthConfigured() bool {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return false
+	}
+	return cfg.APIKey != ""
+}
+
+// warn prints a non-fatal warning. We use a leading bullet rather than ⚠ so
+// the output is grep-friendly and clearly distinct from ✓/✗ status markers.
+func warn(msg string) {
+	fmt.Printf("  ⚠ %s\n", msg)
+}
+
+// installMCPForAllDetected runs the standard MCP installer in TUI mode if
+// stdout looks interactive; otherwise it falls back to a quiet, opinionated
+// non-interactive install for every detected client (user-scope where
+// supported, project-scope as a secondary).
+//
+// We delegate to mcpinstall.Run for the rich path; here in the orchestrator
+// we just print a one-liner so the operator knows what happened.
+func installMCPForAllDetected() error {
+	// The interactive TUI is the safest UX — it surfaces a preview before
+	// writing anything. runFullSetup callers expect a guided experience.
+	return mcpinstall.Run(mcpinstall.BinaryPath(), []string{"mcp", "serve"})
+}
+
+// installHooksForAllDetected installs protocol hooks into every hook-capable
+// client we can detect. dryRun = true logs target paths but writes nothing.
+func installHooksForAllDetected(dryRun bool) error {
+	installers := []hooks.Installer{
+		hooks.NewClaudeCodeInstaller(),
+		hooks.NewCodexInstaller(),
+	}
+	any := false
+	for _, inst := range installers {
+		if !inst.Detect() {
+			fmt.Printf("  · %s not detected — skipping\n", inst.Name())
+			continue
+		}
+		any = true
+		if dryRun {
+			fmt.Printf("  · %s — would write to %s\n", inst.Name(), inst.SettingsPath())
+			continue
+		}
+		if err := inst.Install(hooks.DefaultEntries()); err != nil {
+			warn(fmt.Sprintf("%s hooks: %v", inst.Name(), err))
+			continue
+		}
+		fmt.Printf("  ✓ %s — installed %d hook(s) → %s\n",
+			inst.Name(), len(hooks.DefaultEntries()), inst.SettingsPath())
+	}
+	if !any {
+		fmt.Println("  · no hook-capable clients detected")
+	}
+	return nil
+}
+
+// installRulesForAllDetected installs the protocol rules-file into every
+// rules-only client we can detect.
+func installRulesForAllDetected(dryRun bool) error {
+	installers := []rules.Installer{
+		rules.NewCursorInstaller(),
+		rules.NewWindsurfInstaller(),
+	}
+	any := false
+	for _, inst := range installers {
+		if !inst.Detect() {
+			fmt.Printf("  · %s not detected — skipping\n", inst.Name())
+			continue
+		}
+		any = true
+		path := inst.RulesPath()
+		if dryRun {
+			fmt.Printf("  · %s — would write to %s\n", inst.Name(), path)
+			continue
+		}
+		if err := inst.Install(protocol.EnglishSessionStartText); err != nil {
+			warn(fmt.Sprintf("%s rules: %v", inst.Name(), err))
+			continue
+		}
+		fmt.Printf("  ✓ %s — installed protocol v%s → %s\n",
+			inst.Name(), protocol.Version, path)
+	}
+	if !any {
+		fmt.Println("  · no rules-only clients detected")
+	}
+	return nil
+}
+
+// promptVaultUnlockIfNeeded inspects encryption status and offers to unlock
+// the vault when locked. No-ops when encryption is disabled or the vault is
+// already unlocked.
+func promptVaultUnlockIfNeeded() error {
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg.APIKey == "" {
+		fmt.Println("  · vault: skipped (not authenticated)")
+		return nil
+	}
+	client := api.NewClient()
+	client.APIKey = cfg.APIKey
+	encCfg, err := client.GetEncryptionConfig()
+	if err != nil || encCfg == nil || !encCfg.EncryptionEnabled {
+		fmt.Println("  ✓ vault: encryption disabled — nothing to unlock")
+		return nil
+	}
+	if crypto.IsVaultUnlocked() {
+		fmt.Println("  ✓ vault: already unlocked")
+		return nil
+	}
+	fmt.Println("  · vault: encryption enabled but locked")
+	fmt.Println("    Run `ramorie vault unlock` to unlock with your master password.")
+	return nil
+}
+
+// runQuickDoctor prints an inline summary of installed surfaces and reports
+// whether any check returned doctorFail. Returning the failure bit (instead of
+// just printing) lets runFullSetup translate "one or more surfaces broken"
+// into a non-zero exit code — without that, `ramorie setup` always exits 0
+// even when the final health check found problems.
+func runQuickDoctor() bool {
+	results := collectDoctorChecks()
+	failed := false
+	for _, r := range results {
+		fmt.Printf("  %s %s\n", r.symbol(), r.Message)
+		if r.Status == doctorFail {
+			failed = true
+		}
+	}
+	return failed
 }
 
 func handleUserLogin() error {
