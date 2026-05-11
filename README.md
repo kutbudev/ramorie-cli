@@ -476,7 +476,7 @@ Add to your MCP configuration:
 }
 ```
 
-### Available MCP Tools (v6.8.0 — 15 tools)
+### Available MCP Tools (v6.9.0 — 15 tools)
 
 | Tool | Tier | Description |
 |------|------|-------------|
@@ -620,7 +620,7 @@ Restart Codex CLI (or the Codex app) after editing so it reloads the MCP setting
 
 ### Available MCP Tools
 
-See the full 15-tool table above (v6.8.0). For a live list straight from the binary:
+See the full 15-tool table above (v6.9.0). For a live list straight from the binary:
 
 ```bash
 ramorie mcp tools

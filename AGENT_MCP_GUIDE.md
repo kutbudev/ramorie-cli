@@ -1,6 +1,6 @@
 # Ramorie MCP Agent Guide
 
-> Quick reference for AI agents using the Ramorie MCP server (v6.8.0, 15 tools).
+> Quick reference for AI agents using the Ramorie MCP server (v6.9.0, 15 tools).
 > For full CLI docs, see https://ramorie.com/docs/cli or run `ramorie mcp tools`.
 
 ## Setup
@@ -28,7 +28,7 @@ ramorie setup status    # verify
 > `skill`, `decision`) kaldırıldı. Use the 15 tools below. Restart your MCP client
 > (Claude Code / Cursor / Windsurf) after upgrading from v5.x.
 >
-> **v6.8.0 (PR6):** New `load_skill` tool — Claude Code-format skill
+> **v6.9.0 (PR6):** New `load_skill` tool — Claude Code-format skill
 > rendering on demand. Mirrors `load_context_pack`: one call returns
 > the procedural memory as ready-to-apply markdown.
 
@@ -119,7 +119,7 @@ remember("When deploying to prod: 1) yarn test --ci 2) yarn build 3) verify bund
 
 Retrieve with `find("deploy production")`.
 
-### Loading a skill into context (v6.8.0+)
+### Loading a skill into context (v6.9.0+)
 
 Use `load_skill(skill_id)` when the agent needs the **full procedural
 markdown** ready to apply — same shape Claude Code expects from a
@@ -146,6 +146,23 @@ ramorie skill use deploy-prod                # markdown body to stdout
 ramorie skill use deploy-prod --json         # full response JSON
 ramorie skill use deploy-prod > SKILL.md     # snapshot to file
 ramorie skill use deploy-prod | pbcopy       # paste into chat
+```
+
+### Filesystem sync (v6.9.0+)
+
+Round-trip skills between Ramorie and `~/.claude/skills/`. Ramorie is the
+source of truth; filesystem mirrors it. Hash-based idempotency means
+re-running these commands is safe.
+
+```bash
+ramorie skill upload ~/.claude/skills/foo/SKILL.md     # single file → Ramorie
+ramorie skill upload ./bar.md --overwrite              # force replace on name collision
+ramorie skill sync                                     # bulk push ~/.claude/skills/
+ramorie skill sync --dir .claude/skills/ --overwrite   # project-level skills
+ramorie skill pull                                     # Ramorie → ~/.claude/skills/
+ramorie skill pull --dry-run                           # plan-only (no writes)
+ramorie skill diff                                     # +/- / ~ / = report
+ramorie skill diff -v                                  # also show in-sync rows
 ```
 
 ---
@@ -260,4 +277,4 @@ needed. `_meta.items_skipped_encrypted` reports the skip count.
 
 ---
 
-*Ramorie MCP v6.8.0. Source: https://github.com/kutbudev/ramorie-cli*
+*Ramorie MCP v6.9.0. Source: https://github.com/kutbudev/ramorie-cli*

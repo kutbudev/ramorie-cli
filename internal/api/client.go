@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -103,8 +104,19 @@ func (c *Client) makeAuthRequest(method, endpoint string, body interface{}) ([]b
 	return respBody, nil
 }
 
-// makeRequest makes an HTTP request and returns the response body
+// makeRequest makes an HTTP request and returns the response body.
+// Background-context wrapper around makeRequestWithContext for the
+// legacy call sites that don't have a context to pass.
 func (c *Client) makeRequest(method, endpoint string, body interface{}) ([]byte, error) {
+	return c.makeRequestWithContext(context.Background(), method, endpoint, body)
+}
+
+// makeRequestWithContext is the context-aware HTTP path. Lets callers
+// (e.g. the MCP telemetry goroutine in tools.go) bound the request with
+// a short deadline so a hung backend can't keep a daemon goroutine
+// parked. The shared HTTPClient.Timeout (30s) still applies as a
+// backstop.
+func (c *Client) makeRequestWithContext(ctx context.Context, method, endpoint string, body interface{}) ([]byte, error) {
 	url := c.BaseURL + endpoint
 
 	var reqBody io.Reader
@@ -116,7 +128,7 @@ func (c *Client) makeRequest(method, endpoint string, body interface{}) ([]byte,
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
-	req, err := http.NewRequest(method, url, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -3550,6 +3562,36 @@ func (c *Client) GenerateSkill(description string, projectID *string, autoSave b
 	return &response.Data, nil
 }
 
+// LogSkillUsage records a fire-and-forget "skill was used" event against
+// /v1/skills/{id}/used. The endpoint returns 204 on success and we don't
+// need the body, so we keep the helper minimal — callers (e.g. the
+// load_skill MCP handler) should swallow the error so a telemetry blip
+// never breaks the user-facing action.
+//
+// Valid actions today: "copy-markdown", "copy-mcp", "download-md",
+// "mcp-load". The server validates the action label and returns 400 on
+// an unknown one.
+func (c *Client) LogSkillUsage(skillID, action string) error {
+	return c.LogSkillUsageWithContext(context.Background(), skillID, action)
+}
+
+// LogSkillUsageWithContext is the context-aware variant of LogSkillUsage.
+// PR9 — Stuart B3 fix: the MCP daemon fires telemetry from a goroutine
+// that lives beyond the calling tool invocation; without a deadline a
+// hung backend leaves the goroutine (and its HTTP request) parked
+// indefinitely. Callers (load_skill MCP handler) pass a short
+// context.WithTimeout so a 5-second backend stall can't leak a goroutine
+// per skill load.
+//
+// HTTPClient.Timeout (30s) still acts as a backstop for callers using
+// the legacy LogSkillUsage entry point; this overload simply tightens
+// the deadline at the call site.
+func (c *Client) LogSkillUsageWithContext(ctx context.Context, skillID, action string) error {
+	body := map[string]string{"action": action}
+	_, err := c.makeRequestWithContext(ctx, "POST", fmt.Sprintf("/skills/%s/used", skillID), body)
+	return err
+}
+
 // ============================================================================
 // Project Analysis & Bootstrap
 // ============================================================================
@@ -3660,6 +3702,11 @@ type GeneratedSkillMarkdown struct {
 }
 
 // GenerateSkillMarkdownResponse is the response body for POST /v1/memories/generate-skill.
+//
+// PR8 adds ContextItemsUsed — populated on the smart-context path so the
+// CLI can render "12 items used" without re-counting. Zero on the legacy
+// path (`selected_ids` flow). Marshalled with omitempty so byte-identical
+// to pre-PR8 responses for legacy callers.
 type GenerateSkillMarkdownResponse struct {
 	Skill      GeneratedSkillMarkdown `json:"skill"`
 	AIModel    string                 `json:"ai_model"`
@@ -3668,6 +3715,70 @@ type GenerateSkillMarkdownResponse struct {
 		Input  int `json:"input"`
 		Output int `json:"output"`
 	} `json:"token_usage"`
+	ContextItemsUsed int `json:"context_items_used,omitempty"`
+}
+
+// GenerateSkillOptions is the PR8 input shape for the smart-context-aware
+// `skill generate` CLI command. Mirrors backend service.SkillGenerationRequest
+// minus the user/org IDs (those come from auth middleware, not the CLI args).
+type GenerateSkillOptions struct {
+	Goal            string
+	ProjectID       string
+	Model           string
+	Strategy        string // "relevant" (default) | "top" | "recent" | "manual"
+	ManualMemoryIDs []string
+	ManualTaskIDs   []string
+	MaxMemories     int
+	MaxTasks        int
+}
+
+// GenerateSkillSmart calls POST /v1/memories/generate-skill on the
+// PR8 smart-context path (strategy set). Distinct from the legacy
+// GenerateSkill(description, projectID, autoSave) wrapper above, which
+// targets the older /skills/generate JSON endpoint and stays in place
+// for backward compatibility.
+//
+// When opts.Strategy is empty it falls back to the legacy
+// "manual_memory_ids as selected_ids" path of /memories/generate-skill
+// so a caller can still drive the endpoint with a flat ID list.
+func (c *Client) GenerateSkillSmart(opts GenerateSkillOptions) (*GenerateSkillMarkdownResponse, error) {
+	body := map[string]interface{}{
+		"goal": opts.Goal,
+	}
+	if opts.ProjectID != "" {
+		body["project_id"] = opts.ProjectID
+	}
+	if opts.Model != "" {
+		body["model"] = opts.Model
+	}
+	if opts.Strategy != "" {
+		body["strategy"] = opts.Strategy
+		if len(opts.ManualMemoryIDs) > 0 {
+			body["manual_memory_ids"] = opts.ManualMemoryIDs
+		}
+		if len(opts.ManualTaskIDs) > 0 {
+			body["manual_task_ids"] = opts.ManualTaskIDs
+		}
+		if opts.MaxMemories > 0 {
+			body["max_memories"] = opts.MaxMemories
+		}
+		if opts.MaxTasks > 0 {
+			body["max_tasks"] = opts.MaxTasks
+		}
+	} else {
+		// Legacy fallback — old MemoryLoader path still works.
+		body["selected_ids"] = append(opts.ManualMemoryIDs, opts.ManualTaskIDs...)
+	}
+
+	respBody, err := c.makeRequest("POST", "/memories/generate-skill", body)
+	if err != nil {
+		return nil, err
+	}
+	var resp GenerateSkillMarkdownResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal generate-skill response: %w", err)
+	}
+	return &resp, nil
 }
 
 // GenerateSkillMarkdown calls POST /v1/memories/generate-skill with the
@@ -3876,4 +3987,107 @@ func (c *Client) GetActivityHistory(days, limit int, projectID string) ([]models
 		return nil, fmt.Errorf("failed to unmarshal activity history: %w", err)
 	}
 	return items, nil
+}
+
+// ============================================================================
+// PR7 — Skill filesystem sync (upload / sync-state / pull markdown)
+// ============================================================================
+
+// SkillUploadRequest is the body of POST /v1/skills/upload. SourcePath
+// is the filesystem mirror location (e.g. ~/.claude/skills/foo/SKILL.md);
+// the server stores it verbatim so a later `ramorie skill pull` can write
+// back to the same place. Overwrite=true lets the server replace an
+// existing skill with the same frontmatter name when the hashes differ —
+// without it, the server returns 409 Conflict.
+type SkillUploadRequest struct {
+	Markdown   string `json:"markdown"`
+	SourcePath string `json:"source_path,omitempty"`
+	Overwrite  bool   `json:"overwrite,omitempty"`
+}
+
+// SkillUploadResponse mirrors handlers.SkillUploadResponse. Action is
+// one of "noop", "created", "updated" so callers can render a useful
+// human-facing summary ("Synced 12 skills (3 new, 9 unchanged)…").
+type SkillUploadResponse struct {
+	ID       string    `json:"id"`
+	Action   string    `json:"action"`
+	SyncHash string    `json:"sync_hash"`
+	SyncedAt time.Time `json:"synced_at"`
+}
+
+// SkillSyncStateItem mirrors handlers.SkillSyncStateItem. LastModified
+// is the server's notion of "freshness" (memory.updated_at); compare it
+// against the local file's mtime to decide whether to pull or push.
+type SkillSyncStateItem struct {
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	SourcePath   *string    `json:"source_path,omitempty"`
+	SyncHash     *string    `json:"sync_hash,omitempty"`
+	SyncedAt     *time.Time `json:"synced_at,omitempty"`
+	LastModified time.Time  `json:"last_modified"`
+}
+
+// SkillSyncStateResponse is the GET /v1/skills/sync-state envelope. Count
+// is redundant with len(items) but lets clients early-out on empty state
+// without touching the slice.
+type SkillSyncStateResponse struct {
+	Items []SkillSyncStateItem `json:"items"`
+	Count int                  `json:"count"`
+}
+
+// UploadSkill pushes a single skill markdown to the server.
+// Endpoint: POST /v1/skills/upload. The server hashes the body and
+// either no-ops (hash match), updates (name collision + overwrite), or
+// inserts a new skill memory. Caller does not need to look up an existing
+// id first — the upload path is the only entry point.
+func (c *Client) UploadSkill(markdown, sourcePath string, overwrite bool) (*SkillUploadResponse, error) {
+	if strings.TrimSpace(markdown) == "" {
+		return nil, fmt.Errorf("markdown is required")
+	}
+	req := SkillUploadRequest{
+		Markdown:   markdown,
+		SourcePath: sourcePath,
+		Overwrite:  overwrite,
+	}
+	body, err := c.makeRequest("POST", "/skills/upload", req)
+	if err != nil {
+		return nil, fmt.Errorf("upload skill: %w", err)
+	}
+	var resp SkillUploadResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal upload response: %w", err)
+	}
+	return &resp, nil
+}
+
+// ListSkillsSyncState returns the per-skill sync metadata (hash + path +
+// timestamps) for the authenticated user. Used by `ramorie skill diff`
+// and the frontend SyncStatusBadge to compare local vs remote without
+// loading the full skill bodies.
+func (c *Client) ListSkillsSyncState() ([]SkillSyncStateItem, error) {
+	body, err := c.makeRequest("GET", "/skills/sync-state", nil)
+	if err != nil {
+		return nil, fmt.Errorf("list sync state: %w", err)
+	}
+	var resp SkillSyncStateResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal sync state: %w", err)
+	}
+	return resp.Items, nil
+}
+
+// PullSkillMarkdown fetches the bare markdown body for a skill, suitable
+// for writing straight to disk. Unlike LoadSkill (which returns a JSON
+// envelope), this endpoint emits text/markdown so the CLI can do a one-
+// line `os.WriteFile` without re-serialising.
+func (c *Client) PullSkillMarkdown(skillID string) (string, error) {
+	ident := strings.TrimSpace(skillID)
+	if ident == "" {
+		return "", fmt.Errorf("skill id is required")
+	}
+	body, err := c.makeRequest("GET", "/memories/"+ident+"/raw-markdown", nil)
+	if err != nil {
+		return "", fmt.Errorf("pull skill markdown: %w", err)
+	}
+	return string(body), nil
 }

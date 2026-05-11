@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -2629,6 +2631,28 @@ func handleLoadSkill(ctx context.Context, req *mcp.CallToolRequest, input LoadSk
 	resp, err := apiClient.LoadSkill(ident)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// PR9 — fire-and-forget telemetry. We log the `mcp-load` action so
+	// the dashboard "uses_per_action" breakdown can distinguish
+	// programmatic agent loads from web-clipboard copies. Errors are
+	// intentionally swallowed: a telemetry failure must never block the
+	// skill body from reaching the agent. The skill id from the render
+	// response is always a UUID even when `ident` was a name fragment.
+	//
+	// Stuart B3 fix: bound the goroutine with a short context deadline.
+	// The MCP daemon outlives any single tool call, so a hung backend
+	// (DNS stall, dropped TCP connection, …) would otherwise leak one
+	// parked goroutine per skill load. 5s is well under the 30s
+	// HTTPClient.Timeout backstop but plenty for a 204-only endpoint.
+	if resp.Skill.ID != "" {
+		go func(id string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := apiClient.LogSkillUsageWithContext(ctx, id, "mcp-load"); err != nil {
+				log.Printf("skill telemetry mcp-load failed: %v", err)
+			}
+		}(resp.Skill.ID)
 	}
 
 	// Two-content payload, mirroring how Claude Code returns file

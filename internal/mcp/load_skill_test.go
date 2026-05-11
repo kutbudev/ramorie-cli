@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -56,6 +57,13 @@ func TestHandleLoadSkill_HappyPath_ReturnsBodyAndEnvelope(t *testing.T) {
 
 	skillID := uuid.New().String()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// PR9 — handleLoadSkill fires a fire-and-forget POST to
+		// /skills/{id}/used in a goroutine. Accept it silently so the
+		// happy-path assertions below don't get flooded with errors.
+		if r.URL.Path == "/skills/"+skillID+"/used" && r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.URL.Path != "/memories/"+skillID+"/skill-render" {
 			t.Errorf("unexpected request path: %s", r.URL.Path)
 		}
@@ -110,6 +118,56 @@ func TestHandleLoadSkill_HappyPath_ReturnsBodyAndEnvelope(t *testing.T) {
 	}
 	if _, hasSource := envelope["source"]; !hasSource {
 		t.Errorf("envelope must include source")
+	}
+}
+
+// TestHandleLoadSkill_LogsMcpLoadAction (PR9) verifies that a
+// successful load_skill MCP call fires a fire-and-forget telemetry
+// ping to /skills/{id}/used with action=mcp-load. The test server
+// signals via a channel — we don't want a flaky sleep-based assertion.
+func TestHandleLoadSkill_LogsMcpLoadAction(t *testing.T) {
+	withInitializedSession(t)
+
+	skillID := uuid.New().String()
+	usedCh := make(chan map[string]interface{}, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/skills/"+skillID+"/used" && r.Method == http.MethodPost:
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			select {
+			case usedCh <- body:
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/memories/"+skillID+"/skill-render":
+			w.Header().Set("Content-Type", "application/json")
+			resp := api.SkillRenderResponse{
+				Skill: api.SkillRenderHeader{ID: skillID, Name: "deploy-prod"},
+				Body:  "# Deploy\n",
+				Meta:  map[string]interface{}{"tokens": float64(10)},
+			}
+			b, _ := json.Marshal(resp)
+			_, _ = w.Write(b)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	if _, _, err := handleLoadSkill(context.Background(), nil, LoadSkillInput{SkillID: skillID}); err != nil {
+		t.Fatalf("handleLoadSkill: %v", err)
+	}
+
+	select {
+	case body := <-usedCh:
+		if body["action"] != "mcp-load" {
+			t.Fatalf("expected action=mcp-load, got %+v", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for /skills/{id}/used telemetry ping")
 	}
 }
 
