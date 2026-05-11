@@ -117,7 +117,10 @@ Trigger keywords auto-detect type:
 - "pattern" / "convention" → pattern
 - Default → general
 
-Internally: Jaccard 0.60 word-set similarity check (distinct lowercase tokens) → if match returns existing memory ID + warning, else creates new. 0.60 captures meaningful same-topic duplicates (≈60% word overlap); was 0.85 pre-v7.0.1 but prod smoke test showed real duplicates at 0.77 slipping through.
+Internally:
+1. Backend find pipeline (cosine + rerank, FastMode) — semantic duplicate check at score ≥ 0.75. Catches paraphrased duplicates Jaccard misses (v7.0.2 smoke: 0.867 cosine match where Jaccard reported 0.0).
+2. Local Jaccard 0.60 fallback (no_indexed_corpus / find unavailable) — distinct lowercase token-set overlap. 0.60 from prod smoke test (real duplicates were slipping through at 0.77 with the old 0.85 cutoff).
+Both paths feed the envelope's match_source field ("semantic_find" | "jaccard") for observability.
 
 REQUIRED: content
 OPTIONAL: project, type_override`,

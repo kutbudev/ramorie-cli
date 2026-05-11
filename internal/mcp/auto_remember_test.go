@@ -392,6 +392,121 @@ func TestAutoRemember_NoMatch_Creates(t *testing.T) {
 	}
 }
 
+// TestAutoRemember_SemanticDuplicate_MatchesViaFind verifies the v7.0.2 semantic
+// dedupe gate: when the backend find pipeline (cosine + rerank, FastMode) returns
+// a hit whose score ≥ autoRememberFindScoreThreshold (0.75), auto_remember must
+// short-circuit to matched_existing with match_source="semantic_find" — WITHOUT
+// falling through to Jaccard and WITHOUT POSTing a new memory. Token sets here
+// deliberately diverge so Jaccard alone would miss the duplicate (the v7.0.2
+// motivating case: paraphrased memories scoring 0.867 via cosine while Jaccard
+// reported 0.0).
+func TestAutoRemember_SemanticDuplicate_MatchesViaFind(t *testing.T) {
+	withInitializedSession(t)
+
+	projectID := uuid.New()
+	existingID := uuid.New()
+	createCalls := 0
+	findCalls := 0
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/projects"):
+			b, _ := json.Marshal([]stubProject{{ID: projectID, Name: "PR10Test"}})
+			_, _ = w.Write(b)
+		case r.URL.Path == "/memory/find" && r.Method == http.MethodPost:
+			findCalls++
+			// Sanity: FastMode must be set so backend skips HyDE (saves 5-10s).
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["fast_mode"] != true {
+				t.Errorf("auto_remember find call must pass fast_mode=true; got body=%+v", body)
+			}
+			// Return a top hit at 0.85 — above 0.75 threshold, simulating the
+			// 0.867 paraphrase match from the v7.0.2 smoke test.
+			b, _ := json.Marshal(map[string]interface{}{
+				"items": []map[string]interface{}{{
+					"id":         existingID.String(),
+					"type":       "preference",
+					"title":      "yarn preference",
+					"preview":    "always reach for yarn",
+					"score":      0.85,
+					"created_at": "2026-05-01T00:00:00Z",
+				}},
+				"_meta": map[string]interface{}{
+					"total":              1,
+					"returned":           1,
+					"actual_tokens_est":  10,
+					"applied_scope":      "project",
+					"ranking_mode":       "weighted",
+					"latency_ms":         42,
+					"semantic_available": true,
+				},
+			})
+			_, _ = w.Write(b)
+		case r.URL.Path == "/memories" && r.Method == http.MethodGet:
+			// Jaccard fallback should NOT be reached on the semantic hit path,
+			// but stub a benign empty list in case future test reordering hits
+			// it — keeps the failure mode "wrong path taken" not "panic".
+			_, _ = w.Write([]byte(`{"memories":[],"total":0,"limit":100,"offset":0}`))
+		case r.URL.Path == "/memories" && r.Method == http.MethodPost:
+			createCalls++
+			b, _ := json.Marshal(map[string]interface{}{
+				"id":         uuid.New().String(),
+				"project_id": projectID.String(),
+				"content":    "should-not-be-created",
+			})
+			_, _ = w.Write(b)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	// Content is a paraphrase — token overlap with the "existing" memory is low
+	// enough that Jaccard alone would not match. The find mock returns a 0.85
+	// cosine score, which is the only signal that should drive the match.
+	res, _, err := handleAutoRemember(context.Background(), nil, AutoRememberInput{
+		Content: "I tend to reach for yarn when installing packages",
+		Project: "PR10Test",
+	})
+	if err != nil {
+		t.Fatalf("handleAutoRemember: %v", err)
+	}
+	if findCalls != 1 {
+		t.Errorf("expected exactly 1 POST /memory/find call (semantic gate); got %d", findCalls)
+	}
+	if createCalls != 0 {
+		t.Fatalf("semantic_find match must NOT POST /memories; got %d call(s)", createCalls)
+	}
+
+	envelopeText := extractText(t, res, 1)
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(envelopeText), &envelope); err != nil {
+		t.Fatalf("envelope slot must be JSON: %v\n%s", err, envelopeText)
+	}
+	if envelope["action"] != "matched_existing" {
+		t.Errorf("action: got %v, want matched_existing", envelope["action"])
+	}
+	if envelope["memory_id"] != existingID.String() {
+		t.Errorf("memory_id: got %v, want %s", envelope["memory_id"], existingID)
+	}
+	if envelope["match_source"] != "semantic_find" {
+		t.Errorf("match_source: got %v, want semantic_find (Jaccard fallback would be 'jaccard')", envelope["match_source"])
+	}
+	// similarity surfaced should be the find score (0.85), not a Jaccard value.
+	sim, _ := envelope["similarity"].(float64)
+	if sim < 0.75 {
+		t.Errorf("similarity %.4f must be ≥ threshold 0.75 to have triggered the match", sim)
+	}
+
+	statusText := extractText(t, res, 0)
+	if !strings.Contains(statusText, "Semantic duplicate") {
+		t.Errorf("slot 0 should announce semantic duplicate, got %q", statusText)
+	}
+}
+
 // TestAutoRemember_TypeOverride_BypassesInference verifies that an explicit
 // type_override skips the keyword classifier — useful when the agent already
 // knows the classification and wants deterministic typing.

@@ -4627,6 +4627,15 @@ func protocolReminderForOp(op string) string {
 // remember() directly.
 const autoRememberSimilarityThreshold = 0.60
 
+// autoRememberFindScoreThreshold is the cosine-fusion score (FindMemories
+// pipeline output) at which auto_remember treats a hit as a semantic duplicate
+// and short-circuits to matched_existing. Set to 0.75 from the v7.0.2 smoke
+// test where paraphrased same-topic memories scored 0.85+ via cosine+rerank
+// while Jaccard reported 0.0 (token sets didn't overlap). 0.75 sits below
+// observed true-duplicate scores and well above incidental hits, leaving
+// margin without re-tuning if rerank weights drift.
+const autoRememberFindScoreThreshold = 0.75
+
 // inferAutoRememberType is a thin wrapper over DetectMemoryType. It mirrors the
 // auto-detection rules documented in the auto_remember tool description so
 // callers/tests have a single reference point. Kept separate so we can add
@@ -4686,8 +4695,53 @@ func handleAutoRemember(ctx context.Context, req *mcp.CallToolRequest, input Aut
 		return nil, nil, err
 	}
 
-	// Duplicate check at the auto_remember-specific 0.60 threshold. We rely on
-	// the existing Jaccard-based path (similarity.go); auto_remember is the
+	// PR10 v7.0.2: Semantic dedupe via find pipeline before local Jaccard.
+	// Catches paraphrased duplicates that token-set Jaccard misses
+	// (smoke test: 0.867 cosine match for same-topic memory missed by Jaccard 0.0).
+	// FastMode skips HyDE expansion — rerank+cosine alone is enough for dedupe,
+	// saves 5-10s cold latency.
+	findResp, findErr := apiClient.FindMemories(api.FindMemoriesOptions{
+		Term:     content,
+		Project:  projectIdent,
+		Limit:    1,
+		FastMode: true,
+	})
+	if findErr == nil && len(findResp.Items) > 0 && findResp.Items[0].Score >= autoRememberFindScoreThreshold {
+		top := findResp.Items[0]
+		memType := input.TypeOverride
+		if memType == "" {
+			memType = inferAutoRememberType(content)
+		}
+		envelope := map[string]interface{}{
+			"action":       "matched_existing",
+			"memory_id":    top.ID,
+			"type":         memType,
+			"similarity":   top.Score,
+			"match_source": "semantic_find",
+			"next_action":  "continue — protocol satisfied",
+			"warning": fmt.Sprintf("⚠ Semantic duplicate (find score %.2f) — skipping create. "+
+				"Pass type_override or call remember(force=true) to save anyway.",
+				top.Score),
+			"_meta": map[string]interface{}{
+				"protocol_reminder": protocolReminderForOp("auto_remember_matched"),
+			},
+		}
+		envelopeJSON, jerr := json.MarshalIndent(envelope, "", "  ")
+		if jerr != nil {
+			return nil, nil, fmt.Errorf("marshal auto_remember envelope: %w", jerr)
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf(
+					"⚠ Semantic duplicate: %s (find score %.2f). Not creating.",
+					top.ID, top.Score)},
+				&mcp.TextContent{Text: string(envelopeJSON)},
+			},
+		}, nil, nil
+	}
+
+	// Fallback: Jaccard local check (handles no_indexed_corpus / find unavailable).
+	// auto_remember-specific 0.60 threshold via similarity.go. auto_remember is the
 	// only path that *blocks* on similarity — handleRemember only warns.
 	memories, listErr := apiClient.ListMemories(projectID, "")
 	if listErr == nil {
@@ -4699,11 +4753,12 @@ func handleAutoRemember(ctx context.Context, req *mcp.CallToolRequest, input Aut
 				memType = inferAutoRememberType(content)
 			}
 			envelope := map[string]interface{}{
-				"action":      "matched_existing",
-				"memory_id":   top.MemoryID,
-				"type":        memType,
-				"similarity":  top.Similarity,
-				"next_action": "continue — protocol satisfied",
+				"action":       "matched_existing",
+				"memory_id":    top.MemoryID,
+				"type":         memType,
+				"similarity":   top.Similarity,
+				"match_source": "jaccard",
+				"next_action":  "continue — protocol satisfied",
 				"warning": fmt.Sprintf("⚠ Similar memory exists (similarity %.2f). "+
 					"Returning existing memory_id without creating duplicate. "+
 					"Pass type_override or call remember(force=true) to save anyway.",
