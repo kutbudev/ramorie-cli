@@ -4,7 +4,7 @@
 BINARY_NAME = ramorie
 BUILD_DIR = ./bin
 VERSION = $(shell git describe --tags --dirty --always 2>/dev/null || echo "dev")
-LDFLAGS = -ldflags "-X main.Version=$(VERSION)"
+LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X github.com/kutbudev/ramorie-cli/internal/version.Version=$(VERSION)"
 
 # Build the CLI binary for current platform
 build:

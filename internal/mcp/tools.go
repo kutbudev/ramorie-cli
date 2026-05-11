@@ -17,6 +17,7 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	"github.com/kutbudev/ramorie-cli/internal/models"
+	"github.com/kutbudev/ramorie-cli/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -214,7 +215,7 @@ The type is auto-detected from content:
 - "prefer X" → preference
 - "todo: X" / "later: X" → auto-creates TASK instead of memory
 
-💡 Best Practice: Always call recall(term) BEFORE remember() to check existing knowledge.
+💡 Best Practice: Always call find(term) BEFORE remember() to check existing knowledge.
 
 Example: remember(content: "API uses JWT authentication", project: "my-project")
 Example with force: remember(content: "...", project: "...", force: true)`,
@@ -996,9 +997,9 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	if !input.Full {
 		// Compact mode: one next-action nudge, nothing else. Directives live in the
 		// MCP server instructions block (server.go) — no duplication here.
-		next := "Call recall(term, project) before responding; then remember(content, project) after learning something."
+		next := "Call find(term, project) before responding; then remember(content, project) after durable learning."
 		if detected != nil {
-			next = fmt.Sprintf("Use project=%q. Call recall(term, project) before responding; remember(content, project) after learning.", detected.Name)
+			next = fmt.Sprintf("Use project=%q. Call find(term, project) before responding; remember(content, project) after durable learning.", detected.Name)
 		}
 		result["next_action"] = next
 		return mustTextResult(result), nil, nil
@@ -1007,17 +1008,17 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	// Legacy verbose mode: full guidance payload (kept for agents that explicitly opt in).
 	result["recommended_actions"] = []map[string]interface{}{
 		{"priority": 1, "action": "list_projects", "reason": "See available projects"},
-		{"priority": 2, "action": "recall", "reason": "Check prior context", "example": "recall(term=\"<topic>\", project=\"<project>\")"},
-		{"priority": 3, "action": "work", "reason": "Do the task using recalled context"},
+		{"priority": 2, "action": "find", "reason": "Check prior context", "example": "find(term=\"<topic>\", project=\"<project>\")"},
+		{"priority": 3, "action": "work", "reason": "Do the task using retrieved context"},
 		{"priority": 4, "action": "remember/task", "reason": "Persist learnings", "example": "remember(content=\"...\", project=\"<project>\")"},
 	}
 	result["workflow_pattern"] = map[string]interface{}{
 		"1_setup":   "setup_agent (DONE)",
 		"2_context": "list_projects",
-		"3_recall":  "recall(term) BEFORE acting",
+		"3_find":    "find(term) BEFORE acting",
 		"4_work":    "do the work",
 		"5_save":    "remember/task",
-		"critical":  "Always recall BEFORE remember to avoid duplicates",
+		"critical":  "Always find BEFORE remember to avoid duplicates",
 	}
 	if lastProject := GetSessionLastProjectID(); lastProject != nil {
 		if projects, lerr := apiClient.ListProjects(""); lerr == nil {
@@ -1035,7 +1036,7 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 	result["workflow_guide"] = map[string]interface{}{
 		"step_1": "setup_agent called",
 		"step_2": "list_projects",
-		"step_3": "recall(term) BEFORE remember()",
+		"step_3": "find(term) BEFORE remember()",
 		"step_4": "remember(content) or task(create, project, description)",
 	}
 
@@ -1064,9 +1065,9 @@ func handleListProjects(ctx context.Context, req *mcp.CallToolRequest, input Lis
 			items = append(items, item)
 		}
 		response = map[string]interface{}{
-			"items":   items,
-			"count":   len(items),
-			"_hint":   "Pass verbose:true for full metadata (org id, description, timestamps)",
+			"items":    items,
+			"count":    len(items),
+			"_hint":    "Pass verbose:true for full metadata (org id, description, timestamps)",
 			"_context": getContextString(),
 		}
 	}
@@ -1597,7 +1598,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 						"1. Use the existing memory if it covers the same knowledge, OR\n"+
 						"2. Call remember(..., force=true) to save anyway", len(similarMemories)),
 					"_action": "Either skip saving (duplicate) or use force=true to save anyway",
-					"_hint":   "💡 Best practice: Always call recall(term) BEFORE remember() to check existing knowledge",
+					"_hint":   "💡 Best practice: Always call find(term) BEFORE remember() to check existing knowledge",
 					"_meta":   map[string]interface{}{"protocol_reminder": protocolReminderForOp("remember")},
 				}), nil, nil
 			}
@@ -1903,7 +1904,7 @@ type RecallInput struct {
 	IncludeRelations bool    `json:"include_relations,omitempty"`
 	Limit            float64 `json:"limit,omitempty"`
 	MinScore         float64 `json:"min_score,omitempty"`
-	Cursor           string  `json:"cursor,omitempty"` // Pagination cursor
+	Cursor           string  `json:"cursor,omitempty"`  // Pagination cursor
 	Purpose          string  `json:"purpose,omitempty"` // coding, research, review
 
 	// Knowledge graph integration
@@ -2552,9 +2553,9 @@ func handleImportContextPack(ctx context.Context, req *mcp.CallToolRequest, inpu
 // rows it didn't see.
 
 type LoadContextPackInput struct {
-	PackID          string   `json:"pack_id"`           // REQUIRED — UUID or unique pack name
-	Mode            string   `json:"mode,omitempty"`    // "manifest" (default) | "full"
-	Format          string   `json:"format,omitempty"`  // full mode: xml (default) | json | markdown
+	PackID          string   `json:"pack_id"`          // REQUIRED — UUID or unique pack name
+	Mode            string   `json:"mode,omitempty"`   // "manifest" (default) | "full"
+	Format          string   `json:"format,omitempty"` // full mode: xml (default) | json | markdown
 	BudgetTokens    int      `json:"budget_tokens,omitempty"`
 	Sections        []string `json:"sections,omitempty"` // memories | tasks | contexts (default all)
 	IncludeArchived bool     `json:"include_archived,omitempty"`
@@ -2891,57 +2892,31 @@ type toolDef struct {
 
 func ToolDefinitions() []toolDef {
 	return []toolDef{
-		// ============================================================================
-		// 🔴 ESSENTIAL (8 tools)
-		// ============================================================================
 		{
 			Name:        "setup_agent",
-			Description: "🔴 ESSENTIAL | Initialize agent session. ⚠️ CALL THIS FIRST! Provide your agent name and model for tracking.",
+			Description: "🔴 REQUIRED FIRST CALL every session. Returns cwd-detected project context, top project decisions, active preferences, task stats, and next_action.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"agent_name":  map[string]interface{}{"type": "string", "description": "Your agent identifier (e.g., 'claude-code', 'cursor', 'gemini')"},
 					"agent_model": map[string]interface{}{"type": "string", "description": "Model being used (e.g., 'claude-opus-4-5-20250514', 'gpt-4')"},
+					"full":        map[string]interface{}{"type": "boolean", "description": "Include larger context injection. Default false."},
 				},
 			},
 		},
-		{Name: "list_projects", Description: "🔴 ESSENTIAL | List all projects."},
-		{Name: "list_tasks", Description: "🔴 ESSENTIAL | List/search/prioritize tasks. Supports query, next_priority params."},
-		{Name: "create_task", Description: "🔴 ESSENTIAL | Create a new task."},
-		{Name: "remember", Description: "🔴 ESSENTIAL | Ultra-simple memory storage with auto-detection."},
-		{Name: "recall", Description: "🔴 ESSENTIAL | Search memories (filter type='skill' for learned procedures)."},
-		{Name: "load_context_pack", Description: "🔵 ESSENTIAL | Load context pack INDEX (titles + tokens + tags). Default mode=manifest — bodies fetched on demand via get_memory(id) / get_task(id). Use mode=full only for small packs."},
-		{Name: "load_skill", Description: "🔵 ESSENTIAL | Load skill markdown into agent context. Returns Claude Code-format skill (frontmatter + body) ready to apply. Use when agent needs procedural how-to."},
-		{Name: "surface_skills", Description: "🟡 COMMON | Find relevant procedural skills based on context."},
-		// ============================================================================
-		// 🟡 COMMON (12 tools)
-		// ============================================================================
-		{Name: "get_task", Description: "🟡 COMMON | Get task details including notes and metadata."},
-		{Name: "manage_task", Description: "🟡 COMMON | Start/complete/stop/update progress on a task. Actions: start, complete, stop, progress."},
-		{Name: "add_task_note", Description: "🟡 COMMON | Add a note/annotation to a task."},
-		{Name: "list_memories", Description: "🟡 COMMON | List memories with filtering."},
-		{Name: "get_memory", Description: "🟡 COMMON | Get memory details by ID."},
-		{Name: "list_context_packs", Description: "🟡 COMMON | List all context packs."},
-		{Name: "get_context_pack", Description: "🟡 COMMON | Get detailed context pack info."},
-		{Name: "manage_context_pack", Description: "🟡 COMMON | Manage context packs. Actions: create, update, link_memory, link_task, link_memories, link_tasks, unlink_memories, unlink_tasks, clone."},
-		{Name: "create_decision", Description: "🟡 COMMON | Record an architectural decision (ADR)."},
-		{Name: "list_decisions", Description: "🟡 COMMON | List architectural decisions."},
+		{Name: "list_projects", Description: "🔴 ESSENTIAL | List all accessible projects."},
+		{Name: "remember", Description: "🔴 ESSENTIAL | Deliberately store durable memory. Use for decisions, bug fixes, patterns, preferences, and meaningful references."},
+		{Name: "find", Description: "🔴 ESSENTIAL | Hybrid memory + decision retrieval. Default agent discovery path; supports wider limits and token budgets."},
+		{Name: "recall", Description: "🟡 LEGACY | Lexical search fallback. Prefer find for agent memory discovery."},
+		{Name: "task", Description: "🔴 ESSENTIAL | Unified task management. Actions: list, get, create, start, complete, stop, progress, note, move."},
+		{Name: "memory", Description: "🟡 COMMON | List/get memory details or generate skill memories from a goal."},
 		{Name: "get_stats", Description: "🟡 COMMON | Get task statistics and completion rates."},
 		{Name: "get_agent_activity", Description: "🟡 COMMON | Get recent agent activity timeline."},
-		// ============================================================================
-		// 🟢 ADVANCED (9 tools)
-		// ============================================================================
+		{Name: "surface_context", Description: "🟡 COMMON | Pull file/domain/pattern-scoped context before editing code."},
 		{Name: "create_project", Description: "🟢 ADVANCED | Create a new project."},
-		{Name: "move_task", Description: "🟢 ADVANCED | Move a task to a different project."},
 		{Name: "manage_subtasks", Description: "🟢 ADVANCED | Create/list/complete/update subtasks."},
-		{Name: "manage_dependencies", Description: "🟢 ADVANCED | Add/list/remove task dependencies."},
-		{Name: "manage_plan", Description: "🟢 ADVANCED | Create/status/list/apply/cancel multi-agent plans."},
-		{Name: "list_organizations", Description: "🟢 ADVANCED | List user's organizations."},
-		{Name: "consolidate_memories", Description: "🟢 ADVANCED | Trigger memory consolidation (scores, promotes, archives)."},
-		{Name: "cleanup_memories", Description: "🟢 ADVANCED | Clean up TTL-expired memories."},
-		{Name: "export_context_pack", Description: "🟢 ADVANCED | Export context pack as portable JSON bundle."},
-		{Name: "import_context_pack", Description: "🟢 ADVANCED | Import context pack bundle with all linked items."},
-		{Name: "analyze_project", Description: "🟢 ADVANCED | Analyze codebase and generate AI-powered context suggestions."},
+		{Name: "entity", Description: "🟢 ADVANCED | Knowledge graph entity operations."},
+		{Name: "admin", Description: "🟢 ADVANCED | Administrative maintenance: consolidation, cleanup, orgs, import/export, planning, analysis."},
 	}
 }
 
@@ -3375,7 +3350,7 @@ func normalizePriority(s string) string {
 func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",
-		"version": "3.23.0",
+		"version": version.Version,
 	}
 
 	// Compact mode always includes task stats (3 numbers — cheap signal).
@@ -3407,12 +3382,15 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 	}
 
 	if !full {
+		result["project_decisions"] = projectDecisionContext(client, detectedProjectID, 30)
+
 		// Compact mode: no context injection, no recommendations.
 		return result, nil
 	}
 
 	// Full mode: include context injection.
 	contextInjection := map[string]interface{}{}
+	result["project_decisions"] = projectDecisionContext(client, detectedProjectID, 30)
 
 	// Recent memories — scoped to detected project when available. 3 items, 120-char preview.
 	if memories, err := client.ListMemories(detectedProjectID, ""); err == nil && len(memories) > 0 {
@@ -3499,6 +3477,113 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 	result["next_steps"] = []string{"Ready — use task(action=list, project, next_priority=true)"}
 
 	return result, nil
+}
+
+func projectDecisionContext(client *api.Client, projectID string, limit int) []map[string]interface{} {
+	if client == nil || strings.TrimSpace(projectID) == "" {
+		return []map[string]interface{}{}
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	decisions := make([]models.Memory, 0, limit)
+	const pageSize = 100
+	const maxPages = 10
+	for page := 1; page <= maxPages; page++ {
+		memories, hasMore, err := client.ListMemoriesPage(projectID, "", page, pageSize)
+		if err != nil {
+			break
+		}
+		for _, m := range memories {
+			if strings.EqualFold(strings.TrimSpace(m.Type), "decision") {
+				decisions = append(decisions, m)
+			}
+		}
+		if !hasMore {
+			break
+		}
+	}
+	if len(decisions) == 0 {
+		return []map[string]interface{}{}
+	}
+	sort.SliceStable(decisions, func(i, j int) bool {
+		ii := memoryImportance(decisions[i])
+		ij := memoryImportance(decisions[j])
+		if ii != ij {
+			return ii > ij
+		}
+		if decisions[i].AccessCount != decisions[j].AccessCount {
+			return decisions[i].AccessCount > decisions[j].AccessCount
+		}
+		return decisions[i].UpdatedAt.After(decisions[j].UpdatedAt)
+	})
+	if len(decisions) > limit {
+		decisions = decisions[:limit]
+	}
+
+	out := make([]map[string]interface{}, 0, len(decisions))
+	for _, m := range decisions {
+		content := decryptMemoryContent(&m)
+		title, preview := compactMemoryText(content, 160, 700)
+		entry := map[string]interface{}{
+			"id":           m.ID.String(),
+			"type":         m.Type,
+			"title":        title,
+			"preview":      preview,
+			"access_count": m.AccessCount,
+			"updated_at":   m.UpdatedAt,
+		}
+		if m.Importance != nil {
+			entry["importance"] = *m.Importance
+		}
+		if m.Project != nil {
+			entry["project"] = m.Project.Name
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func memoryImportance(m models.Memory) float64 {
+	if m.Importance == nil {
+		return 0.5
+	}
+	return *m.Importance
+}
+
+func compactMemoryText(content string, titleMax, previewMax int) (string, string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "", ""
+	}
+	content = strings.TrimPrefix(content, `<parameter name="content">`)
+	content = strings.TrimSuffix(content, `</parameter>`)
+	content = strings.TrimSpace(content)
+	lines := strings.SplitN(content, "\n", 2)
+	title := strings.TrimSpace(strings.TrimLeft(lines[0], "# "))
+	if len(title) > titleMax {
+		title = title[:titleMax] + "..."
+	}
+	preview := content
+	if len(lines) > 1 && strings.TrimSpace(lines[1]) != "" {
+		preview = strings.TrimSpace(lines[1])
+	}
+	preview = compactFirstNLines(preview, 30)
+	if len(preview) > previewMax {
+		preview = preview[:previewMax] + "..."
+	}
+	return title, preview
+}
+
+func compactFirstNLines(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(strings.Join(lines[:n], "\n")) + "\n..."
 }
 
 // ============================================================================
@@ -4706,7 +4791,7 @@ func handleSurfaceContext(ctx context.Context, req *mcp.CallToolRequest, input S
 func protocolReminderForOp(op string) string {
 	switch op {
 	case "find":
-		return "If subagent return detected → auto_remember() required next."
+		return "If subagent return detected → remember() with a context-rich summary."
 	case "remember", "auto_remember", "auto_remember_created":
 		return "Saved. Continue without asking user permission for future saves."
 	case "auto_remember_matched":
@@ -4714,9 +4799,9 @@ func protocolReminderForOp(op string) string {
 	case "task":
 		return "Task tracked. If decision/bug_fix learned from this task → remember()."
 	case "memory", "surface_skills":
-		return "Ramorie protocol: subagent return → find() → auto_remember()."
+		return "Ramorie protocol: subagent return → find() → remember()."
 	default:
-		return "Ramorie protocol: subagent return → find() → auto_remember()."
+		return "Ramorie protocol: subagent return → find() → remember()."
 	}
 }
 
@@ -4761,15 +4846,15 @@ type AutoRememberInput struct {
 
 // handleAutoRemember is the atomic find()+remember() entry point. It exists so
 // agents don't have to chain two calls (and inevitably skip one). Flow:
-//   1. Resolve project (explicit → cwd auto-detect).
-//   2. Run a similarity check via existing checkForSimilarMemories (Jaccard).
-//      The 0.60 threshold (autoRememberSimilarityThreshold) catches meaningful
-//      same-topic duplicates that 0.85 missed in prod (PR10 v7.0.0 smoke test).
-//   3. If a near-duplicate exists → return action="matched_existing" with the
-//      existing memory id. No new memory is created. This is the canonical
-//      dedupe path — callers wanting unconditional save should use remember()
-//      directly (which only warns, never blocks).
-//   4. Otherwise → call CreateMemoryWithOptionsFull and return action="created".
+//  1. Resolve project (explicit → cwd auto-detect).
+//  2. Run a similarity check via existing checkForSimilarMemories (Jaccard).
+//     The 0.60 threshold (autoRememberSimilarityThreshold) catches meaningful
+//     same-topic duplicates that 0.85 missed in prod (PR10 v7.0.0 smoke test).
+//  3. If a near-duplicate exists → return action="matched_existing" with the
+//     existing memory id. No new memory is created. This is the canonical
+//     dedupe path — callers wanting unconditional save should use remember()
+//     directly (which only warns, never blocks).
+//  4. Otherwise → call CreateMemoryWithOptionsFull and return action="created".
 //
 // Response is a two-content payload:
 //   - Slot 0: plain text status line so agents reading only the first content

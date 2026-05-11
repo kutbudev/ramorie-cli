@@ -19,29 +19,28 @@ const SessionStartText = `🧠 RAMORIE — Persistent Memory Protocol v1.0
 REQUIRED behavior (not optional, not "best practice"):
 
 1. **FIND FIRST** — call mcp__ramorie__find(term) BEFORE responding to user.
-2. **REMEMBER ALWAYS** — call mcp__ramorie__remember (or auto_remember) when:
+2. **REMEMBER ALWAYS** — call mcp__ramorie__remember when:
    - A decision is made → type=decision
    - A bug is fixed → type=bug_fix
    - A pattern repeats → type=pattern
    - User states preference → type=preference
-   - Sub-agent returns with work product → IMMEDIATELY after Agent tool result
+   - Sub-agent returns with meaningful work product → IMMEDIATELY after Agent tool result
 3. **NEVER ASK** — do not request user permission to remember. Save proactively.
 4. **DUPLICATE CHECK** — find() before remember() to avoid near-duplicates (>0.9 similarity).
 
-When Agent (sub-agent) tool returns:
+When Agent (sub-agent) returns meaningful work product:
 → Your IMMEDIATE next action is: find() duplicate check → remember() if novel.
 → NOT optional. NOT "later". NOW.
 
 Tools available:
 - find(term, project?) — hybrid retrieval (HyDE + rerank + entity + propositional)
-- remember(content, project) — atomic save (type auto-detected)
-- auto_remember(content, project?) — find+remember in one call (PREFERRED)
+- remember(content, project) — deliberate durable memory write (type auto-detected)
 - task(action, ...) — task ops if work deferred
 - setup_agent — FIRST call every session
 
 TR özet: Find ÖNCE. Karar / bug fix / pattern / preference ANINDA remember.
-Sub-agent dönerse hemen remember. Soru sormadan kaydet. Duplicate kontrolü için
-önce find() çağır.
+Sub-agent anlamlı iş ürünü döndürürse remember ile kaydet. Soru sormadan kaydet.
+Duplicate kontrolü için önce find() çağır.
 `
 
 // EnglishSessionStartText is an English-only variant for surfaces or users
@@ -52,23 +51,22 @@ const EnglishSessionStartText = `🧠 RAMORIE — Persistent Memory Protocol v1.
 REQUIRED behavior (not optional, not "best practice"):
 
 1. **FIND FIRST** — call mcp__ramorie__find(term) BEFORE responding to user.
-2. **REMEMBER ALWAYS** — call mcp__ramorie__remember (or auto_remember) when:
+2. **REMEMBER ALWAYS** — call mcp__ramorie__remember when:
    - A decision is made → type=decision
    - A bug is fixed → type=bug_fix
    - A pattern repeats → type=pattern
    - User states preference → type=preference
-   - Sub-agent returns with work product → IMMEDIATELY after Agent tool result
+   - Sub-agent returns with meaningful work product → IMMEDIATELY after Agent tool result
 3. **NEVER ASK** — do not request user permission to remember. Save proactively.
 4. **DUPLICATE CHECK** — find() before remember() to avoid near-duplicates (>0.9 similarity).
 
-When Agent (sub-agent) tool returns:
+When Agent (sub-agent) returns meaningful work product:
 → Your IMMEDIATE next action is: find() duplicate check → remember() if novel.
 → NOT optional. NOT "later". NOW.
 
 Tools available:
 - find(term, project?) — hybrid retrieval (HyDE + rerank + entity + propositional)
-- remember(content, project) — atomic save (type auto-detected)
-- auto_remember(content, project?) — find+remember in one call (PREFERRED)
+- remember(content, project) — deliberate durable memory write (type auto-detected)
 - task(action, ...) — task ops if work deferred
 - setup_agent — FIRST call every session
 `
@@ -76,7 +74,7 @@ Tools available:
 // PostAgentToolReminder is the additionalContext injected after the Agent
 // (sub-agent) tool returns. Short by design — the longer protocol already
 // arrived at SessionStart.
-const PostAgentToolReminder = `RAMORIE PROTOCOL: Sub-agent finished. NEXT ACTION: auto_remember() to save work product. NOT optional.`
+const PostAgentToolReminder = `RAMORIE PROTOCOL: Sub-agent finished. If it produced meaningful durable work, run find() then remember() with a context-rich summary.`
 
 // SubagentStopReminder is emitted on the SubagentStop event so the main agent
 // double-checks its persistence step before resuming.

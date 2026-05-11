@@ -26,14 +26,14 @@ import (
 // to the table can't silently drift the nudges agents read on every response.
 func TestProtocolReminderForOp(t *testing.T) {
 	cases := map[string]string{
-		"find":                  "If subagent return detected → auto_remember() required next.",
+		"find":                  "If subagent return detected → remember() with a context-rich summary.",
 		"remember":              "Saved. Continue without asking user permission for future saves.",
 		"auto_remember":         "Saved. Continue without asking user permission for future saves.",
 		"auto_remember_created": "Saved. Continue without asking user permission for future saves.",
 		"auto_remember_matched": "Memory already exists — protocol satisfied. No save needed.",
 		"task":                  "Task tracked. If decision/bug_fix learned from this task → remember().",
-		"memory":                "Ramorie protocol: subagent return → find() → auto_remember().",
-		"unknown_op":            "Ramorie protocol: subagent return → find() → auto_remember().",
+		"memory":                "Ramorie protocol: subagent return → find() → remember().",
+		"unknown_op":            "Ramorie protocol: subagent return → find() → remember().",
 	}
 	for op, want := range cases {
 		if got := protocolReminderForOp(op); got != want {
@@ -166,9 +166,11 @@ func TestAutoRemember_DuplicateDetection_MatchesExisting(t *testing.T) {
 // a memory whose Jaccard similarity is in the (0.60, 0.85) band — duplicates
 // that the old 0.85 threshold missed in prod (PR10 smoke test, ≈0.77) — must
 // now be caught and short-circuit to matched_existing. Fixture math:
-//   existing tokens: {alpha, beta, gamma, delta, epsilon} (5)
-//   new tokens:      {alpha, beta, gamma, delta, zeta}    (5)
-//   intersection = 4, union = 6 → Jaccard = 4/6 ≈ 0.667
+//
+//	existing tokens: {alpha, beta, gamma, delta, epsilon} (5)
+//	new tokens:      {alpha, beta, gamma, delta, zeta}    (5)
+//	intersection = 4, union = 6 → Jaccard = 4/6 ≈ 0.667
+//
 // This is ≥ 0.60 (matches) and < 0.85 (would have missed pre-v7.0.1).
 func TestAutoRemember_Jaccard_0_60_BoundaryCase(t *testing.T) {
 	withInitializedSession(t)
@@ -241,9 +243,11 @@ func TestAutoRemember_Jaccard_0_60_BoundaryCase(t *testing.T) {
 // TestAutoRemember_Jaccard_BelowThreshold_Creates verifies the lower bound: a
 // memory whose Jaccard similarity is < 0.60 (incidental overlap, not a true
 // duplicate) must fall through to creation. Fixture math:
-//   existing tokens: {alpha, beta, gamma, delta, epsilon} (5)
-//   new tokens:      {alpha, beta, omega, sigma, kappa}   (5)
-//   intersection = 2, union = 8 → Jaccard = 2/8 = 0.25
+//
+//	existing tokens: {alpha, beta, gamma, delta, epsilon} (5)
+//	new tokens:      {alpha, beta, omega, sigma, kappa}   (5)
+//	intersection = 2, union = 8 → Jaccard = 2/8 = 0.25
+//
 // This guards against over-aggressive dedupe after the 0.85 → 0.60 drop.
 func TestAutoRemember_Jaccard_BelowThreshold_Creates(t *testing.T) {
 	withInitializedSession(t)

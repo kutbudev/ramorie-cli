@@ -8,6 +8,7 @@ import (
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/protocol"
+	"github.com/kutbudev/ramorie-cli/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -32,7 +33,7 @@ func ServeStdio(client *api.Client) error {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "ramorie",
-			Version: "2.4.0",
+			Version: version.Version,
 		},
 		&mcp.ServerOptions{
 			CompletionHandler: completionHandler,
@@ -181,4 +182,3 @@ func checkSessionInit(toolName string) error {
 	}
 	return nil
 }
-

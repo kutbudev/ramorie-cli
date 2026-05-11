@@ -4,15 +4,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerToolsV4 registers 15 simplified MCP tools (down from 49) via
+// registerToolsV4 registers 14 simplified MCP tools (down from 49) via
 // mcp.AddTool — this is the v4 tool set optimized for agent compliance.
-// PR10: + auto_remember (atomic find+remember).
+// PR11 follow-up: auto_remember is intentionally not agent-facing. Agents
+// should write durable memories deliberately with remember(); automatic writes
+// created too many tiny, low-context fragments.
 //
-// Current registrations (15 total = 7 core + 4 common + 4 advanced):
-//   🔴 CORE     — setup_agent, list_projects, remember, auto_remember,
-//                 find, recall, task
-//   🟡 COMMON   — memory, get_stats, get_agent_activity, surface_context
-//   🟢 ADVANCED — create_project, manage_subtasks, entity, admin
+// Current registrations (14 total = 6 core + 4 common + 4 advanced):
+//
+//	🔴 CORE     — setup_agent, list_projects, remember, find, recall, task
+//	🟡 COMMON   — memory, get_stats, get_agent_activity, surface_context
+//	🟢 ADVANCED — create_project, manage_subtasks, entity, admin
 //
 // `recall` is kept as a legacy lexical fallback alongside `find`; the
 // section header comments below break the count down per-tier for clarity.
@@ -20,10 +22,11 @@ import (
 //   - decision (deprecated stub) → use remember()/memory
 //   - skill (deprecated stub) → use remember()/memory
 //   - manage_focus → focus/active context concept eliminated
+//
 // Removed admin actions: switch_org (active organization concept eliminated)
 func registerToolsV4(server *mcp.Server) {
 	// ============================================================================
-	// 🔴 CORE (7 tools) - Every Session
+	// 🔴 CORE (6 tools) - Every Session
 	// ============================================================================
 
 	// 1. setup_agent - Initialize session (KEEP)
@@ -37,6 +40,7 @@ Returns a compact session context (~500 tokens):
 - session info + agent tracking identity
 - project auto-detected from cwd (git remote / dir name)
 - top-5 active user preferences (surfaced so you don't have to remember them)
+- top-30 project decisions from memory(type=decision) as startup context
 - task stats + project count
 - next_action nudge based on current state
 
@@ -75,8 +79,6 @@ OPTIONAL:
 		Name: "remember",
 		Description: `🔴 REQUIRED: call find() first for duplicate check. MUST be called after: sub-agent return, bug fix application, deploy success, user preference statement. Not optional.
 
-Prefer auto_remember() — it does find()+remember() atomically and never skips the duplicate check.
-
 REQUIRED: content, project (name or ID)
 OPTIONAL: force (bool) — skip similarity check and save anyway
 
@@ -109,41 +111,13 @@ Example:
 		},
 	}, handleRemember)
 
-	// 3b. auto_remember - Atomic find+remember (PREFERRED post-PR10).
-	// Sub-agent return, bug fix, deploy success, preference statement → call this.
-	// Internally: find() with Jaccard similarity threshold 0.60 → matched_existing OR remember().
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "auto_remember",
-		Description: `🔴 REQUIRED after: sub-agent return, bug fix application, deploy success, user preference statement. Atomik find→remember replacement.
-
-Trigger keywords auto-detect type:
-- "decided X" / "chose X" → decision
-- "fixed bug" / "root cause" → bug_fix
-- "always X" / "never X" / "prefer X" → preference
-- "pattern" / "convention" → pattern
-- Default → general
-
-Internally:
-1. Backend find pipeline (cosine + rerank, FastMode) — semantic duplicate check at score ≥ 0.75. Catches paraphrased duplicates Jaccard misses (v7.0.2 smoke: 0.867 cosine match where Jaccard reported 0.0).
-2. Local Jaccard 0.60 fallback (no_indexed_corpus / find unavailable) — distinct lowercase token-set overlap. 0.60 from prod smoke test (real duplicates were slipping through at 0.77 with the old 0.85 cutoff).
-Both paths feed the envelope's match_source field ("semantic_find" | "jaccard") for observability.
-
-REQUIRED: content
-OPTIONAL: project, type_override`,
-		Annotations: &mcp.ToolAnnotations{
-			Title:           "Auto-Remember (atomic find+remember)",
-			DestructiveHint: boolPtr(false),
-			IdempotentHint:  false, // creates new memory each call unless similar exists
-		},
-	}, handleAutoRemember)
-
 	// 4. find - Hybrid search (semantic + lexical) — preferred in v4.
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "find",
 		Description: `🔴 ESSENTIAL | Hybrid memory + decision retrieval — preferred over recall().
 
 🔴 MUST run BEFORE remember() (duplicate check) and BEFORE responding to user (re-discover context).
-Subagent return → find() → auto_remember(). No skipping.
+Subagent return → find() → remember() with a context-rich summary. No skipping.
 
 Under the hood the server runs a multi-stage pipeline and picks what to apply per query:
   1. HyDE — query is rewritten into a hypothetical answer first, then embedded (catches queries that share no keywords with the memory)
@@ -163,8 +137,8 @@ OPTIONAL (common):
 - project — name or UUID. Omit to auto-scope via cwd.
 - types ([]string) — general | decision | bug_fix | preference | pattern | reference | skill
 - tags ([]string)
-- limit (default 5, max 50)
-- budget_tokens (default 2000) — response trimmed to fit
+- limit (default 30, max 50)
+- budget_tokens (default 12000) — response trimmed to fit
 - include_decisions (bool, default true)
 - purpose ("coding" | "research" | "review") — type-preference nudge
 

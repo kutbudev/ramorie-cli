@@ -10,13 +10,18 @@ import (
 
 	"github.com/kutbudev/ramorie-cli/internal/cli/commands"
 	"github.com/kutbudev/ramorie-cli/internal/cli/help"
+	"github.com/kutbudev/ramorie-cli/internal/version"
 	"github.com/urfave/cli/v2"
 )
 
-// Version is set during build with ldflags.
-var Version = "8.0.0"
+// Version is kept for backward-compatible ldflags. Prefer internal/version.
+var Version = version.Version
 
 func main() {
+	if Version != "" && Version != version.Version {
+		version.Version = Version
+	}
+
 	cli.AppHelpTemplate = help.AppHelpTemplate()
 	cli.CommandHelpTemplate = help.CommandHelpTemplate()
 	cli.SubcommandHelpTemplate = help.CommandHelpTemplate()
