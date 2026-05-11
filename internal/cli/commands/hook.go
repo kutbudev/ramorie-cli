@@ -15,10 +15,18 @@ import (
 // It drives Claude Code PreToolUse integration so that editing a file
 // automatically surfaces relevant memories/decisions into the model's
 // context — no manual recall() needed.
+//
+// DEPRECATED (v7.1.0): prefer `ramorie setup-hooks install` (or the new
+// `ramorie setup hooks install` alias) which covers Claude Code, Codex,
+// Cursor, and Windsurf in one command. This single-client legacy command
+// is kept for backward compatibility with existing scripts.
 func NewHookCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "hook",
-		Usage: "Manage Claude Code integration (PreToolUse hook)",
+		Usage: "[legacy — prefer `ramorie setup-hooks install`] Manage Claude Code integration (PreToolUse hook)",
+		Description: "DEPRECATED in v7.1.0: prefer `ramorie setup-hooks install` (covers Claude Code,\n" +
+			"   Codex, Cursor, and Windsurf in one call). This single-client command is kept\n" +
+			"   for scripts that pinned to the older surface.",
 		Subcommands: []*cli.Command{
 			{
 				Name:   "install",

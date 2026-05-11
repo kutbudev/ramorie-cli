@@ -3493,6 +3493,11 @@ func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) 
 // payload carries `_meta.protocol_reminder`. If slot 0 isn't valid JSON we
 // leave the result untouched — multi-content responses (e.g. load_skill's
 // markdown body + envelope) shouldn't have their first slot rewritten.
+//
+// MUTATES IN PLACE — the returned *mcp.CallToolResult is the same pointer as
+// `res`, with `res.Content[0]` rewritten when JSON. Only call ONCE per result;
+// do not chain (subsequent calls would re-parse and re-inject the reminder
+// against the already-modified slot, which is wasteful and risks shape drift).
 func withProtocolReminder(res *mcp.CallToolResult, op string) *mcp.CallToolResult {
 	if res == nil || len(res.Content) == 0 {
 		return res

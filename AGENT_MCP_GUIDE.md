@@ -13,6 +13,7 @@ Zed), and the new Persistent Memory Protocol hooks/rules in a single step:
 ramorie setup               # full install: auth + MCP + hooks + rules + vault + doctor
 ramorie doctor              # re-run the health check at any time
 ramorie setup-hooks status  # see which clients have the protocol installed
+# v7.1.0: `ramorie setup hooks status` works too — either command form is supported.
 ```
 
 The legacy interactive picker is still available via `ramorie setup --legacy`.

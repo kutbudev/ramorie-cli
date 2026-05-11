@@ -46,6 +46,16 @@ func (c *CursorInstaller) projectDir() string {
 }
 
 // RulesPath is the .mdc file we write inside the resolved project root.
+//
+// WARNING: when called without an explicit projectRoot, `RulesPath()` falls
+// back to `os.Getwd()`. Invoking it from outside a real project root (e.g.
+// from `$HOME` or a transient temp dir) will therefore write the rules file
+// into the current working directory — almost never what the caller wants.
+//
+// Callers should gate writes on `Detect()` first, which probes for `.cursor/`
+// or an existing rules file before agreeing this directory is in fact a
+// Cursor project. The installer orchestration in `internal/cli/commands/
+// setup_hooks.go` honors this gate.
 func (c *CursorInstaller) RulesPath() string {
 	root := c.projectDir()
 	if root == "" {

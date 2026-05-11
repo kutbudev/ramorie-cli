@@ -36,6 +36,12 @@
 
 > **Perfect for developers, AI agents, and anyone who wants to capture knowledge while managing tasks.**
 
+> **Upgrading from v6 or earlier?** See [`CHANGELOG.md`](./CHANGELOG.md) for the v7.0.0
+> breaking-changes summary (MCP `_meta.protocol_reminder` envelope, removed
+> `decision` / `skill` / `manage_focus` tools, `admin.switch_org` dropped).
+> v7.1.0 adds a `ramorie setup hooks` alias for `ramorie setup-hooks` —
+> either command works.
+
 ---
 
 ## 🚀 Installation

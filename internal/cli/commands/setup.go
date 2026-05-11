@@ -40,6 +40,13 @@ func openBrowser(url string) error {
 }
 
 func NewSetupCommand() *cli.Command {
+	// v7.1.0 alias — expose `setup-hooks` machinery as `setup hooks` too,
+	// so both invocation styles work. The underlying subcommand actions
+	// are re-used verbatim; we just re-parent the subtree.
+	hooksAlias := NewSetupHooksCommand()
+	hooksAlias.Name = "hooks"
+	hooksAlias.Usage = "[alias for `ramorie setup-hooks`] Install/uninstall protocol hooks + rules"
+
 	return &cli.Command{
 		Name:  "setup",
 		Usage: "Configure the CLI with user authentication",
@@ -73,6 +80,7 @@ func NewSetupCommand() *cli.Command {
 					return handleLogout()
 				},
 			},
+			hooksAlias,
 			{
 				Name:  "vault",
 				Usage: "Encrypted vault operations (unlock | lock | status)",

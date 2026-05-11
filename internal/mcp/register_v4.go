@@ -6,10 +6,16 @@ import (
 
 // registerToolsV4 registers 15 simplified MCP tools (down from 49) via
 // mcp.AddTool — this is the v4 tool set optimized for agent compliance.
-// PR10: + auto_remember (atomic find+remember). The current AddTool count is
-// 15: setup_agent, list_projects, remember, auto_remember, find, recall, task,
-// memory, get_stats, get_agent_activity, surface_context, create_project,
-// manage_subtasks, entity, admin.
+// PR10: + auto_remember (atomic find+remember).
+//
+// Current registrations (15 total = 7 core + 4 common + 4 advanced):
+//   🔴 CORE     — setup_agent, list_projects, remember, auto_remember,
+//                 find, recall, task
+//   🟡 COMMON   — memory, get_stats, get_agent_activity, surface_context
+//   🟢 ADVANCED — create_project, manage_subtasks, entity, admin
+//
+// `recall` is kept as a legacy lexical fallback alongside `find`; the
+// section header comments below break the count down per-tier for clarity.
 // Removed in this revision (active-state concepts not part of user workflow):
 //   - decision (deprecated stub) → use remember()/memory
 //   - skill (deprecated stub) → use remember()/memory
@@ -17,7 +23,7 @@ import (
 // Removed admin actions: switch_org (active organization concept eliminated)
 func registerToolsV4(server *mcp.Server) {
 	// ============================================================================
-	// 🔴 CORE (5 tools) - Every Session
+	// 🔴 CORE (7 tools) - Every Session
 	// ============================================================================
 
 	// 1. setup_agent - Initialize session (KEEP)
@@ -247,7 +253,7 @@ Examples:
 	}, handleUnifiedTask)
 
 	// ============================================================================
-	// 🟡 COMMON (6 tools) - When Relevant
+	// 🟡 COMMON (4 tools) - When Relevant
 	// ============================================================================
 
 	// 6. memory - Unified memory operations (NEW - replaces 2 tools)
