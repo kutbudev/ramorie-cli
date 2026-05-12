@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/models"
@@ -117,19 +118,53 @@ func (s *APIService) ListProjects() ([]models.Project, error) {
 		return nil, err
 	}
 
-	// Backend returns {projects: [...], total: N} (object).
-	// Fall back to raw array for backward compat with older servers.
-	var envelope struct {
-		Projects []models.Project `json:"projects"`
-		Total    int              `json:"total"`
-	}
-	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Projects != nil {
-		return envelope.Projects, nil
+	return decodeProjectsResponse(body)
+}
+
+func decodeProjectsResponse(body []byte) ([]models.Project, error) {
+	var raw []models.Project
+	if err := json.Unmarshal(body, &raw); err == nil {
+		return raw, nil
 	}
 
-	var projects []models.Project
-	err = json.Unmarshal(body, &projects)
-	return projects, err
+	var envelope struct {
+		Projects []models.Project `json:"projects"`
+		Items    []models.Project `json:"items"`
+		Data     json.RawMessage  `json:"data"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal projects: %w", err)
+	}
+	if envelope.Projects != nil {
+		return envelope.Projects, nil
+	}
+	if envelope.Items != nil {
+		return envelope.Items, nil
+	}
+	if len(envelope.Data) > 0 && string(bytes.TrimSpace(envelope.Data)) != "null" {
+		var projects []models.Project
+		if err := json.Unmarshal(envelope.Data, &projects); err == nil {
+			return projects, nil
+		}
+		var nested struct {
+			Projects []models.Project `json:"projects"`
+			Items    []models.Project `json:"items"`
+		}
+		if err := json.Unmarshal(envelope.Data, &nested); err == nil {
+			if nested.Projects != nil {
+				return nested.Projects, nil
+			}
+			if nested.Items != nil {
+				return nested.Items, nil
+			}
+		}
+	}
+
+	snippet := strings.Join(strings.Fields(string(body)), " ")
+	if len(snippet) > 240 {
+		snippet = snippet[:240] + "..."
+	}
+	return nil, fmt.Errorf("failed to unmarshal projects: unsupported response shape %s", snippet)
 }
 
 func (s *APIService) CreateProject(name string) (*models.Project, error) {

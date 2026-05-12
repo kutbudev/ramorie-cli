@@ -252,22 +252,64 @@ func (c *Client) ListProjects(orgID ...string) ([]models.Project, error) {
 		return nil, err
 	}
 
-	// Backend returns {projects: [...], total: N} (object).
-	// Fall back to raw array for backward compat with older servers.
-	var envelope struct {
-		Projects []models.Project `json:"projects"`
-		Total    int              `json:"total"`
-	}
-	if err := json.Unmarshal(respBody, &envelope); err == nil && envelope.Projects != nil {
-		return envelope.Projects, nil
-	}
-
-	var projects []models.Project
-	if err := json.Unmarshal(respBody, &projects); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal projects: %w", err)
+	projects, err := decodeProjectsResponse(respBody)
+	if err != nil {
+		return nil, err
 	}
 
 	return projects, nil
+}
+
+func decodeProjectsResponse(respBody []byte) ([]models.Project, error) {
+	var raw []models.Project
+	if err := json.Unmarshal(respBody, &raw); err == nil {
+		return raw, nil
+	}
+
+	var envelope struct {
+		Projects []models.Project `json:"projects"`
+		Items    []models.Project `json:"items"`
+		Data     json.RawMessage  `json:"data"`
+		Total    int              `json:"total"`
+		Count    int              `json:"count"`
+	}
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal projects: %w", err)
+	}
+	if envelope.Projects != nil {
+		return envelope.Projects, nil
+	}
+	if envelope.Items != nil {
+		return envelope.Items, nil
+	}
+	if len(envelope.Data) > 0 && string(bytes.TrimSpace(envelope.Data)) != "null" {
+		var dataRaw []models.Project
+		if err := json.Unmarshal(envelope.Data, &dataRaw); err == nil {
+			return dataRaw, nil
+		}
+		var nested struct {
+			Projects []models.Project `json:"projects"`
+			Items    []models.Project `json:"items"`
+		}
+		if err := json.Unmarshal(envelope.Data, &nested); err == nil {
+			if nested.Projects != nil {
+				return nested.Projects, nil
+			}
+			if nested.Items != nil {
+				return nested.Items, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("failed to unmarshal projects: unsupported response shape %s", compactJSONSnippet(respBody, 240))
+}
+
+func compactJSONSnippet(body []byte, max int) string {
+	s := strings.Join(strings.Fields(string(body)), " ")
+	if max > 0 && len(s) > max {
+		return s[:max] + "..."
+	}
+	return s
 }
 
 // ActivePreference is one item in the top-5 preferences surfaced by
@@ -1159,8 +1201,8 @@ type SurfaceContextResponse struct {
 // when the agent didn't specify a project explicitly.
 type FindMemoriesOptions struct {
 	Term             string
-	Project          string   // Name or UUID — body field
-	ProjectHint      string   // cwd-derived fallback — header X-Project-Hint
+	Project          string // Name or UUID — body field
+	ProjectHint      string // cwd-derived fallback — header X-Project-Hint
 	Types            []string
 	Tags             []string
 	Limit            int
@@ -1261,8 +1303,8 @@ type FindMeta struct {
 
 // FindDebug bundles prompt-tuning signals returned when Debug=true.
 type FindDebug struct {
-	HyDEQuery    string                 `json:"hyde_query,omitempty"`
-	RerankScores []map[string]any       `json:"rerank_scores,omitempty"`
+	HyDEQuery    string           `json:"hyde_query,omitempty"`
+	RerankScores []map[string]any `json:"rerank_scores,omitempty"`
 }
 
 // FindMemories calls POST /v1/memory/find. Pass ProjectHint to let the backend
@@ -1497,7 +1539,9 @@ func (c *Client) ListMemoriesPage(projectID, search string, page, pageSize int) 
 		params.Add("search", search)
 	}
 	params.Add("page", fmt.Sprintf("%d", page))
+	params.Add("page_size", fmt.Sprintf("%d", pageSize))
 	params.Add("limit", fmt.Sprintf("%d", pageSize))
+	params.Add("offset", fmt.Sprintf("%d", (page-1)*pageSize))
 
 	respBody, err := c.makeRequest("GET", "/memories?"+params.Encode(), nil)
 	if err != nil {
@@ -1508,6 +1552,9 @@ func (c *Client) ListMemoriesPage(projectID, search string, page, pageSize int) 
 		return nil, false, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 	hasMore := len(response.Memories) == pageSize
+	if response.Total > 0 {
+		hasMore = response.Offset+len(response.Memories) < response.Total
+	}
 	return response.Memories, hasMore, nil
 }
 
@@ -2026,13 +2073,14 @@ func (c *Client) RemoveTaskFromPack(packID, taskID string) error {
 // AssembleOptions are the request knobs forwarded to /assemble.
 //
 // Mode (PR5, mayis 2026):
-//   "manifest" (default) — body-less index of pack items. Agent fetches
-//                          bodies on demand via get_memory(id) /
-//                          get_task(id). ~85-90% smaller payload than
-//                          inline. Mirrors Claude Code's Glob+Read.
-//   "full"     — legacy inline render (bundle string with previews).
-//                          Use for small packs (<2K tokens) or when the
-//                          caller explicitly wants the whole thing now.
+//
+//	"manifest" (default) — body-less index of pack items. Agent fetches
+//	                       bodies on demand via get_memory(id) /
+//	                       get_task(id). ~85-90% smaller payload than
+//	                       inline. Mirrors Claude Code's Glob+Read.
+//	"full"     — legacy inline render (bundle string with previews).
+//	                       Use for small packs (<2K tokens) or when the
+//	                       caller explicitly wants the whole thing now.
 type AssembleOptions struct {
 	Mode            string   `json:"mode,omitempty"`
 	Format          string   `json:"format,omitempty"`
@@ -2236,7 +2284,7 @@ type SkillRenderSource struct {
 type SkillRenderResponse struct {
 	Skill  SkillRenderHeader      `json:"skill"`
 	Body   string                 `json:"body"`
-	Source SkillRenderSource     `json:"source"`
+	Source SkillRenderSource      `json:"source"`
 	Meta   map[string]interface{} `json:"_meta"`
 }
 

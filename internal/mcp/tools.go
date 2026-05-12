@@ -3487,6 +3487,7 @@ func projectDecisionContext(client *api.Client, projectID string, limit int) []m
 		limit = 30
 	}
 	decisions := make([]models.Memory, 0, limit)
+	seen := make(map[string]struct{}, limit)
 	const pageSize = 100
 	const maxPages = 10
 	for page := 1; page <= maxPages; page++ {
@@ -3494,12 +3495,19 @@ func projectDecisionContext(client *api.Client, projectID string, limit int) []m
 		if err != nil {
 			break
 		}
+		newItems := 0
 		for _, m := range memories {
+			id := m.ID.String()
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			newItems++
 			if strings.EqualFold(strings.TrimSpace(m.Type), "decision") {
 				decisions = append(decisions, m)
 			}
 		}
-		if !hasMore {
+		if !hasMore || newItems == 0 {
 			break
 		}
 	}

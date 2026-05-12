@@ -308,6 +308,51 @@ func TestHandleSetupAgent_PreferencesFailureIsNonFatal(t *testing.T) {
 	}
 }
 
+func TestProjectDecisionContextDedupesRepeatedPages(t *testing.T) {
+	projectID := uuid.New()
+	decisionID := uuid.New()
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/memories" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		calls++
+		if calls == 1 && r.URL.Query().Get("offset") != "0" {
+			t.Fatalf("first page offset = %q, want 0", r.URL.Query().Get("offset"))
+		}
+		if calls == 2 && r.URL.Query().Get("offset") != "100" {
+			t.Fatalf("second page offset = %q, want 100", r.URL.Query().Get("offset"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"memories": []models.Memory{
+				{
+					ID:        decisionID,
+					ProjectID: projectID,
+					Type:      "decision",
+					Content:   "Decision: setup_agent should return each project decision once.",
+				},
+			},
+			"total":  200,
+			"limit":  100,
+			"offset": (calls - 1) * 100,
+		})
+	}))
+	defer ts.Close()
+
+	client := &api.Client{BaseURL: ts.URL, APIKey: "test-key", HTTPClient: ts.Client()}
+	got := projectDecisionContext(client, projectID.String(), 30)
+	if len(got) != 1 {
+		t.Fatalf("projectDecisionContext returned %d decisions, want 1 unique item: %+v", len(got), got)
+	}
+	if got[0]["id"] != decisionID.String() {
+		t.Fatalf("decision id = %v, want %s", got[0]["id"], decisionID)
+	}
+	if calls != 2 {
+		t.Fatalf("expected two page attempts before duplicate-page guard stops, got %d", calls)
+	}
+}
+
 // handleListProjects shape tests ---------------------------------------------
 
 func TestHandleListProjects_CompactDefaultShape(t *testing.T) {
