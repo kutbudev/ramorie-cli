@@ -10,8 +10,10 @@ import (
 func helpOverlay(km keyMap, width, height int) string {
 	bindings := []key.Binding{
 		km.Up, km.Down, km.Left, km.Right,
-		km.Enter, km.Back, km.Tab,
-		km.Search, km.Project, km.Refresh,
+		km.Enter, km.Back, km.Tab, km.PrevTab,
+		km.PrevPage, km.NextPage, km.Top, km.Bottom,
+		km.Cat1, km.Cat2, km.Cat3, km.Cat4, km.Cat5, km.Cat6,
+		km.Search, km.Project, km.AllProjects, km.Refresh,
 		km.Yank, km.Theme, km.Help, km.Quit,
 	}
 

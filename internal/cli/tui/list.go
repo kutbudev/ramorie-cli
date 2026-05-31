@@ -13,13 +13,19 @@ import (
 
 // listItem wraps any entity for bubbles/list.
 type listItem struct {
-	id    string
-	title string
-	sub   string
-	raw   interface{} // original entity (Task, Memory, ...)
+	id     string
+	title  string
+	sub    string
+	filter string
+	raw    interface{} // original entity (Task, Memory, ...)
 }
 
-func (i listItem) FilterValue() string { return i.title }
+func (i listItem) FilterValue() string {
+	if i.filter != "" {
+		return i.filter
+	}
+	return i.title
+}
 func (i listItem) Title() string       { return i.title }
 func (i listItem) Description() string { return i.sub }
 
@@ -148,9 +154,10 @@ func taskToItem(t models.Task) list.Item {
 		display.SingleLine(title),
 	)
 	return listItem{
-		id:    t.ID.String(),
-		title: formatted,
-		raw:   t,
+		id:     t.ID.String(),
+		title:  formatted,
+		filter: strings.Join([]string{shortID, title, t.Priority, t.Status}, " "),
+		raw:    t,
 	}
 }
 
@@ -167,9 +174,10 @@ func memoryToItem(m models.Memory) list.Item {
 		display.Truncate(content, 80),
 	)
 	return listItem{
-		id:    m.ID.String(),
-		title: formatted,
-		raw:   m,
+		id:     m.ID.String(),
+		title:  formatted,
+		filter: strings.Join([]string{shortID, content, m.Type}, " "),
+		raw:    m,
 	}
 }
 
@@ -254,9 +262,10 @@ func (l *listModel) setProjects(projects []models.Project) {
 			formatted += "  " + display.Dim.Render(display.Truncate(desc, 60))
 		}
 		items = append(items, listItem{
-			id:    p.ID.String(),
-			title: formatted,
-			raw:   p,
+			id:     p.ID.String(),
+			title:  formatted,
+			filter: strings.Join([]string{shortID, p.Name, p.Description}, " "),
+			raw:    p,
 		})
 	}
 	l.applyItems(items)
@@ -277,9 +286,10 @@ func (l *listModel) setOrgs(orgs []api.Organization) {
 			display.Truncate(o.Name, 40),
 		)
 		items = append(items, listItem{
-			id:    o.ID,
-			title: formatted,
-			raw:   o,
+			id:     o.ID,
+			title:  formatted,
+			filter: strings.Join([]string{shortID, o.Name}, " "),
+			raw:    o,
 		})
 	}
 	l.applyItems(items)
@@ -298,9 +308,10 @@ func (l *listModel) setActivity(events []models.ActivityItem) {
 			display.Truncate(summary, 80),
 		)
 		items = append(items, listItem{
-			id:    e.EntityID.String(),
-			title: formatted,
-			raw:   e,
+			id:     e.EntityID.String(),
+			title:  formatted,
+			filter: strings.Join([]string{e.EntityID.String(), e.EntityType, e.Summary}, " "),
+			raw:    e,
 		})
 	}
 	l.applyItems(items)

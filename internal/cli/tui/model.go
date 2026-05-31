@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -36,6 +37,14 @@ func resizeDebounce(gen uint64) tea.Cmd {
 	})
 }
 
+type cursorSettleMsg struct{ gen uint64 }
+
+func cursorDebounce(gen uint64) tea.Cmd {
+	return tea.Tick(75*time.Millisecond, func(time.Time) tea.Msg {
+		return cursorSettleMsg{gen: gen}
+	})
+}
+
 // pane identifies which of the three columns currently has keyboard focus.
 type pane int
 
@@ -47,16 +56,17 @@ const (
 
 // rootModel owns the sidebar + list + detail panes and routes input to them.
 type rootModel struct {
-	client    *api.Client
-	keys      keyMap
-	focus     pane
-	sidebar   sidebarModel
-	list      listModel
-	detail    detailModel
-	width     int
-	height    int
-	statusMsg string
-	projectID string // active project filter (empty = all)
+	client      *api.Client
+	keys        keyMap
+	focus       pane
+	sidebar     sidebarModel
+	list        listModel
+	detail      detailModel
+	width       int
+	height      int
+	statusMsg   string
+	projectID   string // active project filter (empty = all)
+	projectName string
 
 	// Last-loaded category, so we can avoid reloading on noop transitions.
 	loadedCat Category
@@ -77,21 +87,21 @@ type rootModel struct {
 	// Yank cache — raw entities + their satellites currently shown in the
 	// detail pane. Populated whenever a *DetailLoadedMsg arrives so the `c`
 	// key can serialize the live entity to markdown without refetching.
-	yankTask          *models.Task
-	yankTaskSubtasks  []models.Subtask
-	yankTaskNotes     []models.Annotation
-	yankTaskMems      []models.Memory
-	yankTaskComments  []models.Comment
-	yankMemory        *models.Memory
-	yankMemoryTasks   []models.Task
+	yankTask           *models.Task
+	yankTaskSubtasks   []models.Subtask
+	yankTaskNotes      []models.Annotation
+	yankTaskMems       []models.Memory
+	yankTaskComments   []models.Comment
+	yankMemory         *models.Memory
+	yankMemoryTasks    []models.Task
 	yankMemoryComments []models.Comment
-	yankProject       *models.Project
-	yankProjectTasks  []models.Task
-	yankProjectMems   []models.Memory
-	yankOrg           *api.Organization
-	yankOrgProjects   []models.Project
-	yankOrgEncryption *api.OrgEncryptionStatus
-	yankActivity      *models.ActivityItem
+	yankProject        *models.Project
+	yankProjectTasks   []models.Task
+	yankProjectMems    []models.Memory
+	yankOrg            *api.Organization
+	yankOrgProjects    []models.Project
+	yankOrgEncryption  *api.OrgEncryptionStatus
+	yankActivity       *models.ActivityItem
 
 	// TUI chrome state.
 	theme    string
@@ -102,6 +112,10 @@ type rootModel struct {
 	// resizeSettleMsg with that generation. Only the matching settle fires
 	// the heavy reflow (markdown re-render at the new width).
 	resizeGen uint64
+
+	// Cursor debounce: rapid j/k/page motion should move instantly but only
+	// fetch the expensive right-pane detail after the user pauses.
+	cursorGen uint64
 }
 
 func newRootModel(c *api.Client) rootModel {
@@ -165,6 +179,52 @@ func (m *rootModel) applyFocus() {
 	m.sidebar.focused = m.focus == paneSidebar
 	m.list.focused = m.focus == paneList
 	m.detail.focused = m.focus == paneDetail
+}
+
+func (m *rootModel) scheduleDetailLoad() tea.Cmd {
+	m.cursorGen++
+	return cursorDebounce(m.cursorGen)
+}
+
+func (m *rootModel) activateCategoryIndex(i int) tea.Cmd {
+	if !m.sidebar.selectIndex(i) && m.sidebar.selected() == m.loadedCat {
+		m.focus = paneList
+		m.applyFocus()
+		return m.loadDetailForSelection()
+	}
+	m.focus = paneList
+	m.applyFocus()
+	return m.loadForCategory()
+}
+
+func (m *rootModel) handleProjectShortcut() tea.Cmd {
+	if m.focus == paneList && m.list.cat == CatProjects {
+		if sel := m.list.selected(); sel != nil {
+			if p, ok := sel.raw.(models.Project); ok {
+				m.projectID = p.ID.String()
+				m.projectName = p.Name
+				m.statusMsg = "✓ project filter: " + p.Name
+				m.sidebar.selectIndex(categoryIndex(CatTasks))
+				m.loadedCat = -1
+				m.focus = paneList
+				m.applyFocus()
+				return tea.Batch(m.loadForCategory(), clearStatusAfter(3*time.Second))
+			}
+		}
+	}
+	m.statusMsg = "pick a project, then press p again"
+	return tea.Batch(m.activateCategoryIndex(categoryIndex(CatProjects)), clearStatusAfter(3*time.Second))
+}
+
+func (m *rootModel) clearProjectFilter() tea.Cmd {
+	if m.projectID == "" {
+		m.statusMsg = "showing all projects"
+		return clearStatusAfter(2 * time.Second)
+	}
+	m.projectID = ""
+	m.projectName = ""
+	m.statusMsg = "✓ project filter cleared"
+	return tea.Batch(m.loadForCategory(), clearStatusAfter(2*time.Second))
 }
 
 // loadForCategory issues the appropriate data-fetch cmd for the active
@@ -338,6 +398,12 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail.reflow()
 		return m, nil
 
+	case cursorSettleMsg:
+		if msg.gen != m.cursorGen {
+			return m, nil
+		}
+		return m, m.loadDetailForSelection()
+
 	case tea.KeyMsg:
 		// Help overlay: ? toggles, esc/q closes; while open, swallow other keys.
 		if key.Matches(msg, m.keys.Help) {
@@ -365,9 +431,32 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, clearStatusAfter(2 * time.Second)
 		}
 
+		if m.focus == paneList && m.list.list.SettingFilter() {
+			var cmd tea.Cmd
+			wasFiltering := m.list.list.SettingFilter()
+			m.list.list, cmd = m.list.list.Update(msg)
+			if wasFiltering && !m.list.list.SettingFilter() {
+				return m, tea.Batch(cmd, m.scheduleDetailLoad())
+			}
+			return m, cmd
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
+
+		case key.Matches(msg, m.keys.Cat1):
+			return m, m.activateCategoryIndex(0)
+		case key.Matches(msg, m.keys.Cat2):
+			return m, m.activateCategoryIndex(1)
+		case key.Matches(msg, m.keys.Cat3):
+			return m, m.activateCategoryIndex(2)
+		case key.Matches(msg, m.keys.Cat4):
+			return m, m.activateCategoryIndex(3)
+		case key.Matches(msg, m.keys.Cat5):
+			return m, m.activateCategoryIndex(4)
+		case key.Matches(msg, m.keys.Cat6):
+			return m, m.activateCategoryIndex(5)
 
 		case key.Matches(msg, m.keys.Tab):
 			// Cycle focus forward.
@@ -384,8 +473,27 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case key.Matches(msg, m.keys.PrevTab):
+			if m.focus == paneList && m.list.depth() > 1 {
+				m.list.popFrame()
+				m.lastSelectedID = ""
+				return m, m.loadDetailForSelection()
+			}
+			m.focus = (m.focus + 2) % 3
+			m.applyFocus()
+			if m.focus == paneList {
+				return m, m.loadDetailForSelection()
+			}
+			return m, nil
+
 		case key.Matches(msg, m.keys.Refresh):
 			return m, m.loadForCategory()
+
+		case key.Matches(msg, m.keys.Project):
+			return m, m.handleProjectShortcut()
+
+		case key.Matches(msg, m.keys.AllProjects):
+			return m, m.clearProjectFilter()
 
 		case key.Matches(msg, m.keys.Yank):
 			res := m.yankCurrent()
@@ -436,18 +544,25 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case paneList:
-			// Drill-down handling for h/← when we're inside a stacked frame.
-			if key.Matches(msg, m.keys.Left) && m.list.depth() > 1 {
-				m.list.popFrame()
-				m.lastSelectedID = ""
-				return m, m.loadDetailForSelection()
+			if key.Matches(msg, m.keys.Left) {
+				if m.list.depth() > 1 {
+					m.list.popFrame()
+					m.lastSelectedID = ""
+					return m, m.loadDetailForSelection()
+				}
+				m.focus = paneSidebar
+				m.applyFocus()
+				return m, nil
 			}
 
-			// Enter / → potentially drills further.
+			// Drill-down handling for h/← when we're inside a stacked frame.
 			if key.Matches(msg, m.keys.Enter) || key.Matches(msg, m.keys.Right) {
 				if consumed, cmd := m.handleEnterOnList(); consumed {
 					return m, cmd
 				}
+				m.focus = paneDetail
+				m.applyFocus()
+				return m, nil
 			}
 
 			// Forward keys to the bubbles list (handles up/down/filter/etc).
@@ -456,22 +571,14 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// After cursor moves, refresh the detail pane.
 			// Also: trigger an infinite-scroll page fetch when the cursor
 			// reaches the bottom guard band of a paginated list.
-			if key.Matches(msg, m.keys.Up) || key.Matches(msg, m.keys.Down) {
-				cmds := []tea.Cmd{cmd, m.loadDetailForSelection()}
+			if key.Matches(msg, m.keys.Up) || key.Matches(msg, m.keys.Down) ||
+				key.Matches(msg, m.keys.PrevPage) || key.Matches(msg, m.keys.NextPage) ||
+				key.Matches(msg, m.keys.Top) || key.Matches(msg, m.keys.Bottom) {
+				cmds := []tea.Cmd{cmd, m.scheduleDetailLoad()}
 				if more := m.maybeFetchNextPage(); more != nil {
 					cmds = append(cmds, more)
 				}
 				return m, tea.Batch(cmds...)
-			}
-			if key.Matches(msg, m.keys.Right) || key.Matches(msg, m.keys.Enter) {
-				m.focus = paneDetail
-				m.applyFocus()
-				return m, cmd
-			}
-			if key.Matches(msg, m.keys.Left) {
-				m.focus = paneSidebar
-				m.applyFocus()
-				return m, cmd
 			}
 			return m, cmd
 
@@ -658,7 +765,11 @@ func (m rootModel) View() string {
 		return "loading…"
 	}
 	if m.helpOpen {
-		return helpOverlay(m.keys, m.width, m.height)
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			helpOverlay(m.keys, m.width, maxInt(m.height-1, 1)),
+			m.renderStatusBar(),
+		)
 	}
 	return m.normalView()
 }
@@ -674,12 +785,62 @@ func (m rootModel) normalView() string {
 }
 
 func (m rootModel) renderStatusBar() string {
-	help := "h/← back · j/k up/dn · l/→ forward · ↵ open · ⇥ pane · / search · p project · r refresh · c copy · t theme · ? help · q quit"
-	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(help)
-	if m.statusMsg != "" {
-		bar = lipgloss.NewStyle().Foreground(display.ColorGood).Render(m.statusMsg) + "  " + bar
+	help := strings.Join(m.activeShortcuts(), " · ")
+	scope := "all projects"
+	if m.projectName != "" {
+		scope = m.projectName
+	} else if m.projectID != "" {
+		scope = m.projectID
 	}
-	return bar
+	focus := "sidebar"
+	switch m.focus {
+	case paneList:
+		focus = strings.ToLower(m.list.cat.Label())
+	case paneDetail:
+		focus = "detail"
+	}
+	plain := fmt.Sprintf("%s | %s | %s", focus, scope, help)
+	if m.statusMsg != "" {
+		plain = m.statusMsg + "  " + plain
+	}
+	plain = display.Truncate(plain, maxInt(m.width, 1))
+	return lipgloss.NewStyle().
+		Width(maxInt(m.width, 1)).
+		Foreground(lipgloss.Color("245")).
+		Render(plain)
+}
+
+func (m rootModel) activeShortcuts() []string {
+	if m.helpOpen {
+		return []string{"? close", "esc close", "q close"}
+	}
+	base := []string{"1-6 tabs", "⇥/S-⇥ pane"}
+	tail := []string{"? help", "q quit"}
+	switch m.focus {
+	case paneSidebar:
+		keys := append(base, "j/k choose", "l/↵ open")
+		return append(keys, tail...)
+	case paneList:
+		if m.list.list.SettingFilter() {
+			return []string{"type filter", "↵ apply", "esc cancel", "? help", "q quit"}
+		}
+		keys := append([]string{}, base...)
+		keys = append(keys, "j/k move", "/ filter", "h/l pane")
+		switch m.list.cat {
+		case CatProjects:
+			keys = append(keys, "p set project")
+		case CatTasks, CatMemories:
+			keys = append(keys, "p projects", "P all")
+		case CatOrganizations:
+			keys = append(keys, "l/↵ projects")
+		}
+		keys = append(keys, tail...)
+		return append(keys, "g/G", "^u/^d", "r refresh", "c copy")
+	case paneDetail:
+		keys := append(base, "j/k scroll", "^u/^d page", "h back", "c copy")
+		return append(keys, tail...)
+	}
+	return append(base, tail...)
 }
 
 // Compile-time assertion: rootModel implements tea.Model.

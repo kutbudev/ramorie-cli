@@ -73,6 +73,24 @@ func (s *sidebarModel) moveNext() {
 	}
 }
 
+func (s *sidebarModel) selectIndex(i int) bool {
+	if i < 0 || i >= len(allCategories) {
+		return false
+	}
+	changed := s.cursor != i
+	s.cursor = i
+	return changed
+}
+
+func categoryIndex(cat Category) int {
+	for i, c := range allCategories {
+		if c == cat {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s sidebarModel) selected() Category {
 	return allCategories[s.cursor]
 }
