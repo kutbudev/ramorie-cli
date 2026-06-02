@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
-	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
+	"github.com/kutbudev/ramorie-cli/internal/encstate"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -21,18 +21,18 @@ import (
 // --- unified_task: list/get/create/start/complete/stop/progress/note/move ---
 
 type UnifiedTaskInput struct {
-	Action      string  `json:"action"`                     // list, get, create, start, complete, stop, progress, note, move
-	Project     string  `json:"project,omitempty"`          // For list, create
-	TaskID      string  `json:"taskId,omitempty"`           // For get, start, complete, stop, progress, note, move
-	Description string  `json:"description,omitempty"`      // For create, note
-	Priority    string  `json:"priority,omitempty"`         // For create (L/M/H)
-	Progress    float64 `json:"progress,omitempty"`         // For progress (0-100)
-	Status      string  `json:"status,omitempty"`           // For list filter
-	Query       string  `json:"query,omitempty"`            // For list (keyword search)
-	NextPriority bool   `json:"next_priority,omitempty"`    // For list (prioritized TODO)
-	ProjectID   string  `json:"projectId,omitempty"`        // For move (target project)
-	Limit       float64 `json:"limit,omitempty"`
-	Cursor      string  `json:"cursor,omitempty"`
+	Action       string  `json:"action"`                  // list, get, create, start, complete, stop, progress, note, move
+	Project      string  `json:"project,omitempty"`       // For list, create
+	TaskID       string  `json:"taskId,omitempty"`        // For get, start, complete, stop, progress, note, move
+	Description  string  `json:"description,omitempty"`   // For create, note
+	Priority     string  `json:"priority,omitempty"`      // For create (L/M/H)
+	Progress     float64 `json:"progress,omitempty"`      // For progress (0-100)
+	Status       string  `json:"status,omitempty"`        // For list filter
+	Query        string  `json:"query,omitempty"`         // For list (keyword search)
+	NextPriority bool    `json:"next_priority,omitempty"` // For list (prioritized TODO)
+	ProjectID    string  `json:"projectId,omitempty"`     // For move (target project)
+	Limit        float64 `json:"limit,omitempty"`
+	Cursor       string  `json:"cursor,omitempty"`
 }
 
 func handleUnifiedTask(ctx context.Context, req *mcp.CallToolRequest, input UnifiedTaskInput) (*mcp.CallToolResult, interface{}, error) {
@@ -213,9 +213,11 @@ func handleTaskCreate(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToo
 		}
 	}
 
-	// Personal project only — encrypt with personal key (org projects skip encryption)
-	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.EncryptionEnabled && orgID == "" && crypto.IsVaultUnlocked() {
+	// Personal project only — encrypt with personal key (org projects skip encryption).
+	// Gate on the SERVER's CURRENT encryption status (encstate), not the stale
+	// local config flag, so disabling encryption in the web app stops CLI/MCP
+	// from encrypting with the old personal key.
+	if orgID == "" && encstate.ShouldEncryptPersonal(encstate.FetcherFor(apiClient)) && crypto.IsVaultUnlocked() {
 		encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(description)
 		if err == nil && isEncrypted {
 			task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, priority, meta)
@@ -305,8 +307,8 @@ func handleTaskNote(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToolR
 		return nil, nil, errors.New("taskId and description (note content) are required for note action")
 	}
 
-	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.EncryptionEnabled && crypto.IsVaultUnlocked() {
+	// Gate on the server's CURRENT encryption status, not the stale local flag.
+	if encstate.ShouldEncryptPersonal(encstate.FetcherFor(apiClient)) && crypto.IsVaultUnlocked() {
 		encryptedNote, nonce, isEncrypted, err := crypto.EncryptContent(note)
 		if err == nil && isEncrypted {
 			annotation, err := apiClient.CreateEncryptedAnnotation(taskID, encryptedNote, nonce)
@@ -358,10 +360,10 @@ func handleTaskMove(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToolR
 // --- unified_memory: list/get/generate_skill ---
 
 type UnifiedMemoryInput struct {
-	Action      string  `json:"action,omitempty"`    // list, get, create, generate_skill (omitted when goal is set)
-	Project     string  `json:"project,omitempty"`   // For list, create, generate_skill
-	MemoryID    string  `json:"memoryId,omitempty"`  // For get
-	Term        string  `json:"term,omitempty"`      // For list filter
+	Action      string  `json:"action,omitempty"`   // list, get, create, generate_skill (omitted when goal is set)
+	Project     string  `json:"project,omitempty"`  // For list, create, generate_skill
+	MemoryID    string  `json:"memoryId,omitempty"` // For get
+	Term        string  `json:"term,omitempty"`     // For list filter
 	Limit       float64 `json:"limit,omitempty"`
 	Cursor      string  `json:"cursor,omitempty"`
 	Goal        string  `json:"goal,omitempty"`         // For generate_skill: what skill to create
@@ -585,29 +587,29 @@ func handleMemoryGenerateSkill(ctx context.Context, input UnifiedMemoryInput) (*
 // --- unified_entity: list/get/create/create_relationship/graph/memories/entity_memories/stats/traverse/extract ---
 
 type UnifiedEntityInput struct {
-	Action             string   `json:"action"`                        // list, get, create, create_rel, graph, memories, entity_memories, stats, traverse, extract
-	EntityID           string   `json:"entity_id,omitempty"`           // For get, graph, entity_memories, traverse
-	MemoryID           string   `json:"memory_id,omitempty"`           // For memories
-	Name               string   `json:"name,omitempty"`                // For create
-	Type               string   `json:"type,omitempty"`                // For create, list filter
-	Description        string   `json:"description,omitempty"`         // For create, create_rel
-	Aliases            []string `json:"aliases,omitempty"`             // For create
-	Project            string   `json:"project,omitempty"`             // For create, list
-	Confidence         float64  `json:"confidence,omitempty"`          // For create
-	SourceEntityID     string   `json:"source_entity_id,omitempty"`    // For create_rel
-	TargetEntityID     string   `json:"target_entity_id,omitempty"`    // For create_rel, traverse
-	RelationshipType   string   `json:"relationship_type,omitempty"`   // For create_rel
-	Label              string   `json:"label,omitempty"`               // For create_rel
-	Strength           float64  `json:"strength,omitempty"`            // For create_rel
-	Hops               float64  `json:"hops,omitempty"`                // For graph, entity_memories, traverse
-	MaxDepth           int      `json:"max_depth,omitempty"`           // For traverse
-	RelationshipTypes  []string `json:"relationship_types,omitempty"`  // For traverse
-	EntityTypes        []string `json:"entity_types,omitempty"`        // For traverse
-	Mode               string   `json:"mode,omitempty"`                // For traverse (paths, cluster, neighbors)
-	Content            string   `json:"content,omitempty"`             // For extract
-	Query              string   `json:"query,omitempty"`               // For list
-	Limit              float64  `json:"limit,omitempty"`
-	Offset             float64  `json:"offset,omitempty"`
+	Action            string   `json:"action"`                       // list, get, create, create_rel, graph, memories, entity_memories, stats, traverse, extract
+	EntityID          string   `json:"entity_id,omitempty"`          // For get, graph, entity_memories, traverse
+	MemoryID          string   `json:"memory_id,omitempty"`          // For memories
+	Name              string   `json:"name,omitempty"`               // For create
+	Type              string   `json:"type,omitempty"`               // For create, list filter
+	Description       string   `json:"description,omitempty"`        // For create, create_rel
+	Aliases           []string `json:"aliases,omitempty"`            // For create
+	Project           string   `json:"project,omitempty"`            // For create, list
+	Confidence        float64  `json:"confidence,omitempty"`         // For create
+	SourceEntityID    string   `json:"source_entity_id,omitempty"`   // For create_rel
+	TargetEntityID    string   `json:"target_entity_id,omitempty"`   // For create_rel, traverse
+	RelationshipType  string   `json:"relationship_type,omitempty"`  // For create_rel
+	Label             string   `json:"label,omitempty"`              // For create_rel
+	Strength          float64  `json:"strength,omitempty"`           // For create_rel
+	Hops              float64  `json:"hops,omitempty"`               // For graph, entity_memories, traverse
+	MaxDepth          int      `json:"max_depth,omitempty"`          // For traverse
+	RelationshipTypes []string `json:"relationship_types,omitempty"` // For traverse
+	EntityTypes       []string `json:"entity_types,omitempty"`       // For traverse
+	Mode              string   `json:"mode,omitempty"`               // For traverse (paths, cluster, neighbors)
+	Content           string   `json:"content,omitempty"`            // For extract
+	Query             string   `json:"query,omitempty"`              // For list
+	Limit             float64  `json:"limit,omitempty"`
+	Offset            float64  `json:"offset,omitempty"`
 }
 
 func handleUnifiedEntity(ctx context.Context, req *mcp.CallToolRequest, input UnifiedEntityInput) (*mcp.CallToolResult, interface{}, error) {
@@ -1005,16 +1007,16 @@ func handleUnifiedEntity(ctx context.Context, req *mcp.CallToolRequest, input Un
 // --- unified_admin: consolidate/cleanup/orgs/export/import/plan/analyze ---
 
 type UnifiedAdminInput struct {
-	Action           string                 `json:"action"`                     // consolidate, cleanup, orgs, export, import, plan, analyze
-	Project          string                 `json:"project,omitempty"`          // For consolidate, cleanup, plan, analyze
-	StaleDays        int                    `json:"stale_days,omitempty"`       // For consolidate
+	Action           string                 `json:"action"`                      // consolidate, cleanup, orgs, export, import, plan, analyze
+	Project          string                 `json:"project,omitempty"`           // For consolidate, cleanup, plan, analyze
+	StaleDays        int                    `json:"stale_days,omitempty"`        // For consolidate
 	PromoteThreshold float64                `json:"promote_threshold,omitempty"` // For consolidate
 	ArchiveThreshold float64                `json:"archive_threshold,omitempty"` // For consolidate
-	DryRun           bool                   `json:"dry_run,omitempty"`          // For cleanup
-	BatchSize        int                    `json:"batch_size,omitempty"`       // For cleanup
-	PackID           string                 `json:"pack_id,omitempty"`          // For export
-	Bundle           map[string]interface{} `json:"bundle,omitempty"`           // For import
-	ConflictMode     string                 `json:"conflict_mode,omitempty"`    // For import
+	DryRun           bool                   `json:"dry_run,omitempty"`           // For cleanup
+	BatchSize        int                    `json:"batch_size,omitempty"`        // For cleanup
+	PackID           string                 `json:"pack_id,omitempty"`           // For export
+	Bundle           map[string]interface{} `json:"bundle,omitempty"`            // For import
+	ConflictMode     string                 `json:"conflict_mode,omitempty"`     // For import
 	// Plan fields
 	PlanID       string  `json:"plan_id,omitempty"`
 	Requirements string  `json:"requirements,omitempty"`

@@ -16,6 +16,7 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/config"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
+	"github.com/kutbudev/ramorie-cli/internal/encstate"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/kutbudev/ramorie-cli/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -1310,11 +1311,13 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 			"Please use encryption_scope='organization' or leave it empty to auto-detect.")
 	}
 
-	// Check if user has encryption enabled and vault is unlocked
+	// Check if user has encryption enabled and vault is unlocked.
 	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.EncryptionEnabled {
-		if orgID != "" {
-			// Organization-scoped encryption (REQUIRED for org projects)
+	if orgID != "" {
+		// Organization-scoped encryption (REQUIRED for org projects). Org keys
+		// are independent of the personal vault, so gate on the local
+		// encryption-enabled flag as before.
+		if cfg != nil && cfg.EncryptionEnabled {
 			if !crypto.IsOrgVaultUnlocked(orgID) {
 				return nil, nil, errors.New("🔒 Organization vault is locked.\n\n" +
 					"To unlock, the user must run:\n" +
@@ -1344,8 +1347,13 @@ func handleCreateTask(ctx context.Context, req *mcp.CallToolRequest, input Creat
 				result["_message"] = "✅ Task created (org-encrypted) in project " + projectID[:8] + "..."
 				return mustTextResult(result), nil, nil
 			}
-		} else {
-			// Personal-scoped encryption (only for personal projects)
+		}
+	} else {
+		// Personal-scoped encryption (only for personal projects). Gate on the
+		// SERVER's CURRENT encryption status (encstate) instead of the stale
+		// local flag, so disabling encryption in the web app stops CLI/MCP from
+		// encrypting with the old personal key.
+		if encstate.ShouldEncryptPersonal(encstate.FetcherFor(apiClient)) {
 			if !crypto.IsVaultUnlocked() {
 				return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
 					"To unlock, the user must run:\n" +
@@ -1490,9 +1498,8 @@ func handleAddTaskNote(ctx context.Context, req *mcp.CallToolRequest, input AddT
 		return nil, nil, errors.New("taskId and note are required")
 	}
 
-	// Check if user has encryption enabled and vault is unlocked
-	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.EncryptionEnabled {
+	// Gate on the server's CURRENT encryption status, not the stale local flag.
+	if encstate.ShouldEncryptPersonal(encstate.FetcherFor(apiClient)) {
 		if !crypto.IsVaultUnlocked() {
 			return nil, nil, errors.New("🔒 Vault is locked. Your account has encryption enabled.\n\n" +
 				"To unlock, the user must run:\n" +
@@ -1628,9 +1635,9 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 			}
 		}
 
-		// Personal project only — encrypt with personal key (org projects skip encryption)
-		cfg, _ := config.LoadConfig()
-		if cfg != nil && cfg.EncryptionEnabled && orgID == "" && crypto.IsVaultUnlocked() {
+		// Personal project only — encrypt with personal key (org projects skip
+		// encryption). Gate on the server's CURRENT encryption status.
+		if orgID == "" && encstate.ShouldEncryptPersonal(encstate.FetcherFor(apiClient)) && crypto.IsVaultUnlocked() {
 			encryptedDesc, nonce, isEncrypted, err := crypto.EncryptContent(taskDesc)
 			if err == nil && isEncrypted {
 				task, err := apiClient.CreateEncryptedTaskWithMeta(projectID, encryptedDesc, nonce, "M", meta)
@@ -1673,11 +1680,11 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		memoryType = DetectMemoryType(content)
 	}
 
-	// Check encryption based on project scope (org vs personal)
-	cfg, _ := config.LoadConfig()
-
-	// Personal project only — encrypt with personal key (org projects skip encryption)
-	if orgID == "" && cfg != nil && cfg.EncryptionEnabled && crypto.IsVaultUnlocked() {
+	// Check encryption based on project scope (org vs personal).
+	// Personal project only — encrypt with personal key (org projects skip
+	// encryption). Gate on the server's CURRENT encryption status (encstate)
+	// instead of the stale local flag.
+	if orgID == "" && encstate.ShouldEncryptPersonal(encstate.FetcherFor(apiClient)) && crypto.IsVaultUnlocked() {
 		contentHash := crypto.ComputeContentHash(content)
 
 		encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)

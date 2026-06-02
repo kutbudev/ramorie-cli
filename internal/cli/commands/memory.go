@@ -13,6 +13,7 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/cli/resolve"
 	"github.com/kutbudev/ramorie-cli/internal/constants"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
+	"github.com/kutbudev/ramorie-cli/internal/encstate"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/urfave/cli/v2"
@@ -140,7 +141,11 @@ For multi-line content with leading "-" bullets, prefer piping via stdin
 			}
 
 			var memory *models.Memory
-			if crypto.IsVaultUnlocked() && !isOrgProject {
+			// Gate on the SERVER's CURRENT encryption status (encstate) in
+			// addition to the unlocked vault. Previously this path skipped the
+			// encryption-enabled flag entirely, so it kept encrypting with the
+			// old personal key after the user disabled encryption server-side.
+			if encstate.ShouldEncryptPersonal(encstate.FetcherFor(client)) && crypto.IsVaultUnlocked() && !isOrgProject {
 				contentHash := crypto.ComputeContentHash(content)
 				encryptedContent, nonce, isEncrypted, encErr := crypto.EncryptContent(content)
 				if encErr != nil {

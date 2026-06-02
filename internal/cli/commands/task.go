@@ -9,6 +9,7 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
+	"github.com/kutbudev/ramorie-cli/internal/encstate"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 	"github.com/urfave/cli/v2"
@@ -137,11 +138,11 @@ func taskListCmd() *cli.Command {
 			fmt.Println()
 
 			cols := []display.Column{
-				{Title: "S", Min: 3, Weight: 0},        // status icon
-				{Title: "P", Min: 3, Weight: 0},        // priority badge
+				{Title: "S", Min: 3, Weight: 0}, // status icon
+				{Title: "P", Min: 3, Weight: 0}, // priority badge
 				{Title: "ID", Min: 8, Weight: 0},
 				{Title: "TITLE", Min: 24, Weight: 4},
-				{Title: "TAGS", Min: 14, Weight: 1},    // dropped first
+				{Title: "TAGS", Min: 14, Weight: 1}, // dropped first
 				{Title: "UPDATED", Min: 10, Weight: 0},
 			}
 			rows := make([][]string, 0, len(tasks))
@@ -222,7 +223,10 @@ func taskCreateCmd() *cli.Command {
 				}
 			}
 
-			if crypto.IsVaultUnlocked() && !isOrgProject {
+			// Gate on the SERVER's CURRENT encryption status (encstate) in
+			// addition to the unlocked vault, so disabling encryption in the web
+			// app stops the CLI from encrypting with the old personal key.
+			if encstate.ShouldEncryptPersonal(encstate.FetcherFor(client)) && crypto.IsVaultUnlocked() && !isOrgProject {
 				// Personal project only — encrypt with personal key
 				encTitle, titleNonce, titleEncrypted, encErr := crypto.EncryptContent(title)
 				if encErr != nil {
