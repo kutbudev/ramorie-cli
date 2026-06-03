@@ -160,6 +160,14 @@ For multi-line content with leading "-" bullets, prefer piping via stdin
 				memory, err = client.CreateMemory(projectID, content, tags...)
 			}
 			if err != nil {
+				if apierrors.IsEncryptionRequiredError(err) {
+					projectName := projectNameFor(projects, projectID)
+					return fmt.Errorf("%s", apierrors.EncryptionRequiredMessage(
+						projectName,
+						crypto.IsVaultUnlocked(),
+						encstate.ShouldEncryptPersonal(encstate.FetcherFor(client)),
+					))
+				}
 				return fmt.Errorf("%s", apierrors.ParseAPIError(err))
 			}
 
@@ -553,6 +561,18 @@ func memoryLinksCmd() *cli.Command {
 			return nil
 		},
 	}
+}
+
+// projectNameFor returns the display name of the project with the given ID
+// from an already-fetched list, or "" if not present. Used to build a
+// friendlier ENCRYPTION_REQUIRED error without an extra round-trip.
+func projectNameFor(projects []models.Project, projectID string) string {
+	for _, p := range projects {
+		if p.ID.String() == projectID {
+			return p.Name
+		}
+	}
+	return ""
 }
 
 // decryptMemoryForCLI decrypts memory content if encrypted and vault is unlocked.

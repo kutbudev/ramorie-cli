@@ -262,6 +262,14 @@ func taskCreateCmd() *cli.Command {
 			}
 
 			if err != nil {
+				if apierrors.IsEncryptionRequiredError(err) {
+					fmt.Println(apierrors.EncryptionRequiredMessage(
+						projectNameFor(projects, projectID),
+						crypto.IsVaultUnlocked(),
+						encstate.ShouldEncryptPersonal(encstate.FetcherFor(client)),
+					))
+					return err
+				}
 				fmt.Println(apierrors.ParseAPIError(err))
 				return err
 			}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
@@ -23,6 +24,7 @@ func NewProjectCommand() *cli.Command {
 			projectShowCmd(),
 			projectDeleteCmd(),
 			projectUpdateCmd(),
+			projectSetEncryptionCmd(),
 		},
 	}
 }
@@ -47,7 +49,7 @@ func projectListCmd() *cli.Command {
 			}
 
 			cols := []display.Column{
-				{Title: "ID", Min: 36, Weight: 0},          // full UUID — fixed
+				{Title: "ID", Min: 36, Weight: 0}, // full UUID — fixed
 				{Title: "NAME", Min: 16, Weight: 1},
 				{Title: "DESCRIPTION", Min: 24, Weight: 3}, // dropped on narrow terminals
 			}
@@ -244,6 +246,57 @@ func projectUpdateCmd() *cli.Command {
 			}
 
 			fmt.Printf("✅ Project '%s' (ID: %s) updated successfully.\n", project.Name, project.ID.String()[:8])
+			return nil
+		},
+	}
+}
+
+// projectSetEncryptionCmd toggles a project's encryption_required flag.
+//
+// This is the operator-facing fix for the encryption_required deadlock:
+// when a project requires encryption but the account has encryption
+// disabled, writes fail with ENCRYPTION_REQUIRED and unlocking can't help.
+// `ramorie project set-encryption <project> false` clears the requirement.
+func projectSetEncryptionCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "set-encryption",
+		Usage:     "Set whether a project requires encrypted writes",
+		ArgsUsage: "[project] [true|false]",
+		Description: "Toggle the per-project encryption_required flag.\n" +
+			"   true  → memories/tasks must be written encrypted (vault must be unlocked).\n" +
+			"   false → plaintext writes are allowed (use this if your account encryption is disabled).\n\n" +
+			"   Example: ramorie project set-encryption my-project false",
+		Action: func(c *cli.Context) error {
+			if c.NArg() < 2 {
+				return fmt.Errorf("usage: ramorie project set-encryption <project> <true|false>")
+			}
+			arg := c.Args().Get(0)
+			rawVal := c.Args().Get(1)
+
+			required, perr := strconv.ParseBool(rawVal)
+			if perr != nil {
+				return fmt.Errorf("invalid value %q: expected true or false", rawVal)
+			}
+
+			client := api.NewClient()
+			projectID, err := resolve.ResolveProject(arg, client)
+			if err != nil {
+				return err
+			}
+
+			project, err := client.UpdateProject(projectID, map[string]interface{}{
+				"encryption_required": required,
+			})
+			if err != nil {
+				fmt.Printf("Error updating project encryption: %v\n", err)
+				return err
+			}
+
+			if required {
+				fmt.Printf("🔒 Project '%s' now REQUIRES encrypted writes. Make sure your vault is unlocked (`ramorie setup unlock`).\n", project.Name)
+			} else {
+				fmt.Printf("🔓 Project '%s' no longer requires encryption — plaintext writes are now allowed.\n", project.Name)
+			}
 			return nil
 		},
 	}
