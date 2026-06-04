@@ -629,6 +629,198 @@ func TestDetectCwdProject_ShortNameIgnored(t *testing.T) {
 	}
 }
 
+// TestDetectCwdProject_NoPrefixFalseMatch verifies that a project whose
+// normalized name is a PREFIX of a cwd segment does NOT match.
+//
+// Regression: the old HasPrefix check caused a project named "Ramorie"
+// (norm="ramorie") to match a directory named "ramorie-frontend"
+// (norm="ramoriefrontend") because "ramoriefrontend".HasPrefix("ramorie")=true.
+func TestDetectCwdProject_NoPrefixFalseMatch(t *testing.T) {
+	origCwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+
+	// Directory segment "ramoriefrontend" after normalization.
+	root := t.TempDir()
+	dir := filepath.Join(root, "ramorie-frontend")
+	_ = os.Mkdir(dir, 0o755)
+	_ = os.Chdir(dir)
+
+	// Project "Ramorie" normalizes to "ramorie" — a strict prefix of "ramoriefrontend".
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stubProjectsEndpoint([]stubProject{{ID: uuid.New(), Name: "Ramorie"}})(w, r)
+	}))
+	defer ts.Close()
+	c := &api.Client{BaseURL: ts.URL, APIKey: "k", HTTPClient: ts.Client()}
+
+	p, _, err := detectCwdProject(c)
+	if err != nil {
+		t.Fatalf("detectCwdProject: %v", err)
+	}
+	if p != nil {
+		t.Errorf("project %q (norm=%q) must NOT match dir segment %q via prefix; got match",
+			"Ramorie", "ramorie", "ramorie-frontend")
+	}
+}
+
+// TestDetectCwdProject_ExactNormMatchStillWorks verifies the happy-path:
+// a directory whose normalized name EXACTLY equals the project's normalized name.
+func TestDetectCwdProject_ExactNormMatchStillWorks(t *testing.T) {
+	origCwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+
+	root := t.TempDir()
+	// "ramorie-frontend" normalizes to "ramoriefrontend", same as "Ramorie Frontend".
+	dir := filepath.Join(root, "ramorie-frontend")
+	_ = os.Mkdir(dir, 0o755)
+	_ = os.Chdir(dir)
+
+	projectID := uuid.New()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stubProjectsEndpoint([]stubProject{{ID: projectID, Name: "Ramorie Frontend"}})(w, r)
+	}))
+	defer ts.Close()
+	c := &api.Client{BaseURL: ts.URL, APIKey: "k", HTTPClient: ts.Client()}
+
+	p, _, err := detectCwdProject(c)
+	if err != nil {
+		t.Fatalf("detectCwdProject: %v", err)
+	}
+	if p == nil {
+		t.Fatal("exact norm match: 'ramorie-frontend' dir should match project 'Ramorie Frontend'")
+	}
+	if p.ID != projectID {
+		t.Errorf("matched wrong project: got %s, want %s", p.ID, projectID)
+	}
+}
+
+// seedStaleSession creates an initialized session with a specific last-project ID
+// to simulate a persisted stale session from a previous MCP run.
+// Returns a cleanup function that resets the session.
+func seedStaleSession(t *testing.T, projectID uuid.UUID) func() {
+	t.Helper()
+	// InitializeSession ensures currentSession is non-nil before we set the project.
+	InitializeSession("seed-agent", "seed-model")
+	SetSessionLastProject(projectID)
+	return func() { ResetSession() }
+}
+
+// TestHandleSetupAgent_StaleLastProjectNotLeakedWhenCwdDetects checks that
+// when setup_agent detects a cwd project (e.g. "Ramorie Frontend"), a stale
+// session last_used_project (e.g. "warp-lite" from a previous session) does
+// NOT appear in the verbose response — agents would latch onto the wrong one.
+func TestHandleSetupAgent_StaleLastProjectNotLeakedWhenCwdDetects(t *testing.T) {
+	// Create a dir whose basename exactly matches a project.
+	origCwd, _ := os.Getwd()
+	root := t.TempDir()
+	matchDir := filepath.Join(root, "Ramorie-Frontend")
+	_ = os.Mkdir(matchDir, 0o755)
+	if err := os.Chdir(matchDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+
+	ramorieID := uuid.New()
+	warpID := uuid.New()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/projects"):
+			stubProjectsEndpoint([]stubProject{
+				{ID: ramorieID, Name: "Ramorie Frontend"},
+				{ID: warpID, Name: "warp-lite"},
+			})(w, r)
+		case strings.HasPrefix(r.URL.Path, "/reports/stats"):
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	// Seed a stale session last-project pointing to warp-lite.
+	cleanup := seedStaleSession(t, warpID)
+	t.Cleanup(cleanup)
+
+	res, _, err := handleSetupAgent(context.Background(), nil, SetupAgentInput{
+		AgentName: "stale-bleed-test",
+		Full:      true, // verbose path exercises last_used_project injection
+	})
+	if err != nil {
+		t.Fatalf("handleSetupAgent: %v", err)
+	}
+	got := decodeToolResult(t, res)
+
+	// The cwd MUST detect ramorie.
+	detected, ok := got["detected_project"].(map[string]any)
+	if !ok || detected == nil {
+		t.Fatalf("expected detected_project from cwd; got %v", got["detected_project"])
+	}
+	if detected["id"] != ramorieID.String() {
+		t.Errorf("detected_project should be ramorie; got %v", detected["id"])
+	}
+
+	// last_used_project MUST NOT appear when detected_project is set (prevents stale bleed).
+	if lup, present := got["last_used_project"]; present {
+		t.Errorf("last_used_project must be suppressed when cwd project is detected; got %v", lup)
+	}
+}
+
+// TestHandleSetupAgent_StaleLastProjectShownWithCautionWhenNoCwdMatch verifies that
+// when there is no cwd match, last_used_project IS shown but carries a _caution field
+// so the agent knows it may be stale.
+func TestHandleSetupAgent_StaleLastProjectShownWithCautionWhenNoCwdMatch(t *testing.T) {
+	origCwd, _ := os.Getwd()
+	// Use a temp dir with no project-matching name.
+	_ = os.Chdir(t.TempDir())
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+
+	warpID := uuid.New()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/projects"):
+			stubProjectsEndpoint([]stubProject{{ID: warpID, Name: "warp-lite"}})(w, r)
+		case strings.HasPrefix(r.URL.Path, "/reports/stats"):
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer ts.Close()
+	installTestAPIClient(t, ts)
+
+	// Seed stale session with warp-lite as last project.
+	cleanup := seedStaleSession(t, warpID)
+	t.Cleanup(cleanup)
+
+	res, _, err := handleSetupAgent(context.Background(), nil, SetupAgentInput{
+		AgentName: "no-cwd-stale-test",
+		Full:      true,
+	})
+	if err != nil {
+		t.Fatalf("handleSetupAgent: %v", err)
+	}
+	got := decodeToolResult(t, res)
+
+	// No cwd match → detected_project absent.
+	if _, present := got["detected_project"]; present {
+		t.Errorf("no cwd match: detected_project should be absent; got %v", got["detected_project"])
+	}
+
+	// last_used_project MUST be present (no cwd override) with the _caution field.
+	lup, present := got["last_used_project"].(map[string]any)
+	if !present || lup == nil {
+		t.Fatalf("last_used_project should be present when no cwd match; got %v", got["last_used_project"])
+	}
+	if lup["id"] != warpID.String() {
+		t.Errorf("last_used_project.id wrong; got %v want %s", lup["id"], warpID)
+	}
+	if _, ok := lup["_caution"]; !ok {
+		t.Errorf("last_used_project must carry _caution field when no cwd project detected; got %v", lup)
+	}
+}
+
 // Ensure models import is used (avoid unused-import lint in some layouts).
 var _ = models.Project{}
 

@@ -925,6 +925,20 @@ type ListProjectsInput struct {
 
 // detectCwdProject scans cwd path segments against project names, returns the first match.
 // Also sets session last-project on match.
+//
+// Matching rules (tightest-first to avoid false positives):
+//  1. Exact normalized equality: normalizeForMatch(segment) == normalizeForMatch(project.Name)
+//     e.g. dir "ramorie_frontend" matches project "Ramorie Frontend"
+//  2. Segment is a strict extension of the project name separated at a word boundary:
+//     segmentNorm starts with projectNorm AND the next character is NOT alphanumeric.
+//     e.g. dir "ramorie-frontend-v2" (→ "ramoriefrontendv2") does NOT match project "Ramorie"
+//     because after stripping separators there is no word boundary to test — we skip HasPrefix
+//     entirely. The only safe containment case is the exact-match above.
+//
+// The old strings.HasPrefix(segmentNorm, projectNorm) was over-eager: a short project
+// named "Ramorie" (norm="ramorie") would match segment "ramoriefrontend" because
+// "ramoriefrontend" starts with "ramorie". After normalization all separators are gone so
+// there is no way to confirm the prefix ends at a word boundary — we drop it entirely.
 func detectCwdProject(client *api.Client) (*models.Project, string, error) {
 	cwd, err := os.Getwd()
 	if err != nil || cwd == "" {
@@ -946,7 +960,9 @@ func detectCwdProject(client *api.Client) (*models.Project, string, error) {
 				continue
 			}
 			segmentNorm := normalizeForMatch(segment)
-			if segmentNorm == projectNorm || strings.HasPrefix(segmentNorm, projectNorm) {
+			// Exact normalized equality only — no HasPrefix to avoid
+			// "ramorie" (project) matching "ramoriefrontend" (segment).
+			if segmentNorm == projectNorm {
 				SetSessionLastProject(p.ID)
 				return p, cwd, nil
 			}
@@ -1021,15 +1037,23 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 		"5_save":    "remember/task",
 		"critical":  "Always find BEFORE remember to avoid duplicates",
 	}
-	if lastProject := GetSessionLastProjectID(); lastProject != nil {
-		if projects, lerr := apiClient.ListProjects(""); lerr == nil {
-			for _, p := range projects {
-				if p.ID == *lastProject {
-					result["last_used_project"] = map[string]interface{}{
-						"id":   lastProject.String(),
-						"name": p.Name,
+	// Only expose last_used_project when no cwd project was detected.
+	// When cwd detection already identified a project (detected != nil), the
+	// detected project IS the authoritative context — surfacing a stale
+	// last_used_project from a previous session (e.g. warp-lite) would confuse
+	// agents into using the wrong project.
+	if detected == nil {
+		if lastProject := GetSessionLastProjectID(); lastProject != nil {
+			if projects, lerr := apiClient.ListProjects(""); lerr == nil {
+				for _, p := range projects {
+					if p.ID == *lastProject {
+						result["last_used_project"] = map[string]interface{}{
+							"id":       lastProject.String(),
+							"name":     p.Name,
+							"_caution": "stale session value — pass project= explicitly or rely on cwd detection",
+						}
+						break
 					}
-					break
 				}
 			}
 		}
@@ -2990,14 +3014,10 @@ func resolveProjectID(client *api.Client, projectIdentifier string) (string, err
 					}
 					segmentNorm := normalizeForMatch(segment)
 
-					// Exact normalized match: "ramorie-frontend" == "Ramorie Frontend"
+					// Exact normalized match only — no HasPrefix to prevent
+					// a short project name (e.g. "ramorie") from matching a
+					// longer segment (e.g. "ramoriefrontend").
 					if segmentNorm == projectNorm {
-						SetSessionLastProject(p.ID)
-						return p.ID.String(), nil
-					}
-
-					// Prefix match: "ramorie-frontend-app" contains "ramorie-frontend"
-					if len(projectNorm) >= 4 && strings.HasPrefix(segmentNorm, projectNorm) {
 						SetSessionLastProject(p.ID)
 						return p.ID.String(), nil
 					}
@@ -3169,7 +3189,9 @@ func resolveProjectWithOrg(client *api.Client, projectIdentifier string) (projec
 					}
 					segmentNorm := normalizeForMatch(segment)
 
-					if segmentNorm == projectNorm || (len(projectNorm) >= 4 && strings.HasPrefix(segmentNorm, projectNorm)) {
+					// Exact normalized match only — mirrors detectCwdProject
+					// (no HasPrefix to avoid short-name false positives).
+					if segmentNorm == projectNorm {
 						SetSessionLastProject(p.ID)
 						oid := ""
 						if p.OrganizationID != nil {
