@@ -50,8 +50,13 @@ func rememberCmd() *cli.Command {
 		UseShortOptionHandling: true,
 		Description: `Create a new memory entry, scoped to a project.
 
-Project resolution accepts a name, short ID prefix, or full UUID — same
-semantics as ` + "`task list -p`" + ` and ` + "`kanban -p`" + `.
+Project resolution accepts a name, short ID prefix, or full UUID. When -p is
+omitted the project is auto-detected from the current directory name, the git
+remote, your single project, or the last project you used — so inside a project
+directory you can just run ` + "`ramorie remember \"my note\"`" + `.
+
+-p may also be placed AFTER the content; it is rescued even though urfave/cli
+would otherwise swallow it as positional text.
 
 Content sources (in priority order):
   1. Positional argument(s) — joined with spaces
@@ -61,13 +66,13 @@ For multi-line content with leading "-" bullets, prefer piping via stdin
 (or use the "--" separator) so urfave/cli doesn't treat lines as flags:
 
   cat memory.md | ramorie remember -p "Ramorie Backend"
-  ramorie remember -p "Ramorie Backend" -- "- bullet one"`,
+  ramorie remember "my note"                 # project auto-detected
+  ramorie remember "my note" -p ramorie-cli  # -p after content also works`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "project",
-				Aliases:  []string{"p"},
-				Usage:    "Project (name | short id | UUID)",
-				Required: true,
+				Name:    "project",
+				Aliases: []string{"p"},
+				Usage:   "Project (name | short id | UUID). Optional: auto-detected when omitted.",
 			},
 			&cli.StringSliceFlag{
 				Name:    "tags",
@@ -82,15 +87,24 @@ For multi-line content with leading "-" bullets, prefer piping via stdin
 		Action: func(c *cli.Context) error {
 			client := api.NewClient()
 
-			// 1. Resolve project (name, short id, or UUID).
+			// 1. Resolve project (name, short id, UUID, or auto-detect).
+			//    Rescue a -p/--project that urfave/cli swallowed into the
+			//    positionals when the user typed it AFTER the content.
 			projectArg := c.String("project")
-			projectID, err := resolve.ResolveProject(projectArg, client)
+			posArgs := c.Args().Slice()
+			if projectArg == "" {
+				if rescued, rest := extractProjectFlag(posArgs); rescued != "" {
+					projectArg = rescued
+					posArgs = rest
+				}
+			}
+			projectID, err := resolve.AutoResolveProject(projectArg, client)
 			if err != nil {
 				return err
 			}
 
 			// 2. Get content from positionals or piped stdin.
-			content := strings.TrimSpace(strings.Join(c.Args().Slice(), " "))
+			content := strings.TrimSpace(strings.Join(posArgs, " "))
 			if content == "" {
 				if !term.IsTerminal(int(os.Stdin.Fd())) {
 					b, readErr := io.ReadAll(os.Stdin)

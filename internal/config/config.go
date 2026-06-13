@@ -26,6 +26,36 @@ type Config struct {
 
 	// TUI preferences
 	Theme string `json:"theme,omitempty"` // glamour markdown theme for `ramorie ui`
+
+	// LastProjectID is the most recently used project UUID. Lets commands
+	// auto-detect the project when -p is omitted, so users rarely have to
+	// remember or retype project identifiers.
+	LastProjectID string `json:"last_project_id,omitempty"`
+}
+
+// LoadLastProject returns the remembered project UUID, or "" if none/unreadable.
+func LoadLastProject() string {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return ""
+	}
+	return cfg.LastProjectID
+}
+
+// RememberLastProject persists projectID as the last-used project (best effort).
+func RememberLastProject(projectID string) {
+	if projectID == "" {
+		return
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return
+	}
+	if cfg.LastProjectID == projectID {
+		return
+	}
+	cfg.LastProjectID = projectID
+	_ = SaveConfig(cfg)
 }
 
 // GetConfigPath returns the path to the new config file (~/.ramorie/config.json)

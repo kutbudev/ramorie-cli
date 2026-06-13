@@ -8,6 +8,7 @@ import (
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
+	"github.com/kutbudev/ramorie-cli/internal/cli/resolve"
 	"github.com/kutbudev/ramorie-cli/internal/crypto"
 	"github.com/kutbudev/ramorie-cli/internal/encstate"
 	apierrors "github.com/kutbudev/ramorie-cli/internal/errors"
@@ -63,24 +64,14 @@ func taskListCmd() *cli.Command {
 
 			client := api.NewClient()
 
-			// Resolve project name/short-id to full UUID
+			// Resolve project name/short-id to full UUID (empty = all projects).
 			var projectID string
 			if projectArg != "" {
-				projects, err := client.ListProjects()
+				resolved, err := resolve.ResolveProject(projectArg, client)
 				if err != nil {
-					return fmt.Errorf("could not fetch projects: %w", err)
+					return err
 				}
-				for _, p := range projects {
-					if p.ID.String() == projectArg ||
-						strings.HasPrefix(p.ID.String(), projectArg) ||
-						strings.EqualFold(p.Name, projectArg) {
-						projectID = p.ID.String()
-						break
-					}
-				}
-				if projectID == "" {
-					return fmt.Errorf("project '%s' not found", projectArg)
-				}
+				projectID = resolved
 			}
 
 			tasks, err := client.ListTasks(projectID, status)
@@ -176,40 +167,42 @@ func taskCreateCmd() *cli.Command {
 		ArgsUsage:              "[title]",
 		UseShortOptionHandling: true,
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Project ID or name (required)", Required: true},
+			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Project (name | short id | UUID). Optional: auto-detected when omitted."},
 			&cli.StringFlag{Name: "description", Aliases: []string{"d"}, Usage: "Task description"},
 			&cli.StringFlag{Name: "priority", Aliases: []string{"P"}, Usage: "Priority (H, M, L)", Value: "M"},
 			&cli.StringSliceFlag{Name: "tags", Aliases: []string{"t"}, Usage: "Tags (comma-separated or multiple -t flags)"},
 		},
 		Action: func(c *cli.Context) error {
-			if c.NArg() == 0 {
-				return fmt.Errorf("task title is required. Usage: ramorie task create [--priority H] [--tags tag1,tag2] \"Task title\"")
-			}
-			title := c.Args().First()
+			// Rescue a -p/--project the user typed AFTER the title (urfave/cli
+			// would otherwise swallow it into the positionals).
+			posArgs := c.Args().Slice()
 			projectArg := c.String("project")
+			if projectArg == "" {
+				if rescued, rest := extractProjectFlag(posArgs); rescued != "" {
+					projectArg = rescued
+					posArgs = rest
+				}
+			}
+			if len(posArgs) == 0 {
+				return fmt.Errorf("task title is required. Usage: ramorie task create [--project name] [--priority H] [--tags tag1,tag2] \"Task title\"")
+			}
+			title := posArgs[0]
 			description := c.String("description")
 			priority := c.String("priority")
 			tags := c.StringSlice("tags")
 
 			client := api.NewClient()
 
-			// Resolve project name/short-id to full UUID
+			// Resolve project (name, short id, UUID, or auto-detect when omitted).
+			projectID, err := resolve.AutoResolveProject(projectArg, client)
+			if err != nil {
+				return err
+			}
+
+			// Fetch projects for the org-encryption check below.
 			projects, err := client.ListProjects()
 			if err != nil {
 				return fmt.Errorf("could not fetch projects: %w", err)
-			}
-
-			var projectID string
-			for _, p := range projects {
-				if p.ID.String() == projectArg ||
-					strings.HasPrefix(p.ID.String(), projectArg) ||
-					strings.EqualFold(p.Name, projectArg) {
-					projectID = p.ID.String()
-					break
-				}
-			}
-			if projectID == "" {
-				return fmt.Errorf("project '%s' not found", projectArg)
 			}
 
 			var task *models.Task
@@ -677,22 +670,10 @@ func taskMoveCmd() *cli.Command {
 			taskIDs := c.Args().Slice()
 			client := api.NewClient()
 
-			// Resolve project name to ID if needed
-			projects, err := client.ListProjects()
+			// Resolve project name/short-id to full UUID.
+			projectID, err := resolve.ResolveProject(targetProject, client)
 			if err != nil {
-				return fmt.Errorf("could not fetch projects: %w", err)
-			}
-
-			var projectID string
-			for _, p := range projects {
-				if p.ID.String() == targetProject || strings.HasPrefix(p.ID.String(), targetProject) || strings.EqualFold(p.Name, targetProject) {
-					projectID = p.ID.String()
-					break
-				}
-			}
-
-			if projectID == "" {
-				return fmt.Errorf("project '%s' not found", targetProject)
+				return err
 			}
 
 			// Move each task
@@ -739,24 +720,14 @@ func taskNextCmd() *cli.Command {
 
 			client := api.NewClient()
 
-			// Resolve project name/short-id to full UUID
+			// Resolve project name/short-id to full UUID (empty = all projects).
 			var projectID string
 			if projectArg != "" {
-				projects, err := client.ListProjects()
+				resolved, err := resolve.ResolveProject(projectArg, client)
 				if err != nil {
-					return fmt.Errorf("could not fetch projects: %w", err)
+					return err
 				}
-				for _, p := range projects {
-					if p.ID.String() == projectArg ||
-						strings.HasPrefix(p.ID.String(), projectArg) ||
-						strings.EqualFold(p.Name, projectArg) {
-						projectID = p.ID.String()
-						break
-					}
-				}
-				if projectID == "" {
-					return fmt.Errorf("project '%s' not found", projectArg)
-				}
+				projectID = resolved
 			}
 
 			// Get all tasks
