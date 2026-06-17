@@ -217,7 +217,7 @@ func handleMemoryConsolidationPrompt(_ context.Context, req *mcp.GetPromptReques
 	if focusArea != "" {
 		focusSection = fmt.Sprintf(`
 - Focus specifically on memories related to: "%s"
-- Use recall with term="%s" to find relevant memories`, focusArea, focusArea)
+- Use find with term="%s" to find relevant memories`, focusArea, focusArea)
 	}
 
 	promptText := fmt.Sprintf(`Consolidate and organize memories for project "%s". Follow these steps:

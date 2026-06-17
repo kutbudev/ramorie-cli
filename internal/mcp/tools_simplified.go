@@ -360,17 +360,14 @@ func handleTaskMove(ctx context.Context, input UnifiedTaskInput) (*mcp.CallToolR
 // --- unified_memory: list/get/generate_skill ---
 
 type UnifiedMemoryInput struct {
-	Action      string  `json:"action,omitempty"`   // list, get, create, generate_skill (omitted when goal is set)
-	Project     string  `json:"project,omitempty"`  // For list, create, generate_skill
+	Action      string  `json:"action,omitempty"`   // list, get, generate_skill (omitted when goal is set)
+	Project     string  `json:"project,omitempty"`  // For list, generate_skill
 	MemoryID    string  `json:"memoryId,omitempty"` // For get
-	Term        string  `json:"term,omitempty"`     // For list filter
+	Term        string  `json:"term,omitempty"`     // For list: substring (contains) filter — NOT search; use find() for topics
 	Limit       float64 `json:"limit,omitempty"`
 	Cursor      string  `json:"cursor,omitempty"`
 	Goal        string  `json:"goal,omitempty"`         // For generate_skill: what skill to create
 	AutoContext bool    `json:"auto_context,omitempty"` // For generate_skill: fetch suggested context automatically
-	// Create-action fields
-	Content string `json:"content,omitempty"` // For create: memory content
-	Type    string `json:"type,omitempty"`    // For create: memory type (decision, bug_fix, etc.)
 }
 
 // serializeSkillMarkdown formats frontmatter + body into a markdown string
@@ -419,11 +416,17 @@ func dispatchUnifiedMemoryAction(action string, input UnifiedMemoryInput) (*mcp.
 		if err != nil {
 			return nil, nil, err
 		}
+		// list returns the project's raw memories newest-first and UNRANKED —
+		// there is no semantic scoring here. This is a browse surface, not search;
+		// agents wanting topic/semantic retrieval must use find().
 		memories, err := apiClient.ListMemories(projectID, "")
 		if err != nil {
 			return nil, nil, err
 		}
 
+		// `term` is a plain substring (contains) filter over decrypted content —
+		// NOT a search query. The JSON key stays "term" for wire compatibility,
+		// but it never invokes ranking/HyDE/rerank. Use find() for that.
 		term := strings.TrimSpace(input.Term)
 		if term != "" {
 			filtered := memories[:0]
@@ -492,34 +495,13 @@ func dispatchUnifiedMemoryAction(action string, input UnifiedMemoryInput) (*mcp.
 		return mustTextResult(result), nil, nil
 
 	case "create":
-		content := strings.TrimSpace(input.Content)
-		if content == "" {
-			return nil, nil, errors.New("content is required for create action")
-		}
-		if strings.TrimSpace(input.Project) == "" {
-			return nil, nil, errors.New("'project' parameter is REQUIRED for create action")
-		}
-		projectID, err := resolveProjectID(apiClient, input.Project)
-		if err != nil {
-			return nil, nil, err
-		}
-		saved, err := apiClient.CreateMemoryWithOptions(api.CreateMemoryOptions{
-			ProjectID: projectID,
-			Content:   content,
-			Type:      strings.TrimSpace(input.Type),
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return mustTextResult(map[string]interface{}{
-			"action":  "created",
-			"id":      saved.ID.String(),
-			"content": content,
-			"type":    input.Type,
-		}), nil, nil
+		// memory(action:create) was a thin remember() clone that bypassed
+		// duplicate detection and auto-typing. Removed — route writes through
+		// remember() so the dedup + auto-type pipeline always runs.
+		return nil, nil, errors.New("memory(action:create) has been removed. Use remember(content, project) instead — it runs duplicate detection and auto-detects the memory type")
 
 	default:
-		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: list, get, create, or set goal to generate a skill", action)
+		return nil, nil, fmt.Errorf("invalid action '%s'. Must be: list or get, or set goal to generate a skill", action)
 	}
 }
 

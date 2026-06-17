@@ -44,7 +44,8 @@ func ServeStdio(client *api.Client) error {
 	)
 
 	// Register all tools, resources, and prompts
-	// v4: Simplified from 49 tools to 15 action-based tools
+	// v4: Simplified from 49 tools to 13 action-based tools (recall removed —
+	// retrieval unified under find; lexical baseline via find(hyde:off, rerank:off))
 	registerToolsV4(server)
 	registerResources(server)
 	registerPrompts(server)

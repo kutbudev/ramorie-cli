@@ -4,21 +4,22 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerToolsV4 registers 14 simplified MCP tools (down from 49) via
+// registerToolsV4 registers 13 simplified MCP tools (down from 49) via
 // mcp.AddTool — this is the v4 tool set optimized for agent compliance.
 // PR11 follow-up: auto_remember is intentionally not agent-facing. Agents
 // should write durable memories deliberately with remember(); automatic writes
 // created too many tiny, low-context fragments.
 //
-// Current registrations (14 total = 6 core + 4 common + 4 advanced):
+// Current registrations (13 total = 4 core + 5 common + 4 advanced):
 //
-//	🔴 CORE     — setup_agent, list_projects, remember, find, recall, task
-//	🟡 COMMON   — memory, get_stats, get_agent_activity, surface_context
+//	🔴 CORE     — setup_agent, remember, find, task
+//	🟡 COMMON   — list_projects, memory, get_stats, get_agent_activity, surface_context
 //	🟢 ADVANCED — create_project, manage_subtasks, entity, admin
 //
-// `recall` is kept as a legacy lexical fallback alongside `find`; the
-// section header comments below break the count down per-tier for clarity.
+// Retrieval is unified under `find` — the lexical-only baseline that `recall`
+// used to provide is reachable via find(hyde:"off", rerank:"off").
 // Removed in this revision (active-state concepts not part of user workflow):
+//   - recall → use find() (lexical baseline via find(hyde:off, rerank:off))
 //   - decision (deprecated stub) → use remember()/memory
 //   - skill (deprecated stub) → use remember()/memory
 //   - manage_focus → focus/active context concept eliminated
@@ -26,7 +27,7 @@ import (
 // Removed admin actions: switch_org (active organization concept eliminated)
 func registerToolsV4(server *mcp.Server) {
 	// ============================================================================
-	// 🔴 CORE (6 tools) - Every Session
+	// 🔴 CORE - Every Session (setup_agent, remember, find, task)
 	// ============================================================================
 
 	// 1. setup_agent - Initialize session (KEEP)
@@ -61,7 +62,7 @@ Durable operating directives live in the server's instructions block (loaded onc
 	// 2. list_projects - List accessible projects (KEEP)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_projects",
-		Description: `🔴 ESSENTIAL | List ALL accessible projects (personal + organization-scoped).
+		Description: `🟡 COMMON | List ALL accessible projects (personal + organization-scoped).
 
 Returns a compact shape: [{id, name, org?}].
 
@@ -114,7 +115,13 @@ Example:
 	// 4. find - Hybrid search (semantic + lexical) — preferred in v4.
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "find",
-		Description: `🔴 ESSENTIAL | Hybrid memory + decision retrieval — preferred over recall().
+		Description: `🔴 ESSENTIAL | Hybrid memory + decision retrieval — the default retrieval path.
+
+RETRIEVAL DECISION TABLE — pick the right tool:
+- Natural-language question or topic ("how do we invalidate the RTK cache", "why did we drop org switching") → find (THIS tool, always — your default).
+- Opening a file / want what's been decided about a module, before you know what to ask → surface_context.
+- Browsing a project's raw memory list with no query (newest-first, unranked) → memory(action:list).
+A lexical-only baseline (no HyDE/rerank, keyword overlap) is reachable via find(hyde:"off", rerank:"off") — no separate tool needed.
 
 🔴 MUST run BEFORE remember() (duplicate check) and BEFORE responding to user (re-discover context).
 Subagent return → find() → remember() with a context-rich summary. No skipping.
@@ -166,38 +173,6 @@ Examples:
 		},
 	}, handleFind)
 
-	// 4b. recall - legacy keyword search (KEEP for backwards compat).
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "recall",
-		Description: `🟡 LEGACY | Full-text ts_rank search — kept for backwards compatibility, will be removed in v5.
-
-⚠️ Prefer find(): find() wraps the same query set but adds HyDE expansion, Gemini rerank,
-propositional boost, entity-graph bonus, intent routing, and supersede filtering on top.
-recall() only does lexical ts_rank — you will miss results that don't share keywords with
-your query even when they're semantically spot-on.
-
-Use recall() only when (a) you need to replicate exact pre-v4 agent behavior, or
-(b) you're benchmarking search quality and want a lexical-only baseline.
-
-REQUIRED: term
-Optional: project, tag, type, purpose, min_score, limit, include_decisions (default true)
-
-Routing (precision controls which backend endpoint is called):
-- precision: false (default) → GET /memory/search : pure FTS, <500ms, no LLM involvement.
-  Keyword overlap only — agent MUST share lexical tokens with the stored memory.
-- precision: true  → POST /memory/find  : full hybrid pipeline (HyDE query expansion +
-  Gemini rerank + propositional boost + entity graph + intent routing). Latency
-  ~5-10s cold, <2s warm with rerank cache. Use when the agent needs semantic
-  understanding beyond surface keywords, or when precision=false returned nothing
-  useful. Response shape is normalized to match the FTS path so agent code doesn't
-  branch on the routing choice.`,
-		Annotations: &mcp.ToolAnnotations{
-			Title:         "Recall (legacy — prefer find)",
-			ReadOnlyHint:  true,
-			OpenWorldHint: boolPtr(false),
-		},
-	}, handleRecall)
-
 	// 5. task - Unified task management (NEW - replaces 6 tools)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task",
@@ -227,7 +202,8 @@ Examples:
 	}, handleUnifiedTask)
 
 	// ============================================================================
-	// 🟡 COMMON (4 tools) - When Relevant
+	// 🟡 COMMON - When Relevant (list_projects above, memory, get_stats,
+	//            get_agent_activity, surface_context)
 	// ============================================================================
 
 	// 6. memory - Unified memory operations (NEW - replaces 2 tools)
@@ -238,7 +214,10 @@ Examples:
 REQUIRED: action (list|get) — OR set goal to trigger skill generation (action not needed).
 
 Actions:
-- list: List memories. Requires: project. Optional: term, limit
+- list: Browse a project's raw memory list — newest-first, UNRANKED (no semantic scoring).
+  Requires: project. Optional:
+    - term: contains-filter (substring browse — NOT search). Use find() for topic/semantic retrieval.
+    - limit
 - get: Get memory details with related decisions, tasks, and memories. Requires: memoryId
 
 Skill Generation (when goal is set):
