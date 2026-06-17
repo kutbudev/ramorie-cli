@@ -332,10 +332,17 @@ type ActivePreferencesResponse struct {
 // ordered by access_count DESC. Called from setup_agent so Claude / Cursor
 // see active preferences at session start without having to find() them.
 // limit is bounded server-side (1-20); pass 5 for the default surface.
-func (c *Client) GetActivePreferences(limit int) (*ActivePreferencesResponse, error) {
+func (c *Client) GetActivePreferences(limit int, projectID string) (*ActivePreferencesResponse, error) {
 	endpoint := "/memory/preferences"
+	sep := "?"
 	if limit > 0 {
-		endpoint += fmt.Sprintf("?limit=%d", limit)
+		endpoint += fmt.Sprintf("%slimit=%d", sep, limit)
+		sep = "&"
+	}
+	// Scope to the detected project so another project's preferences don't leak
+	// into this session. Empty → server falls back to global top preferences.
+	if projectID != "" {
+		endpoint += sep + "project_id=" + projectID
 	}
 	respBody, err := c.makeRequest("GET", endpoint, nil)
 	if err != nil {
