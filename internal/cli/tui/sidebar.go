@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 )
@@ -96,38 +98,36 @@ func (s sidebarModel) selected() Category {
 }
 
 func (s sidebarModel) View() string {
-	var lines []string
-	headerStyle := display.Title.PaddingLeft(1).PaddingRight(1)
-	lines = append(lines, headerStyle.Render("ramorie"))
-	lines = append(lines, "")
+	innerW := maxInt(s.width-2, 1)
+	lines := make([]string, 0, len(allCategories)+1)
 	for i, cat := range allCategories {
-		prefix := "  "
-		style := lipgloss.NewStyle().Padding(0, 1)
-		if i == s.cursor {
-			prefix = "▶ "
-			if s.focused {
-				style = style.Foreground(display.ColorAccent).Bold(true)
-			} else {
-				style = style.Foreground(display.ColorAccent)
-			}
-		} else {
-			style = style.Foreground(lipgloss.Color("245"))
-		}
-		lines = append(lines, style.Render(prefix+cat.Label()))
+		lines = append(lines, s.rowView(i, cat, innerW))
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return titledPane("ramorie", "", body, s.width, s.height, s.focused)
+}
 
-	border := lipgloss.NormalBorder()
-	borderColor := lipgloss.Color("240")
-	if s.focused {
-		borderColor = display.ColorAccent
+// rowView renders one category row: a number gutter, a plain-unicode icon, and
+// the label. The selected row paints a full-width selection bar when the pane
+// is focused, or shows bold-only when it isn't (the lazygit two-state rule).
+func (s sidebarModel) rowView(i int, cat Category, innerW int) string {
+	// Plain text first so the selection bar's background is never severed by an
+	// embedded ANSI reset.
+	plain := fmt.Sprintf(" %d %s %s", i+1, categoryIcon(cat), cat.Label())
+
+	if i == s.cursor {
+		if s.focused {
+			return display.SelRowStyle.Width(innerW).MaxWidth(innerW).Render(plain)
+		}
+		return lipgloss.NewStyle().Bold(true).Width(innerW).MaxWidth(innerW).Render(plain)
 	}
-	container := lipgloss.NewStyle().
-		Width(maxInt(s.width-2, 1)).
-		Height(maxInt(s.height-2, 1)).
-		BorderStyle(border).
-		BorderForeground(borderColor)
-	return container.Render(body)
+
+	// Resting row: dim number gutter, accent icon, muted label.
+	num := display.Dim.Render(fmt.Sprintf("%d", i+1))
+	icon := lipgloss.NewStyle().Foreground(display.ColorAccent).Render(categoryIcon(cat))
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(cat.Label())
+	line := " " + num + " " + icon + " " + label
+	return lipgloss.NewStyle().Width(innerW).MaxWidth(innerW).Render(line)
 }
 
 func maxInt(a, b int) int {

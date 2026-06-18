@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/models"
@@ -76,15 +75,16 @@ func mdTypeBadge(t string) string {
 // Some content (kanban grid, error/loading) is NOT markdown — those callers
 // use setRawContent() which bypasses glamour.
 type detailModel struct {
-	vp       viewport.Model
-	width    int
-	height   int
-	focused  bool
-	loading  bool
-	content  string // pre-rendered text fed into the viewport
-	errMsg   string
-	caps     terminalCaps
-	theme    string
+	vp      viewport.Model
+	width   int
+	height  int
+	focused bool
+	loading bool
+	content string // pre-rendered text fed into the viewport
+	errMsg  string
+	caps    terminalCaps
+	theme   string
+	title   string // pane title embedded in the top border (e.g. "Task")
 	// lastContent is the most recent markdown source passed to setContent().
 	// Stored so we can re-render on width or theme changes.
 	lastContent    string
@@ -95,12 +95,16 @@ type detailModel struct {
 }
 
 func newDetail(width, height int) detailModel {
-	vp := viewport.New(maxInt(width-4, 10), maxInt(height-4, 3))
+	// Viewport height fills the titled pane's body box (totalH-2 content rows)
+	// so content reaches the bottom border with no dead space. Width keeps a
+	// small inset for readability (markdown is wrapped at width-4).
+	vp := viewport.New(maxInt(width-4, 10), maxInt(height-2, 1))
 	return detailModel{
 		vp:     vp,
 		width:  width,
 		height: height,
 		theme:  ThemeAuto,
+		title:  "Detail",
 	}
 }
 
@@ -112,7 +116,7 @@ func (d *detailModel) resize(width, height int) {
 	d.width = width
 	d.height = height
 	d.vp.Width = maxInt(width-4, 10)
-	d.vp.Height = maxInt(height-4, 3)
+	d.vp.Height = maxInt(height-2, 1)
 	d.vp.SetContent(d.content)
 }
 
@@ -249,17 +253,6 @@ func (d *detailModel) setError(err error) {
 
 // View renders the bordered detail pane.
 func (d detailModel) View() string {
-	border := lipgloss.NormalBorder()
-	borderColor := lipgloss.Color("240")
-	if d.focused {
-		borderColor = display.ColorAccent
-	}
-	container := lipgloss.NewStyle().
-		Width(maxInt(d.width-2, 1)).
-		Height(maxInt(d.height-2, 1)).
-		BorderStyle(border).
-		BorderForeground(borderColor)
-
 	var inner string
 	switch {
 	case d.loading:
@@ -271,7 +264,11 @@ func (d detailModel) View() string {
 	default:
 		inner = d.vp.View()
 	}
-	return container.Render(inner)
+	title := d.title
+	if title == "" {
+		title = "Detail"
+	}
+	return titledPane(title, "", inner, d.width, d.height, d.focused)
 }
 
 // ---- Render helpers -------------------------------------------------------

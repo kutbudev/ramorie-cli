@@ -37,6 +37,55 @@ var (
 	Info  = lipgloss.NewStyle().Foreground(ColorInfo)
 )
 
+// ---- TUI chrome palette ----------------------------------------------------
+//
+// These tokens are consumed only by the interactive `ramorie ui` navigator
+// (internal/cli/tui). They are intentionally separate from the CLI palette
+// above so that piped/non-TTY output (which lipgloss already strips) keeps its
+// flat, grep-friendly look. AdaptiveColor is used only where a light terminal
+// would otherwise wash a token out — the #8a87ff accent itself stays fixed so
+// the product identity never disappears under background auto-detection.
+var (
+	// Accent family. ColorAccentBright lifts the focused pane title/border a
+	// shade above the resting accent; ColorSelBg/Fg paint the selected-row bar.
+	ColorAccentBright = lipgloss.Color("#a5a3ff")
+	ColorSelBg        = lipgloss.AdaptiveColor{Light: "#e7e6ff", Dark: "#34316b"}
+	ColorSelFg        = lipgloss.AdaptiveColor{Light: "#2a2750", Dark: "#f2f1ff"}
+
+	// Pane borders: inactive is quiet, active is the accent.
+	ColorBorderActive   lipgloss.TerminalColor = ColorAccent
+	ColorBorderInactive lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c9c9d4", Dark: "#3a3a44"}
+
+	// Footer bar: a subtle filled background distinct from the selection bar,
+	// so the two never visually merge (lazygit/gitui both keep them separate).
+	ColorFooterBg  = lipgloss.AdaptiveColor{Light: "#ecebf4", Dark: "#26262e"}
+	ColorFooterDsc = lipgloss.AdaptiveColor{Light: "#5b5b66", Dark: "#9a9aa6"}
+	ColorFooterSeg = lipgloss.AdaptiveColor{Light: "#46465a", Dark: "#c7c7d2"}
+	ColorFooterSep = lipgloss.AdaptiveColor{Light: "#bfbfca", Dark: "#45454f"}
+
+	// Muted chrome text (pane titles when unfocused, counts).
+	ColorMuted = lipgloss.AdaptiveColor{Light: "#6c6c78", Dark: "#8a8a96"}
+)
+
+// Reusable chrome styles for the TUI.
+var (
+	PaneTitleOn  = lipgloss.NewStyle().Foreground(ColorAccentBright).Bold(true)
+	PaneTitleOff = lipgloss.NewStyle().Foreground(ColorMuted)
+	PaneCount    = lipgloss.NewStyle().Foreground(ColorMuted)
+
+	// SelRowStyle is the full-width selection bar shown on the focused pane's
+	// highlighted row. Rendered from PLAIN text only — embedded ANSI resets
+	// would otherwise terminate the background fill mid-row.
+	SelRowStyle = lipgloss.NewStyle().Background(ColorSelBg).Foreground(ColorSelFg).Bold(true)
+
+	// Footer hint styles.
+	FooterBar = lipgloss.NewStyle().Background(ColorFooterBg)
+	FooterKey = lipgloss.NewStyle().Foreground(ColorAccent).Background(ColorFooterBg).Bold(true)
+	FooterDsc = lipgloss.NewStyle().Foreground(ColorFooterDsc).Background(ColorFooterBg)
+	FooterSeg = lipgloss.NewStyle().Foreground(ColorFooterSeg).Background(ColorFooterBg)
+	FooterSep = lipgloss.NewStyle().Foreground(ColorFooterSep).Background(ColorFooterBg)
+)
+
 // ---- status + priority -----------------------------------------------------
 
 // StatusIcon returns a one-rune glyph colored by task status. Designed to

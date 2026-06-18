@@ -177,7 +177,7 @@ func (m *rootModel) layout() {
 
 func (m *rootModel) applyFocus() {
 	m.sidebar.focused = m.focus == paneSidebar
-	m.list.focused = m.focus == paneList
+	m.list.setFocused(m.focus == paneList)
 	m.detail.focused = m.focus == paneDetail
 }
 
@@ -302,6 +302,7 @@ func (m *rootModel) loadDetailForSelection() tea.Cmd {
 		return nil
 	}
 	m.lastSelectedID = sel.id
+	m.detail.title = detailTitleFor(m.list.cat)
 
 	switch m.list.cat {
 	case CatTasks:
@@ -784,13 +785,17 @@ func (m rootModel) normalView() string {
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
 }
 
+// renderStatusBar draws the always-visible, context-aware footer: a left
+// segment (focus · scope · counts) plus right-aligned key hints, with any
+// transient status message taking the left-most slot.
 func (m rootModel) renderStatusBar() string {
-	help := strings.Join(m.activeShortcuts(), " · ")
+	w := maxInt(m.width, 1)
+
 	scope := "all projects"
 	if m.projectName != "" {
 		scope = m.projectName
 	} else if m.projectID != "" {
-		scope = m.projectID
+		scope = shortID(m.projectID)
 	}
 	focus := "sidebar"
 	switch m.focus {
@@ -799,48 +804,91 @@ func (m rootModel) renderStatusBar() string {
 	case paneDetail:
 		focus = "detail"
 	}
-	plain := fmt.Sprintf("%s | %s | %s", focus, scope, help)
-	if m.statusMsg != "" {
-		plain = m.statusMsg + "  " + plain
+	seg := []string{focus, scope}
+	if m.focus == paneList && !m.list.list.SettingFilter() {
+		if n := len(m.list.list.Items()); n > 0 {
+			seg = append(seg, fmt.Sprintf("%d items", n))
+		}
 	}
-	plain = display.Truncate(plain, maxInt(m.width, 1))
-	return lipgloss.NewStyle().
-		Width(maxInt(m.width, 1)).
-		Foreground(lipgloss.Color("245")).
-		Render(plain)
+	left := display.FooterSeg.Render(strings.Join(seg, " · "))
+
+	status := ""
+	if m.statusMsg != "" {
+		status = lipgloss.NewStyle().
+			Foreground(display.ColorGood).
+			Background(display.ColorFooterBg).
+			Render(m.statusMsg)
+	}
+
+	return renderFooter(w, left, m.footerHints(), status)
 }
 
-func (m rootModel) activeShortcuts() []string {
+// footerHints returns the context-aware key-hint segments for the footer.
+// Only the single most-likely "next action" key takes a semantic accent
+// (warn/info); every other key uses the resting accent (the lazygit rule).
+func (m rootModel) footerHints() []string {
 	if m.helpOpen {
-		return []string{"? close", "esc close", "q close"}
+		return []string{keyHint("?", "close"), keyHint("esc", "close"), keyHint("q", "quit")}
 	}
-	base := []string{"1-6 tabs", "⇥/S-⇥ pane"}
-	tail := []string{"? help", "q quit"}
 	switch m.focus {
 	case paneSidebar:
-		keys := append(base, "j/k choose", "l/↵ open")
-		return append(keys, tail...)
+		return []string{
+			keyHint("↑↓", "choose"), keyHint("↵", "open"),
+			keyHint("1-6", "jump"), keyHint("⇥", "pane"),
+			keyHint("?", "help"), keyHint("q", "quit"),
+		}
 	case paneList:
 		if m.list.list.SettingFilter() {
-			return []string{"type filter", "↵ apply", "esc cancel", "? help", "q quit"}
+			return []string{
+				display.FooterDsc.Render("type to filter"),
+				keyHintAccent("↵", "apply", display.ColorInfo),
+				keyHint("esc", "cancel"),
+			}
 		}
-		keys := append([]string{}, base...)
-		keys = append(keys, "j/k move", "/ filter", "h/l pane")
+		hints := []string{keyHint("↑↓", "move"), keyHint("↵", "open"), keyHint("/", "filter")}
 		switch m.list.cat {
 		case CatProjects:
-			keys = append(keys, "p set project")
+			hints = append(hints, keyHintAccent("p", "set project", display.ColorWarn))
 		case CatTasks, CatMemories:
-			keys = append(keys, "p projects", "P all")
+			hints = append(hints, keyHint("p", "project"), keyHint("P", "all"))
 		case CatOrganizations:
-			keys = append(keys, "l/↵ projects")
+			hints = append(hints, keyHint("↵", "projects"))
 		}
-		keys = append(keys, tail...)
-		return append(keys, "g/G", "^u/^d", "r refresh", "c copy")
+		hints = append(hints,
+			keyHint("c", "copy"), keyHint("r", "refresh"),
+			keyHint("?", "help"), keyHint("q", "quit"),
+		)
+		return hints
 	case paneDetail:
-		keys := append(base, "j/k scroll", "^u/^d page", "h back", "c copy")
-		return append(keys, tail...)
+		return []string{
+			keyHint("↑↓", "scroll"), keyHint("^u^d", "page"),
+			keyHint("h", "back"), keyHint("c", "copy"),
+			keyHint("t", "theme"), keyHint("?", "help"), keyHint("q", "quit"),
+		}
 	}
-	return append(base, tail...)
+	return []string{keyHint("?", "help"), keyHint("q", "quit")}
+}
+
+// detailTitleFor maps a sidebar category to the right-pane title shown in the
+// detail pane's top border.
+func detailTitleFor(c Category) string {
+	switch c {
+	case CatTasks:
+		return "Task"
+	case CatMemories:
+		return "Memory"
+	case CatProjects:
+		return "Project"
+	case CatOrganizations:
+		return "Organization"
+	case CatActivity:
+		return "Activity"
+	case CatKanban:
+		return "Kanban"
+	case CatProfile:
+		return "Profile"
+	}
+	return "Detail"
 }
 
 // Compile-time assertion: rootModel implements tea.Model.

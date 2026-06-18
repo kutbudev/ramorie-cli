@@ -2,22 +2,29 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
 	"github.com/kutbudev/ramorie-cli/internal/models"
 )
 
-// listItem wraps any entity for bubbles/list.
+// listItem wraps any entity for bubbles/list. The row is laid out by
+// rowDelegate from these column parts — `title` is PLAIN text (no embedded
+// ANSI) so the selection bar's background can never be severed by a reset.
 type listItem struct {
-	id     string
-	title  string
-	sub    string
-	filter string
-	raw    interface{} // original entity (Task, Memory, ...)
+	id         string
+	title      string // plain, single-line title text
+	sub        string
+	filter     string
+	badge      string         // plain badge text, e.g. "[H]" or "[decision]"
+	badgeStyle lipgloss.Style // color applied to badge on non-selected rows
+	rel        string         // right-aligned relative time, e.g. "2h ago"
+	raw        interface{}    // original entity (Task, Memory, ...)
 }
 
 func (i listItem) FilterValue() string {
@@ -28,6 +35,78 @@ func (i listItem) FilterValue() string {
 }
 func (i listItem) Title() string       { return i.title }
 func (i listItem) Description() string { return i.sub }
+
+// rowDelegate renders one list row as columns (badge · id · title · relative
+// time) with a full-width selection bar. `focused` mirrors the list pane's
+// focus so the selected row shows the accent bar only when the pane is active
+// (bold-only otherwise — the lazygit two-state rule).
+type rowDelegate struct{ focused bool }
+
+func (d rowDelegate) Height() int                         { return 1 }
+func (d rowDelegate) Spacing() int                        { return 0 }
+func (d rowDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
+func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	it, ok := item.(listItem)
+	if !ok {
+		return
+	}
+	width := maxInt(m.Width(), 1)
+	inner := maxInt(width-2, 1) // 1-col pad each side
+	selected := index == m.Index()
+
+	// Special rows (kanban summary, profile hint, placeholder) carry only a
+	// pre-styled title — render verbatim, no columns and no bar (their ANSI
+	// would break a background fill anyway).
+	if it.badge == "" && it.rel == "" {
+		line := lipgloss.NewStyle().Width(width).MaxWidth(width).Render(" " + it.title)
+		if selected {
+			line = lipgloss.NewStyle().Bold(true).Width(width).MaxWidth(width).Render(" " + display.SingleLine(it.title))
+		}
+		fmt.Fprint(w, line)
+		return
+	}
+
+	idStr := shortID(it.id)
+	title := display.SingleLine(it.title)
+	badgeW := lipgloss.Width(it.badge)
+	relW := lipgloss.Width(it.rel)
+
+	// Budget the title so badge / id / relative-time keep fixed columns.
+	used := badgeW + 1 + len(idStr) + 2
+	if relW > 0 {
+		used += relW + 1
+	}
+	if b := inner - used; b >= 1 {
+		title = display.Truncate(title, b)
+	} else {
+		title = display.Truncate(title, 1)
+	}
+
+	// Selected + focused: full-width accent bar, built from PLAIN text only.
+	if selected && d.focused {
+		left := it.badge + " " + idStr + "  " + title
+		gap := inner - lipgloss.Width(left) - relW
+		if gap < 0 {
+			gap = 0
+		}
+		line := " " + left + strings.Repeat(" ", gap) + it.rel + " "
+		fmt.Fprint(w, display.SelRowStyle.Width(width).MaxWidth(width).Render(line))
+		return
+	}
+
+	// Resting (or unfocused-selected) row: colored columns.
+	left := it.badgeStyle.Render(it.badge) + " " + display.Dim.Render(idStr) + "  " + title
+	gap := inner - badgeW - 1 - len(idStr) - 2 - lipgloss.Width(title) - relW
+	if gap < 0 {
+		gap = 0
+	}
+	line := " " + left + strings.Repeat(" ", gap) + display.Dim.Render(it.rel) + " "
+	style := lipgloss.NewStyle().Width(width).MaxWidth(width)
+	if selected { // unfocused-selected → bold, no bar
+		style = style.Bold(true)
+	}
+	fmt.Fprint(w, style.Render(line))
+}
 
 // navFrame is one entry in the drill-down stack. The list pane always
 // displays the items of the top-most frame.
@@ -59,13 +138,9 @@ type listModel struct {
 }
 
 func newList(cat Category, width, height int) listModel {
-	delegate := list.NewDefaultDelegate()
-	delegate.SetSpacing(0)
-	delegate.ShowDescription = false
-
-	w := maxInt(width-4, 10)
-	h := maxInt(height-4, 3)
-	l := list.New(nil, delegate, w, h)
+	w := maxInt(width-2, 10)
+	h := maxInt(height-3, 1)
+	l := list.New(nil, rowDelegate{}, w, h)
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -82,12 +157,23 @@ func newList(cat Category, width, height int) listModel {
 func (l *listModel) resize(width, height int) {
 	l.width = width
 	l.height = height
-	innerH := maxInt(height-4, 3)
-	if len(l.stack) > 1 {
-		// Reserve one row for the breadcrumb.
-		innerH = maxInt(innerH-1, 1)
+	// Reserve exactly one body row for the optional footer line. The
+	// breadcrumb (drill-down frames) and the pagination footer (top-level
+	// Tasks/Memories) are mutually exclusive, so a single reserved row always
+	// suffices — the list fills to the bottom border with neither overflow nor
+	// dead space.
+	innerH := maxInt(height-3, 1)
+	l.list.SetSize(maxInt(width-2, 10), innerH)
+}
+
+// setFocused mirrors pane focus into the row delegate so the selected row
+// switches between the accent bar (focused) and bold-only (unfocused).
+func (l *listModel) setFocused(b bool) {
+	if l.focused == b {
+		return
 	}
-	l.list.SetSize(maxInt(width-4, 10), innerH)
+	l.focused = b
+	l.list.SetDelegate(rowDelegate{focused: b})
 }
 
 // resetStack clears the breadcrumb stack and seeds it with a single frame for
@@ -144,40 +230,30 @@ func (l listModel) topFrame() navFrame {
 // taskToItem renders a single task as a list cell.
 func taskToItem(t models.Task) list.Item {
 	title, _ := decryptTask(&t)
-	shortID := t.ID.String()
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	formatted := fmt.Sprintf("%s %s  %s",
-		display.PriorityBadge(t.Priority),
-		display.Dim.Render(shortID),
-		display.SingleLine(title),
-	)
+	badge, st := priorityBadgeParts(t.Priority)
 	return listItem{
-		id:     t.ID.String(),
-		title:  formatted,
-		filter: strings.Join([]string{shortID, title, t.Priority, t.Status}, " "),
-		raw:    t,
+		id:         t.ID.String(),
+		title:      display.SingleLine(title),
+		badge:      badge,
+		badgeStyle: st,
+		rel:        display.Relative(t.UpdatedAt),
+		filter:     strings.Join([]string{shortID(t.ID.String()), title, t.Priority, t.Status}, " "),
+		raw:        t,
 	}
 }
 
 // memoryToItem renders a single memory as a list cell.
 func memoryToItem(m models.Memory) list.Item {
-	shortID := m.ID.String()
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
 	content := display.SingleLine(decryptMemoryContent(&m))
-	formatted := fmt.Sprintf("%s %s  %s",
-		display.TypeBadge(m.Type),
-		display.Dim.Render(shortID),
-		display.Truncate(content, 80),
-	)
+	badge, st := typeBadgeParts(m.Type)
 	return listItem{
-		id:     m.ID.String(),
-		title:  formatted,
-		filter: strings.Join([]string{shortID, content, m.Type}, " "),
-		raw:    m,
+		id:         m.ID.String(),
+		title:      content,
+		badge:      badge,
+		badgeStyle: st,
+		rel:        display.Relative(m.UpdatedAt),
+		filter:     strings.Join([]string{shortID(m.ID.String()), content, m.Type}, " "),
+		raw:        m,
 	}
 }
 
@@ -248,24 +324,18 @@ func (l *listModel) setProjects(projects []models.Project) {
 	items := make([]list.Item, 0, len(projects))
 	for i := range projects {
 		p := projects[i]
-		shortID := p.ID.String()
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
-		}
-		desc := display.SingleLine(p.Description)
-		formatted := fmt.Sprintf("%s %s  %s",
-			display.Dim.Render("[project]"),
-			display.Dim.Render(shortID),
-			display.Truncate(p.Name, 32),
-		)
-		if desc != "" {
-			formatted += "  " + display.Dim.Render(display.Truncate(desc, 60))
+		title := p.Name
+		if desc := display.SingleLine(p.Description); desc != "" {
+			title += "  " + desc
 		}
 		items = append(items, listItem{
-			id:     p.ID.String(),
-			title:  formatted,
-			filter: strings.Join([]string{shortID, p.Name, p.Description}, " "),
-			raw:    p,
+			id:         p.ID.String(),
+			title:      title,
+			badge:      "[project]",
+			badgeStyle: display.Dim,
+			rel:        display.Relative(p.UpdatedAt),
+			filter:     strings.Join([]string{shortID(p.ID.String()), p.Name, p.Description}, " "),
+			raw:        p,
 		})
 	}
 	l.applyItems(items)
@@ -276,20 +346,13 @@ func (l *listModel) setOrgs(orgs []api.Organization) {
 	items := make([]list.Item, 0, len(orgs))
 	for i := range orgs {
 		o := orgs[i]
-		shortID := o.ID
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
-		}
-		formatted := fmt.Sprintf("%s %s  %s",
-			display.Dim.Render("[org]"),
-			display.Dim.Render(shortID),
-			display.Truncate(o.Name, 40),
-		)
 		items = append(items, listItem{
-			id:     o.ID,
-			title:  formatted,
-			filter: strings.Join([]string{shortID, o.Name}, " "),
-			raw:    o,
+			id:         o.ID,
+			title:      o.Name,
+			badge:      "[org]",
+			badgeStyle: display.Dim,
+			filter:     strings.Join([]string{shortID(o.ID), o.Name}, " "),
+			raw:        o,
 		})
 	}
 	l.applyItems(items)
@@ -300,18 +363,15 @@ func (l *listModel) setActivity(events []models.ActivityItem) {
 	items := make([]list.Item, 0, len(events))
 	for i := range events {
 		e := events[i]
-		ts := e.Timestamp.Format("2006-01-02 15:04")
-		summary := display.SingleLine(e.Summary)
-		formatted := fmt.Sprintf("%s %s  %s",
-			display.TypeBadge(e.EntityType),
-			display.Dim.Render(ts),
-			display.Truncate(summary, 80),
-		)
+		badge, st := typeBadgeParts(e.EntityType)
 		items = append(items, listItem{
-			id:     e.EntityID.String(),
-			title:  formatted,
-			filter: strings.Join([]string{e.EntityID.String(), e.EntityType, e.Summary}, " "),
-			raw:    e,
+			id:         e.EntityID.String(),
+			title:      display.SingleLine(e.Summary),
+			badge:      badge,
+			badgeStyle: st,
+			rel:        display.Relative(e.Timestamp),
+			filter:     strings.Join([]string{e.EntityID.String(), e.EntityType, e.Summary}, " "),
+			raw:        e,
 		})
 	}
 	l.applyItems(items)
@@ -398,17 +458,6 @@ func (l listModel) breadcrumb() string {
 
 // View renders the bordered list pane.
 func (l listModel) View() string {
-	border := lipgloss.NormalBorder()
-	borderColor := lipgloss.Color("240")
-	if l.focused {
-		borderColor = display.ColorAccent
-	}
-	container := lipgloss.NewStyle().
-		Width(maxInt(l.width-2, 1)).
-		Height(maxInt(l.height-2, 1)).
-		BorderStyle(border).
-		BorderForeground(borderColor)
-
 	var inner string
 	switch {
 	case l.loading:
@@ -424,7 +473,17 @@ func (l listModel) View() string {
 			inner += "\n" + foot
 		}
 	}
-	return container.Render(inner)
+
+	// Pane title follows the active drill-down frame; count is the item total.
+	title := l.cat.Label()
+	if top := l.topFrame(); top.label != "" {
+		title = top.label
+	}
+	count := ""
+	if n := len(l.list.Items()); n > 0 && !l.loading && l.errMsg == "" {
+		count = fmt.Sprintf("%d", n)
+	}
+	return titledPane(title, count, inner, l.width, l.height, l.focused)
 }
 
 // paginationFooter shows "n loaded · page N · more →" or "all loaded" when

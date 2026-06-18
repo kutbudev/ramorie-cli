@@ -66,7 +66,9 @@ func TestStatusBarAlwaysIncludesShortcuts(t *testing.T) {
 	m.list.resetStack(CatTasks, CatTasks.Label())
 
 	got := stripANSITUI(m.renderStatusBar())
-	for _, want := range []string{"1-6 tabs", "/ filter", "q quit"} {
+	// The footer is context-aware; in list focus it advertises movement,
+	// filtering, and the global quit hint at minimum.
+	for _, want := range []string{"move", "filter", "quit"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status bar %q does not contain %q", got, want)
 		}
