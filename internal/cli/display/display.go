@@ -86,6 +86,21 @@ var (
 	FooterSep = lipgloss.NewStyle().Foreground(ColorFooterSep).Background(ColorFooterBg)
 )
 
+// SetAccent overrides the accent color and rebuilds every style derived from
+// it. Call this ONCE from the `ramorie ui` entrypoint (before the program
+// starts) so the interactive UI can follow the terminal theme or a user
+// preference. It mutates package globals in-process; piped CLI output runs in a
+// separate process that never calls this, so grep-friendly badge colors are
+// unaffected.
+func SetAccent(accent, bright lipgloss.Color) {
+	ColorAccent = accent
+	ColorAccentBright = bright
+	ColorBorderActive = accent
+	Title = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	PaneTitleOn = lipgloss.NewStyle().Foreground(bright).Bold(true)
+	FooterKey = lipgloss.NewStyle().Foreground(accent).Background(ColorFooterBg).Bold(true)
+}
+
 // ---- status + priority -----------------------------------------------------
 
 // StatusIcon returns a one-rune glyph colored by task status. Designed to

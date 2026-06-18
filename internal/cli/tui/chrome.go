@@ -159,21 +159,21 @@ func renderFooter(width int, left string, hints []string, status string) string 
 func categoryIcon(c Category) string {
 	switch c {
 	case CatTasks:
-		return "◎"
+		return icon("cat_tasks")
 	case CatMemories:
-		return "✱"
+		return icon("cat_memories")
 	case CatProjects:
-		return "▤"
+		return icon("cat_projects")
 	case CatOrganizations:
-		return "⬢"
+		return icon("cat_orgs")
 	case CatActivity:
-		return "◷"
+		return icon("cat_activity")
 	case CatKanban:
-		return "▦"
+		return icon("cat_kanban")
 	case CatProfile:
-		return "⊙"
+		return icon("cat_profile")
 	case CatSearch:
-		return "⌕"
+		return icon("cat_search")
 	}
 	return "·"
 }
@@ -185,13 +185,13 @@ func categoryIcon(c Category) string {
 func priorityBadgeParts(p string) (string, lipgloss.Style) {
 	switch strings.ToUpper(strings.TrimSpace(p)) {
 	case "H", "HIGH", "P1", "P0":
-		return "[H]", display.Err
+		return icon("prio_high"), display.Err
 	case "M", "MEDIUM", "P2":
-		return "[M]", display.Warn
+		return icon("prio_med"), display.Warn
 	case "L", "LOW", "P3", "P4":
-		return "[L]", display.Dim
+		return icon("prio_low"), display.Dim
 	}
-	return "[?]", display.Dim
+	return icon("prio_unknown"), display.Dim
 }
 
 // typeBadgeParts is the memory/activity-type analogue of priorityBadgeParts.
@@ -200,20 +200,25 @@ func typeBadgeParts(t string) (string, lipgloss.Style) {
 	if label == "" {
 		label = "general"
 	}
-	txt := "[" + label + "]"
 	switch label {
 	case "decision":
-		return txt, display.Info
+		return icon("type_decision"), display.Info
 	case "bug_fix":
-		return txt, display.Err
+		return icon("type_bug_fix"), display.Err
 	case "preference":
-		return txt, display.Warn
+		return icon("type_preference"), display.Warn
 	case "pattern":
-		return txt, display.Good
+		return icon("type_pattern"), display.Good
 	case "reference":
-		return txt, display.Dim
+		return icon("type_reference"), display.Dim
 	case "skill":
-		return txt, display.Title
+		return icon("type_skill"), display.Title
+	case "general":
+		return icon("type_general"), display.Dim
 	}
-	return txt, display.Dim
+	// Unknown type: a generic glyph in nerd mode, the bracketed label in plain.
+	if nerdFont {
+		return icon("type_general"), display.Dim
+	}
+	return "[" + label + "]", display.Dim
 }

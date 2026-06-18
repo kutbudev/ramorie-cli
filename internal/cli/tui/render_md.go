@@ -7,7 +7,47 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 )
+
+// sp/bp/up are pointer helpers for building an ansi.StyleConfig literal.
+func sp(s string) *string { return &s }
+func bp(b bool) *bool     { return &b }
+func up(u uint) *uint     { return &u }
+
+// baseStyleConfig returns the bundled glamour style for the named theme, used
+// as the foundation we then tint with the app accent.
+func baseStyleConfig(theme string) ansi.StyleConfig {
+	switch theme {
+	case ThemeLight:
+		return styles.LightStyleConfig
+	case ThemeDracula:
+		return styles.DraculaStyleConfig
+	case ThemeNotty:
+		return styles.NoTTYStyleConfig
+	default: // auto + dark
+		return styles.DarkStyleConfig
+	}
+}
+
+// buildAccentStyle clones the theme's base style and tints headings, links,
+// strong text and inline code with the resolved accent, and drops glamour's
+// default document margin so a narrow detail pane keeps every column.
+func buildAccentStyle(theme, accent string) ansi.StyleConfig {
+	c := baseStyleConfig(theme)
+	c.Document.Margin = up(0)
+	c.Heading.Color = sp(accent)
+	c.Heading.Bold = bp(true)
+	c.H1.Color = sp(accent)
+	c.H2.Color = sp(accent)
+	c.Link.Color = sp(accent)
+	c.Link.Underline = bp(true)
+	c.LinkText.Color = sp(accent)
+	c.Strong.Color = sp(accent)
+	c.Code.Color = sp(accent)
+	return c
+}
 
 // Markdown rendering hot path notes:
 //
@@ -38,7 +78,7 @@ func bucketize(w int) int {
 
 // renderMarkdown converts markdown source to ANSI-rendered text using glamour.
 // Cached aggressively. Falls back to the raw input on any glamour error.
-func renderMarkdown(input string, width int, theme string) string {
+func renderMarkdown(input string, width int, theme, accent string) string {
 	if input == "" || width <= 0 {
 		return input
 	}
@@ -50,12 +90,12 @@ func renderMarkdown(input string, width int, theme string) string {
 		bw = widthBucket
 	}
 
-	key := mdKey(input, bw, theme)
+	key := mdKey(input, bw, theme, accent)
 	if v, ok := mdCache.Load(key); ok {
 		return v.(string)
 	}
 
-	r := getRenderer(theme, bw)
+	r := getRenderer(theme, accent, bw)
 	if r == nil {
 		return input
 	}
@@ -78,13 +118,8 @@ func worthRendering(s string) bool {
 		strings.Contains(s, "http://") || strings.Contains(s, "https://")
 }
 
-func getRenderer(theme string, bw int) *glamour.TermRenderer {
-	style := theme
-	switch theme {
-	case ThemeAuto, "":
-		style = "auto"
-	}
-	cacheKey := style + "|" + strconv.Itoa(bw)
+func getRenderer(theme, accent string, bw int) *glamour.TermRenderer {
+	cacheKey := theme + "|" + accent + "|" + strconv.Itoa(bw)
 
 	rendererMu.Lock()
 	defer rendererMu.Unlock()
@@ -92,7 +127,7 @@ func getRenderer(theme string, bw int) *glamour.TermRenderer {
 		return r
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(style),
+		glamour.WithStyles(buildAccentStyle(theme, accent)),
 		glamour.WithWordWrap(bw),
 		glamour.WithEmoji(),
 	)
@@ -103,10 +138,10 @@ func getRenderer(theme string, bw int) *glamour.TermRenderer {
 	return r
 }
 
-func mdKey(content string, width int, theme string) string {
+func mdKey(content string, width int, theme, accent string) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(content))
-	return strconv.FormatUint(h.Sum64(), 36) + "|" + strconv.Itoa(width) + "|" + theme
+	return strconv.FormatUint(h.Sum64(), 36) + "|" + strconv.Itoa(width) + "|" + theme + "|" + accent
 }
 
 // invalidateMarkdownCache clears the rendered output cache AND the renderer

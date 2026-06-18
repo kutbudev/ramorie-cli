@@ -26,6 +26,13 @@ type Config struct {
 
 	// TUI preferences
 	Theme string `json:"theme,omitempty"` // glamour markdown theme for `ramorie ui`
+	// Accent selects the TUI accent color: "auto"/"" follows the terminal's
+	// own palette (ANSI magenta), "brand" keeps the #8a87ff violet, or an ANSI
+	// index ("0".."15") / hex ("#rrggbb").
+	Accent string `json:"accent,omitempty"`
+	// NerdFont enables richer Nerd Font icons in `ramorie ui`. Pointer so an
+	// unset value (nil) means "plain unicode" without being an explicit false.
+	NerdFont *bool `json:"nerd_font,omitempty"`
 
 	// LastProjectID is the most recently used project UUID. Lets commands
 	// auto-detect the project when -p is omitted, so users rarely have to

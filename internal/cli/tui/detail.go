@@ -47,13 +47,15 @@ func mdStatusLabel(s string) string {
 func mdStatusIcon(s string) string {
 	switch s {
 	case "COMPLETED":
-		return "✓"
+		return icon("st_completed")
 	case "IN_PROGRESS":
-		return "◐"
+		return icon("st_in_progress")
 	case "TODO":
-		return "○"
+		return icon("st_todo")
 	case "BLOCKED":
-		return "✗"
+		return icon("st_blocked")
+	case "REVIEW":
+		return icon("st_review")
 	}
 	return "·"
 }
@@ -84,6 +86,7 @@ type detailModel struct {
 	errMsg  string
 	caps    terminalCaps
 	theme   string
+	accent  string // glamour accent (ANSI index or hex), tied to the UI accent
 	title   string // pane title embedded in the top border (e.g. "Task")
 	// lastContent is the most recent markdown source passed to setContent().
 	// Stored so we can re-render on width or theme changes.
@@ -179,7 +182,7 @@ func (d *detailModel) setContent(s string) tea.Cmd {
 	if bw < widthBucket {
 		bw = widthBucket
 	}
-	if v, ok := mdCache.Load(mdKey(s, bw, d.theme)); ok {
+	if v, ok := mdCache.Load(mdKey(s, bw, d.theme, d.accent)); ok {
 		d.content = v.(string)
 		d.vp.SetContent(d.content)
 		d.vp.GotoTop()
@@ -199,9 +202,10 @@ func (d *detailModel) setContent(s string) tea.Cmd {
 	d.vp.SetContent(s)
 	d.vp.GotoTop()
 	theme := d.theme
+	accent := d.accent
 	width := d.vp.Width
 	return func() tea.Msg {
-		out := renderMarkdown(s, width, theme)
+		out := renderMarkdown(s, width, theme, accent)
 		return renderedMsg{token: tok, output: out}
 	}
 }
@@ -242,7 +246,7 @@ func (d *detailModel) setTheme(theme string) {
 
 func (d *detailModel) renderMD(src string) string {
 	src = linkifyText(src, d.caps)
-	return renderMarkdown(src, maxInt(d.width-4, 10), d.theme)
+	return renderMarkdown(src, maxInt(d.width-4, 10), d.theme, d.accent)
 }
 
 func (d *detailModel) setLoading(b bool) { d.loading = b }
@@ -268,7 +272,13 @@ func (d detailModel) View() string {
 	if title == "" {
 		title = "Detail"
 	}
-	return titledPane(title, "", inner, d.width, d.height, d.focused)
+	// Show a scroll-% indicator in the title's right slot when the content
+	// overflows the viewport (hidden when everything fits).
+	count := ""
+	if d.content != "" && !d.loading && d.errMsg == "" && !(d.vp.AtTop() && d.vp.AtBottom()) {
+		count = fmt.Sprintf("%d%%", int(d.vp.ScrollPercent()*100))
+	}
+	return titledPane(title, count, inner, d.width, d.height, d.focused)
 }
 
 // ---- Render helpers -------------------------------------------------------
@@ -402,9 +412,6 @@ func renderMemoryDetail(
 		shortID(m.ID.String()),
 		m.AccessCount, display.Relative(m.UpdatedAt),
 	)
-	first := display.SingleLine(content)
-	fmt.Fprintf(&b, "# %s\n\n", display.Truncate(first, 80))
-
 	if m.Project != nil && m.Project.Name != "" {
 		fmt.Fprintf(&b, "**Project:** %s  \n", m.Project.Name)
 	}
@@ -413,8 +420,12 @@ func renderMemoryDetail(
 	}
 	fmt.Fprintf(&b, "**Created:** %s\n\n", display.Relative(m.CreatedAt))
 
-	// Full content.
-	mdSection(&b, "Content")
+	// Full content rendered as markdown. The synthetic title is gone — the
+	// body speaks for itself. A "Content" divider is added only when more
+	// sections follow, so a bare memory reads as one clean document.
+	if len(comments) > 0 || len(linkedTasks) > 0 {
+		mdSection(&b, "Content")
+	}
 	b.WriteString(content)
 	b.WriteString("\n\n")
 

@@ -23,6 +23,8 @@ type keyMap struct {
 	Refresh     key.Binding
 	Yank        key.Binding
 	Theme       key.Binding
+	Accent      key.Binding // cycle accent color
+	NerdToggle  key.Binding // toggle Nerd Font icons
 	Help        key.Binding
 	Quit        key.Binding
 	New         key.Binding // create task / memory
@@ -58,6 +60,8 @@ func defaultKeyMap() keyMap {
 		Refresh:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Yank:        key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy")),
 		Theme:       key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
+		Accent:      key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "accent")),
+		NerdToggle:  key.NewBinding(key.WithKeys("I"), key.WithHelp("I", "icons")),
 		Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 		New:         key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),

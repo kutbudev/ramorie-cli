@@ -105,9 +105,11 @@ type rootModel struct {
 	yankActivity       *models.ActivityItem
 
 	// TUI chrome state.
-	theme    string
-	helpOpen bool
-	caps     terminalCaps
+	theme         string
+	accentSpec    string // current accent spec ("auto"/"brand"/index/hex) for the A-cycle + persistence
+	accentGlamour string // accent color threaded into the detail pane's glamour renderer
+	helpOpen      bool
+	caps          terminalCaps
 
 	// Interactive overlay state (create / recall prompt, delete confirm).
 	overlay        overlayKind
@@ -129,21 +131,29 @@ type rootModel struct {
 
 func newRootModel(c *api.Client) rootModel {
 	theme := ThemeAuto
-	if cfg, err := config.LoadConfig(); err == nil && cfg != nil && cfg.Theme != "" {
-		theme = cfg.Theme
+	accentSpec := "auto"
+	if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
+		if cfg.Theme != "" {
+			theme = cfg.Theme
+		}
+		if cfg.Accent != "" {
+			accentSpec = cfg.Accent
+		}
 	}
 	ti := textinput.New()
 	ti.Prompt = "› "
 	ti.CharLimit = 512
 	return rootModel{
-		client:    c,
-		keys:      defaultKeyMap(),
-		focus:     paneSidebar,
-		sidebar:   newSidebar(),
-		loadedCat: -1,
-		theme:     theme,
-		caps:      detectTerminal(),
-		input:     ti,
+		client:        c,
+		keys:          defaultKeyMap(),
+		focus:         paneSidebar,
+		sidebar:       newSidebar(),
+		loadedCat:     -1,
+		theme:         theme,
+		accentSpec:    accentSpec,
+		accentGlamour: resolveAccent(accentSpec).Glamour,
+		caps:          detectTerminal(),
+		input:         ti,
 	}
 }
 
@@ -185,6 +195,7 @@ func (m *rootModel) layout() {
 	} else {
 		m.detail.resize(dw, h)
 	}
+	m.detail.accent = m.accentGlamour
 	m.applyFocus()
 }
 
@@ -464,6 +475,43 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.statusMsg = "✓ theme: " + m.theme
 			return m, clearStatusAfter(2 * time.Second)
+		}
+
+		// Accent cycle (global): A. Steps auto → brand → blue/magenta/cyan/…,
+		// follows the terminal palette, updates chrome + markdown live.
+		if key.Matches(msg, m.keys.Accent) {
+			m.accentSpec = nextAccentSpec(m.accentSpec)
+			pal := resolveAccent(m.accentSpec)
+			display.SetAccent(pal.Accent, pal.Bright)
+			m.accentGlamour = pal.Glamour
+			m.detail.accent = pal.Glamour
+			invalidateMarkdownCache()
+			m.detail.setTheme(m.theme) // re-render current markdown with the new accent
+			if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
+				cfg.Accent = m.accentSpec
+				_ = config.SaveConfig(cfg)
+			}
+			m.statusMsg = "✓ accent: " + m.accentSpec
+			return m, clearStatusAfter(2 * time.Second)
+		}
+
+		// Nerd-font toggle (global): I. Reloads so list badges + detail glyphs
+		// re-render with the new icon set.
+		if key.Matches(msg, m.keys.NerdToggle) {
+			setNerdFont(!nerdFont)
+			on := nerdFont
+			if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
+				cfg.NerdFont = &on
+				_ = config.SaveConfig(cfg)
+			}
+			if on {
+				m.statusMsg = "✓ icons: nerd"
+			} else {
+				m.statusMsg = "✓ icons: unicode"
+			}
+			m.lastSelectedID = ""
+			invalidateMarkdownCache()
+			return m, tea.Batch(m.loadForCategory(), clearStatusAfter(2*time.Second))
 		}
 
 		if m.focus == paneList && m.list.list.SettingFilter() {
