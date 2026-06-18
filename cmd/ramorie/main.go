@@ -10,6 +10,7 @@ import (
 
 	"github.com/kutbudev/ramorie-cli/internal/cli/commands"
 	"github.com/kutbudev/ramorie-cli/internal/cli/help"
+	"github.com/kutbudev/ramorie-cli/internal/selfupdate"
 	"github.com/kutbudev/ramorie-cli/internal/version"
 	"github.com/urfave/cli/v2"
 )
@@ -65,6 +66,7 @@ func main() {
 			help.SetTier(commands.NewFindCommand(), "essential"),
 			help.SetTier(commands.NewUICommand(), "essential"),
 			help.SetTier(commands.NewSkillCommand(), "essential"),
+			help.SetTier(commands.NewUpdateCommand(), "essential"),
 
 			// 🟡 COMMON — frequent.
 			help.SetTier(commands.NewKanbanCmd(), "common"),
@@ -92,4 +94,20 @@ func main() {
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
+	notifyUpdate()
+}
+
+// notifyUpdate prints a passive "new version available" hint after a successful
+// command. It is skipped for commands where the notice would be noise or unsafe
+// — notably `mcp` (the stdio server must not write to its streams) and the
+// update/version/help verbs. selfupdate.MaybeNotify additionally no-ops when
+// stderr is not a terminal or RAMORIE_NO_UPDATE_CHECK is set.
+func notifyUpdate() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "mcp", "update", "upgrade", "version", "--version", "-v", "help", "--help", "-h":
+			return
+		}
+	}
+	selfupdate.MaybeNotify(os.Stderr, version.Version)
 }
