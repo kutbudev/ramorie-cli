@@ -18,6 +18,7 @@ const (
 	CatActivity
 	CatKanban
 	CatProfile
+	CatSearch // recall results — never shown in the sidebar; pushed as a frame
 )
 
 // Label returns the human-readable name for a category.
@@ -37,6 +38,8 @@ func (c Category) Label() string {
 		return "Kanban"
 	case CatProfile:
 		return "Profile"
+	case CatSearch:
+		return "Search"
 	}
 	return ""
 }

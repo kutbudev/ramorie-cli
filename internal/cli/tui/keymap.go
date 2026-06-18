@@ -25,6 +25,11 @@ type keyMap struct {
 	Theme       key.Binding
 	Help        key.Binding
 	Quit        key.Binding
+	New         key.Binding // create task / memory
+	Toggle      key.Binding // complete / reopen task
+	StartTask   key.Binding // mark task in-progress
+	Delete      key.Binding // delete task / memory (confirmed)
+	Recall      key.Binding // backend hybrid find/recall
 	Cat1        key.Binding
 	Cat2        key.Binding
 	Cat3        key.Binding
@@ -55,6 +60,11 @@ func defaultKeyMap() keyMap {
 		Theme:       key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
 		Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+		New:         key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
+		Toggle:      key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "complete")),
+		StartTask:   key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "start")),
+		Delete:      key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "delete")),
+		Recall:      key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "recall")),
 		Cat1:        key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "tasks")),
 		Cat2:        key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "memories")),
 		Cat3:        key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "projects")),

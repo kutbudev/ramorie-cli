@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kutbudev/ramorie-cli/internal/api"
@@ -108,6 +109,14 @@ type rootModel struct {
 	helpOpen bool
 	caps     terminalCaps
 
+	// Interactive overlay state (create / recall prompt, delete confirm).
+	overlay        overlayKind
+	input          textinput.Model
+	promptIntent   promptIntent
+	confirmVerb    string  // e.g. "Delete task abc123?"
+	confirmCmd     tea.Cmd // action to run if the user confirms
+	lastRecallTerm string  // last recall query, so post-action refresh re-runs it
+
 	// Resize debounce: every WindowSizeMsg bumps resizeGen and schedules a
 	// resizeSettleMsg with that generation. Only the matching settle fires
 	// the heavy reflow (markdown re-render at the new width).
@@ -123,6 +132,9 @@ func newRootModel(c *api.Client) rootModel {
 	if cfg, err := config.LoadConfig(); err == nil && cfg != nil && cfg.Theme != "" {
 		theme = cfg.Theme
 	}
+	ti := textinput.New()
+	ti.Prompt = "› "
+	ti.CharLimit = 512
 	return rootModel{
 		client:    c,
 		keys:      defaultKeyMap(),
@@ -131,6 +143,7 @@ func newRootModel(c *api.Client) rootModel {
 		loadedCat: -1,
 		theme:     theme,
 		caps:      detectTerminal(),
+		input:     ti,
 	}
 }
 
@@ -334,6 +347,19 @@ func (m *rootModel) loadDetailForSelection() tea.Cmd {
 	case CatProfile:
 		// Already populated by profileLoadedMsg.
 		return nil
+	case CatSearch:
+		// Recall hit — dispatch the detail fetch by the hit's entity type.
+		if it, ok := sel.raw.(api.FindItem); ok {
+			if strings.EqualFold(it.Type, "task") {
+				m.detail.title = "Task"
+				m.detail.setLoading(true)
+				return loadTaskDetail(m.client, sel.id)
+			}
+			m.detail.title = "Memory"
+			m.detail.setLoading(true)
+			return loadMemoryDetail(m.client, sel.id)
+		}
+		return nil
 	}
 	return nil
 }
@@ -406,6 +432,14 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadDetailForSelection()
 
 	case tea.KeyMsg:
+		// Interactive overlays consume all keys while open.
+		switch m.overlay {
+		case overlayPrompt:
+			return m.updatePrompt(msg)
+		case overlayConfirm:
+			return m.updateConfirm(msg)
+		}
+
 		// Help overlay: ? toggles, esc/q closes; while open, swallow other keys.
 		if key.Matches(msg, m.keys.Help) {
 			m.helpOpen = !m.helpOpen
@@ -504,6 +538,17 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = fmt.Sprintf("✓ copied (%d chars)", res.chars)
 			}
 			return m, clearStatusAfter(3 * time.Second)
+
+		case key.Matches(msg, m.keys.Recall):
+			return m, m.startRecall()
+		case key.Matches(msg, m.keys.New):
+			return m, m.startCreate()
+		case m.focus == paneList && key.Matches(msg, m.keys.Toggle):
+			return m, m.toggleSelected()
+		case m.focus != paneSidebar && key.Matches(msg, m.keys.StartTask):
+			return m, m.startSelectedTask()
+		case m.focus != paneSidebar && key.Matches(msg, m.keys.Delete):
+			return m, m.askDelete()
 
 		case key.Matches(msg, m.keys.Back):
 			// Esc: pop drill-down frame first if we're in one.
@@ -748,6 +793,34 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		))
 		return m, cmd
 
+	case actionDoneMsg:
+		if !msg.ok {
+			m.statusMsg = "✗ " + msg.err.Error()
+			return m, clearStatusAfter(4 * time.Second)
+		}
+		m.statusMsg = "✓ " + msg.verb
+		cmds := []tea.Cmd{clearStatusAfter(3 * time.Second)}
+		if msg.refresh {
+			m.lastSelectedID = ""
+			if m.list.cat == CatSearch && m.lastRecallTerm != "" {
+				// Stay in the recall frame: re-run the query instead of
+				// resetting the stack back to a base category.
+				cmds = append(cmds, recallCmd(m.client, m.lastRecallTerm, m.projectID))
+			} else {
+				cmds = append(cmds, m.loadForCategory())
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case recallLoadedMsg:
+		if msg.err != nil {
+			m.list.setError(msg.err)
+			return m, nil
+		}
+		m.list.setSearchResults(msg.items)
+		m.statusMsg = fmt.Sprintf("✓ %d hits for \"%s\"", len(msg.items), msg.term)
+		return m, tea.Batch(m.loadDetailForSelection(), clearStatusAfter(4*time.Second))
+
 	case clearStatusMsg:
 		m.statusMsg = ""
 		return m, nil
@@ -769,6 +842,20 @@ func (m rootModel) View() string {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			helpOverlay(m.keys, m.width, maxInt(m.height-1, 1)),
+			m.renderStatusBar(),
+		)
+	}
+	switch m.overlay {
+	case overlayPrompt:
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			renderPromptOverlay(promptTitleFor(m.promptIntent), m.input.View(), m.width, maxInt(m.height-1, 1)),
+			m.renderStatusBar(),
+		)
+	case overlayConfirm:
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			renderConfirmOverlay(m.confirmVerb, m.width, maxInt(m.height-1, 1)),
 			m.renderStatusBar(),
 		)
 	}
@@ -830,11 +917,24 @@ func (m rootModel) footerHints() []string {
 	if m.helpOpen {
 		return []string{keyHint("?", "close"), keyHint("esc", "close"), keyHint("q", "quit")}
 	}
+	switch m.overlay {
+	case overlayPrompt:
+		return []string{
+			display.FooterDsc.Render("type"),
+			keyHintAccent("↵", "submit", display.ColorInfo),
+			keyHint("esc", "cancel"),
+		}
+	case overlayConfirm:
+		return []string{
+			keyHintAccent("y", "confirm", display.ColorWarn),
+			keyHint("n", "cancel"),
+		}
+	}
 	switch m.focus {
 	case paneSidebar:
 		return []string{
 			keyHint("↑↓", "choose"), keyHint("↵", "open"),
-			keyHint("1-6", "jump"), keyHint("⇥", "pane"),
+			keyHint("1-6", "jump"), keyHint("s", "recall"),
 			keyHint("?", "help"), keyHint("q", "quit"),
 		}
 	case paneList:
@@ -849,13 +949,16 @@ func (m rootModel) footerHints() []string {
 		switch m.list.cat {
 		case CatProjects:
 			hints = append(hints, keyHintAccent("p", "set project", display.ColorWarn))
-		case CatTasks, CatMemories:
-			hints = append(hints, keyHint("p", "project"), keyHint("P", "all"))
+		case CatTasks:
+			hints = append(hints, keyHint("space", "done"), keyHint("S", "start"),
+				keyHint("n", "new"), keyHint("D", "del"), keyHint("p", "project"))
+		case CatMemories:
+			hints = append(hints, keyHint("n", "new"), keyHint("D", "del"), keyHint("p", "project"))
 		case CatOrganizations:
 			hints = append(hints, keyHint("↵", "projects"))
 		}
 		hints = append(hints,
-			keyHint("c", "copy"), keyHint("r", "refresh"),
+			keyHint("s", "recall"), keyHint("c", "copy"),
 			keyHint("?", "help"), keyHint("q", "quit"),
 		)
 		return hints
@@ -863,7 +966,7 @@ func (m rootModel) footerHints() []string {
 		return []string{
 			keyHint("↑↓", "scroll"), keyHint("^u^d", "page"),
 			keyHint("h", "back"), keyHint("c", "copy"),
-			keyHint("t", "theme"), keyHint("?", "help"), keyHint("q", "quit"),
+			keyHint("s", "recall"), keyHint("?", "help"), keyHint("q", "quit"),
 		}
 	}
 	return []string{keyHint("?", "help"), keyHint("q", "quit")}
@@ -889,6 +992,193 @@ func detailTitleFor(c Category) string {
 		return "Profile"
 	}
 	return "Detail"
+}
+
+// ---- interactive actions ---------------------------------------------------
+
+// activeCat is the category the action keys operate on: the focused list's
+// category, or the sidebar cursor's category when the sidebar has focus.
+func (m rootModel) activeCat() Category {
+	if m.focus == paneSidebar {
+		return m.sidebar.selected()
+	}
+	return m.list.cat
+}
+
+func promptTitleFor(intent promptIntent) string {
+	switch intent {
+	case promptCreateTask:
+		return "New task"
+	case promptCreateMemory:
+		return "New memory"
+	case promptRecall:
+		return "Recall · hybrid find"
+	}
+	return ""
+}
+
+// openPrompt switches into the single-line prompt overlay.
+func (m *rootModel) openPrompt(intent promptIntent, placeholder string) tea.Cmd {
+	m.overlay = overlayPrompt
+	m.promptIntent = intent
+	m.input.Reset()
+	m.input.Placeholder = placeholder
+	m.input.Width = maxInt(minInt(m.width-16, 56), 16)
+	return m.input.Focus()
+}
+
+func (m *rootModel) startRecall() tea.Cmd {
+	return m.openPrompt(promptRecall, "search term…")
+}
+
+func (m *rootModel) startCreate() tea.Cmd {
+	switch m.activeCat() {
+	case CatTasks:
+		if m.projectID == "" {
+			m.statusMsg = "press p to pick a project before creating"
+			return clearStatusAfter(3 * time.Second)
+		}
+		return m.openPrompt(promptCreateTask, "task title…")
+	case CatMemories:
+		if m.projectID == "" {
+			m.statusMsg = "press p to pick a project before creating"
+			return clearStatusAfter(3 * time.Second)
+		}
+		return m.openPrompt(promptCreateMemory, "memory content…")
+	}
+	m.statusMsg = "new works in Tasks or Memories"
+	return clearStatusAfter(3 * time.Second)
+}
+
+// updatePrompt routes keys while the text prompt is open.
+func (m rootModel) updatePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.overlay = overlayNone
+		m.input.Blur()
+		return m, nil
+	case "enter":
+		return m.submitPrompt()
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m rootModel) submitPrompt() (tea.Model, tea.Cmd) {
+	val := strings.TrimSpace(m.input.Value())
+	intent := m.promptIntent
+	m.overlay = overlayNone
+	m.input.Blur()
+	if val == "" {
+		return m, nil
+	}
+	switch intent {
+	case promptRecall:
+		m.focus = paneList
+		m.applyFocus()
+		m.list.pushFrame(CatSearch, "Search: "+display.Truncate(val, 24), "")
+		m.lastSelectedID = ""
+		m.lastRecallTerm = val
+		m.statusMsg = "searching…"
+		return m, recallCmd(m.client, val, m.projectID)
+	case promptCreateTask:
+		m.statusMsg = "creating task…"
+		return m, createTaskCmd(m.client, m.projectID, val)
+	case promptCreateMemory:
+		m.statusMsg = "creating memory…"
+		return m, createMemoryCmd(m.client, m.projectID, val)
+	}
+	return m, nil
+}
+
+// updateConfirm routes keys while the yes/no delete confirm is open.
+func (m rootModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y", "enter":
+		cmd := m.confirmCmd
+		m.overlay = overlayNone
+		m.confirmCmd = nil
+		m.statusMsg = "deleting…"
+		return m, cmd
+	case "n", "N", "esc":
+		m.overlay = overlayNone
+		m.confirmCmd = nil
+		return m, nil
+	}
+	return m, nil
+}
+
+// selectedEntity resolves the highlighted row to an (id, kind) pair, working
+// across normal category frames (raw is a models.Task/Memory) AND recall
+// results (raw is an api.FindItem). task is non-nil only when the full task
+// entity is in hand (so toggle can read its status). kind is "task"/"memory"/"".
+func (m rootModel) selectedEntity() (id, kind string, task *models.Task, ok bool) {
+	sel := m.list.selected()
+	if sel == nil || sel.id == "" || sel.id == "placeholder" {
+		return "", "", nil, false
+	}
+	switch r := sel.raw.(type) {
+	case models.Task:
+		t := r
+		return sel.id, "task", &t, true
+	case models.Memory:
+		return sel.id, "memory", nil, true
+	case api.FindItem:
+		k := "memory"
+		if strings.EqualFold(r.Type, "task") {
+			k = "task"
+		}
+		return sel.id, k, nil, true
+	}
+	return sel.id, "", nil, false
+}
+
+func (m *rootModel) toggleSelected() tea.Cmd {
+	id, kind, task, ok := m.selectedEntity()
+	if !ok || kind != "task" {
+		m.statusMsg = "complete works on a task"
+		return clearStatusAfter(2 * time.Second)
+	}
+	// Reopen only when we know the task is already completed; from a recall
+	// hit (no status in hand) the action completes.
+	if task != nil && strings.EqualFold(task.Status, "COMPLETED") {
+		m.statusMsg = "reopening…"
+		return reopenTaskCmd(m.client, id)
+	}
+	m.statusMsg = "completing…"
+	return completeTaskCmd(m.client, id)
+}
+
+func (m *rootModel) startSelectedTask() tea.Cmd {
+	id, kind, _, ok := m.selectedEntity()
+	if !ok || kind != "task" {
+		m.statusMsg = "start works on a task"
+		return clearStatusAfter(2 * time.Second)
+	}
+	m.statusMsg = "starting…"
+	return startTaskCmd(m.client, id)
+}
+
+func (m *rootModel) askDelete() tea.Cmd {
+	id, kind, _, ok := m.selectedEntity()
+	if !ok {
+		return nil
+	}
+	switch kind {
+	case "task":
+		m.overlay = overlayConfirm
+		m.confirmVerb = "Delete task " + shortID(id) + "?"
+		m.confirmCmd = deleteTaskCmd(m.client, id)
+	case "memory":
+		m.overlay = overlayConfirm
+		m.confirmVerb = "Delete memory " + shortID(id) + "?"
+		m.confirmCmd = deleteMemoryCmd(m.client, id)
+	default:
+		m.statusMsg = "delete works on tasks or memories"
+		return clearStatusAfter(2 * time.Second)
+	}
+	return nil
 }
 
 // Compile-time assertion: rootModel implements tea.Model.

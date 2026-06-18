@@ -33,7 +33,21 @@ const (
 	repo          = "kutbudev/ramorie-cli"
 	checkInterval = 24 * time.Hour
 	userAgent     = "ramorie-cli-selfupdate"
+	maxBinarySize = 300 << 20 // hard cap on the extracted binary (anti-bomb)
 )
+
+// readCapped reads r but refuses to buffer more than maxBinarySize bytes, so a
+// maliciously crafted archive can't exhaust memory on decompression.
+func readCapped(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxBinarySize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxBinarySize {
+		return nil, fmt.Errorf("extracted binary exceeds %d bytes", maxBinarySize)
+	}
+	return b, nil
+}
 
 // ---- version comparison ----------------------------------------------------
 
@@ -309,6 +323,10 @@ func selfReplace(ctx context.Context, w io.Writer, version, exePath string) erro
 		_ = os.Rename(exePath, exePath+".old")
 	}
 	if err := os.Rename(tmpName, exePath); err != nil {
+		if runtime.GOOS == "windows" {
+			// Best-effort restore so the user isn't left without a binary.
+			_ = os.Rename(exePath+".old", exePath)
+		}
 		return fmt.Errorf("could not replace %s (try: sudo ramorie update): %w", exePath, err)
 	}
 	fmt.Fprintf(w, "✓ Updated to %s.\n", version)
@@ -356,8 +374,14 @@ func extractTarGz(data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Defense-in-depth: ignore any traversal-shaped entry. We only ever
+		// match the leaf name and write to a fixed temp path, but reject `..`
+		// outright so a future refactor can't reintroduce zip-slip.
+		if strings.Contains(hdr.Name, "..") {
+			continue
+		}
 		if filepath.Base(hdr.Name) == "ramorie" && hdr.Typeflag == tar.TypeReg {
-			return io.ReadAll(tr)
+			return readCapped(tr)
 		}
 	}
 	return nil, fmt.Errorf("ramorie binary not found in archive")
@@ -369,13 +393,16 @@ func extractZip(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	for _, f := range zr.File {
+		if strings.Contains(f.Name, "..") {
+			continue
+		}
 		if filepath.Base(f.Name) == "ramorie.exe" {
 			rc, err := f.Open()
 			if err != nil {
 				return nil, err
 			}
 			defer rc.Close()
-			return io.ReadAll(rc)
+			return readCapped(rc)
 		}
 	}
 	return nil, fmt.Errorf("ramorie.exe not found in archive")

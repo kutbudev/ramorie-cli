@@ -25,8 +25,9 @@ func helpOverlay(_ keyMap, width, height int) string {
 		{"→/l", "forward"}, {"↵", "open"}, {"esc", "back"},
 	}}
 	actions := group{"Actions", []kv{
-		{"p", "project filter"}, {"P", "all projects"}, {"r", "refresh"},
-		{"c", "copy"}, {"t", "theme"},
+		{"s", "recall (find)"}, {"n", "new task/memory"}, {"space", "complete task"},
+		{"S", "start task"}, {"D", "delete"}, {"p", "project filter"},
+		{"P", "all projects"}, {"r", "refresh"}, {"c", "copy"}, {"t", "theme"},
 	}}
 	global := group{"Global", []kv{
 		{"1-6", "jump category"}, {"?", "help"}, {"q", "quit"},

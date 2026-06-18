@@ -377,6 +377,43 @@ func (l *listModel) setActivity(events []models.ActivityItem) {
 	l.applyItems(items)
 }
 
+// setSearchResults renders hybrid-recall hits. Each row's badge is the hit
+// type (memory/task/decision/…) and the raw entity is the api.FindItem so the
+// detail pane can dispatch by type on selection.
+func (l *listModel) setSearchResults(items []api.FindItem) {
+	rows := make([]list.Item, 0, len(items))
+	for i := range items {
+		it := items[i]
+		badge, st := typeBadgeParts(itemKind(it))
+		title := display.SingleLine(it.Title)
+		if title == "" {
+			title = display.SingleLine(it.Preview)
+		}
+		rows = append(rows, listItem{
+			id:         it.ID,
+			title:      title,
+			badge:      badge,
+			badgeStyle: st,
+			rel:        display.Relative(it.CreatedAt),
+			filter:     it.ID + " " + it.Title + " " + it.Preview,
+			raw:        it,
+		})
+	}
+	if len(rows) == 0 {
+		l.setPlaceholder("no matches — try a different query")
+		return
+	}
+	l.applyItems(rows)
+}
+
+// itemKind picks the most descriptive label for a recall hit's badge.
+func itemKind(it api.FindItem) string {
+	if it.Kind != "" {
+		return it.Kind
+	}
+	return it.Type
+}
+
 // setKanbanSummary renders three compact rows showing bucket counts. The
 // detail pane carries the actual three-column board.
 func (l *listModel) setKanbanSummary(todo, inProgress, completed int) {

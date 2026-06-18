@@ -172,6 +172,8 @@ func categoryIcon(c Category) string {
 		return "▦"
 	case CatProfile:
 		return "⊙"
+	case CatSearch:
+		return "⌕"
 	}
 	return "·"
 }
