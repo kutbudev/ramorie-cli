@@ -196,6 +196,52 @@ func TestFormatBeforeActionRunbooks(t *testing.T) {
 	}
 }
 
+func TestFormatBeforeActionRunbooks_CompactsGeneratedSkill(t *testing.T) {
+	body := `---
+description: 'Runbook: before running tests'
+name: runbook-before-running-tests-with-a-very-long-generated-slug-name
+version: 1.0.0
+---
+
+# Generated Title
+
+## Overview
+Verbose overview that should not be injected.
+
+## When to Use
+before:test
+
+## Steps
+1. Use pinned Go.
+2. Set GOCACHE.
+
+## Validation
+Tests exit 0.`
+
+	got := formatBeforeActionRunbooks(
+		"go test ./...",
+		[]beforeActionIntent{{Key: "test", Label: "test"}},
+		[]beforeActionRunbook{{
+			Name:    "runbook-before-running-tests-with-a-very-long-generated-slug-name",
+			Preview: "Runbook: before running tests",
+			Trigger: "before:test",
+			Body:    body,
+		}},
+		300,
+	)
+
+	for _, want := range []string{"Runbook 1: before running tests", "Checklist:", "1. Use pinned Go.", "Validation:", "Tests exit 0."} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatted runbook missing %q:\n%s", want, got)
+		}
+	}
+	for _, bad := range []string{"description:", "Generated Title", "Verbose overview"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("formatted runbook should omit %q:\n%s", bad, got)
+		}
+	}
+}
+
 // TestInstallUninstall_Roundtrip runs the real install/uninstall paths
 // against a temp HOME so we don't touch the user's ~/.claude/settings.json.
 // Verifies settings shape preservation — foreign top-level keys must survive.

@@ -727,13 +727,13 @@ func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, ru
 			break
 		}
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "Runbook %d: %s\n", i+1, strings.TrimSpace(rb.Name))
+		fmt.Fprintf(&b, "Runbook %d: %s\n", i+1, friendlyRunbookName(rb))
 		if strings.TrimSpace(rb.Trigger) != "" {
 			b.WriteString("Trigger: ")
 			b.WriteString(strings.TrimSpace(rb.Trigger))
 			b.WriteString("\n")
 		}
-		body := clipRunes(strings.TrimSpace(rb.Body), beforeActionMaxRunbookRunes)
+		body := clipRunes(formatRunbookChecklist(rb.Body), beforeActionMaxRunbookRunes)
 		if body != "" {
 			b.WriteString(body)
 			b.WriteString("\n")
@@ -743,6 +743,94 @@ func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, ru
 	return clipRunes(b.String(), maxChars)
 }
 
+func friendlyRunbookName(rb beforeActionRunbook) string {
+	name := strings.TrimSpace(rb.Name)
+	if name == "" || looksLikeGeneratedSlug(name) {
+		if fallback := firstUsefulLine(rb.Preview); fallback != "" {
+			name = fallback
+		} else if fallback := firstUsefulLine(stripFrontMatter(rb.Body)); fallback != "" {
+			name = fallback
+		}
+	}
+	name = strings.TrimPrefix(strings.TrimSpace(name), "Runbook: ")
+	if name == "" {
+		name = "untitled runbook"
+	}
+	return clipInlineRunes(name, 100)
+}
+
+func looksLikeGeneratedSlug(s string) bool {
+	return !strings.Contains(s, " ") && strings.Count(s, "-") >= 6 && len(s) > 48
+}
+
+func firstUsefulLine(s string) string {
+	for _, line := range strings.Split(stripFrontMatter(s), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "---") {
+			continue
+		}
+		return strings.TrimPrefix(line, "description: ")
+	}
+	return ""
+}
+
+func formatRunbookChecklist(body string) string {
+	body = stripFrontMatter(body)
+	steps := extractMarkdownSection(body, "Steps")
+	validation := extractMarkdownSection(body, "Validation")
+
+	var b strings.Builder
+	if steps != "" {
+		b.WriteString("Checklist:\n")
+		b.WriteString(steps)
+	}
+	if validation != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("Validation:\n")
+		b.WriteString(validation)
+	}
+	if b.Len() > 0 {
+		return strings.TrimSpace(b.String())
+	}
+	return strings.TrimSpace(body)
+}
+
+func stripFrontMatter(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return strings.TrimSpace(s)
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+func extractMarkdownSection(body, heading string) string {
+	lines := strings.Split(body, "\n")
+	target := "## " + heading
+	var out []string
+	inSection := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.EqualFold(trimmed, target) {
+			inSection = true
+			continue
+		}
+		if inSection && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		if inSection {
+			out = append(out, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
 func clipRunes(s string, max int) string {
 	s = strings.TrimSpace(s)
 	if max <= 0 || len([]rune(s)) <= max {
@@ -750,6 +838,18 @@ func clipRunes(s string, max int) string {
 	}
 	r := []rune(s)
 	return strings.TrimSpace(string(r[:max])) + "\n[truncated]"
+}
+
+func clipInlineRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 || len([]rune(s)) <= max {
+		return s
+	}
+	if max <= 3 {
+		return strings.TrimSpace(string([]rune(s)[:max]))
+	}
+	r := []rune(s)
+	return strings.TrimSpace(string(r[:max-3])) + "..."
 }
 
 // extractFilePathFromPayload tries the common shapes Claude Code sends.

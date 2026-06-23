@@ -10,7 +10,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 
 const VERSION = require('./package.json').version;
 const REPO = 'kutbudev/ramorie-cli';
@@ -26,6 +26,8 @@ const ARCH_MAP = {
   x64: 'amd64',
   arm64: 'arm64'
 };
+
+const SKIP_HOOK_REFRESH_ENV = 'RAMORIE_SKIP_HOOK_REFRESH';
 
 function download(url) {
   return new Promise((resolve, reject) => {
@@ -51,6 +53,34 @@ function download(url) {
 
     request(url);
   });
+}
+
+function refreshProtocolHooks(binaryPath) {
+  if (process.env[SKIP_HOOK_REFRESH_ENV]) {
+    console.log(`   Skipping protocol hook refresh (${SKIP_HOOK_REFRESH_ENV} is set)`);
+    return;
+  }
+
+  if (!fs.existsSync(binaryPath)) {
+    console.log('   ⚠ Protocol hook refresh skipped: binary not found');
+    return;
+  }
+
+  try {
+    console.log('   Refreshing protocol hooks...');
+    execFileSync(binaryPath, ['setup-hooks', 'install', '--client', 'all'], {
+      env: {
+        ...process.env,
+        RAMORIE_NO_UPDATE_CHECK: '1'
+      },
+      stdio: 'pipe'
+    });
+    console.log('   ✓ Protocol hooks refreshed');
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.log(`   ⚠ Protocol hook refresh failed: ${message}`);
+    console.log('     Run "ramorie setup-hooks install --client all" manually to update hook templates.');
+  }
 }
 
 async function main() {
@@ -114,6 +144,11 @@ async function main() {
     if (!isWindows && fs.existsSync(binaryPath)) {
       fs.chmodSync(binaryPath, 0o755);
     }
+
+    // Keep already-installed editor hooks in sync with the just-installed
+    // binary. Best-effort: a package upgrade must not fail because a local
+    // editor config is absent, locked, or intentionally skipped.
+    refreshProtocolHooks(binaryPath);
 
     // Cleanup temp files and directory
     if (fs.existsSync(tempFile)) {
