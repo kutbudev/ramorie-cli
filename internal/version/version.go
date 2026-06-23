@@ -2,4 +2,4 @@ package version
 
 // Version is the single runtime version shared by the CLI and MCP server.
 // Release builds override it with ldflags.
-var Version = "9.5.2"
+var Version = "9.5.3"

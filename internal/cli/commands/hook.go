@@ -695,7 +695,22 @@ func beforeActionRunbookLooksRelevant(item api.FindItem, rb beforeActionRunbook,
 			if term == "" {
 				continue
 			}
-			if strings.Contains(trigger, term) || strings.Contains(haystack, term) {
+			if strings.Contains(trigger, term) {
+				return true
+			}
+		}
+	}
+	// A structured skill with a trigger is an explicit before-action contract.
+	// If that trigger did not match the detected intent, do not let generic
+	// words buried in the body (e.g. "Validation") pull it into an unrelated
+	// build/test/deploy command.
+	if trigger != "" {
+		return false
+	}
+	for _, intent := range intents {
+		for _, term := range intent.Terms {
+			term = strings.ToLower(strings.TrimSpace(term))
+			if term != "" && strings.Contains(haystack, term) {
 				return true
 			}
 		}
