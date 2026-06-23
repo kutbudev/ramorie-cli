@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,46 @@ func TestClaudeCodeInstaller_Idempotent(t *testing.T) {
 	count := countRamorieIDs(raw)
 	if count != len(entries) {
 		t.Fatalf("expected %d ramorie IDs after 3 installs, got %d", len(entries), count)
+	}
+}
+
+func TestDefaultEntries_SessionStartUsesDynamicHookCommand(t *testing.T) {
+	entries := DefaultEntries()
+	if len(entries) == 0 {
+		t.Fatal("DefaultEntries returned no hooks")
+	}
+	session := entries[0]
+	if session.Event != SessionStart {
+		t.Fatalf("first hook event = %s, want %s", session.Event, SessionStart)
+	}
+	if !strings.Contains(session.Command, " hook session-start") {
+		t.Fatalf("SessionStart command must call the dynamic hook shim, got %q", session.Command)
+	}
+	if strings.Contains(session.Command, "cat <<") {
+		t.Fatalf("SessionStart command must not be a static heredoc anymore: %q", session.Command)
+	}
+}
+
+func TestDefaultEntries_IncludeBeforeActionRunbookHook(t *testing.T) {
+	entries := DefaultEntries()
+	var found bool
+	for _, entry := range entries {
+		if entry.ID != "ramorie-protocol-before-action-v1" {
+			continue
+		}
+		found = true
+		if entry.Event != PreToolUse {
+			t.Fatalf("before-action event = %s, want %s", entry.Event, PreToolUse)
+		}
+		if entry.Matcher != "Bash|Shell" {
+			t.Fatalf("before-action matcher = %q, want Bash|Shell", entry.Matcher)
+		}
+		if !strings.Contains(entry.Command, " hook before-action") {
+			t.Fatalf("before-action command must call hook shim, got %q", entry.Command)
+		}
+	}
+	if !found {
+		t.Fatalf("DefaultEntries missing before-action runbook hook")
 	}
 }
 

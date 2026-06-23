@@ -168,6 +168,46 @@ func TestFindMemories_BuildsExpectedBody(t *testing.T) {
 	}
 }
 
+func TestFindMemories_PreservesTrustSignals(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"items":[{
+				"id":"11111111-1111-1111-1111-111111111111",
+				"type":"memory",
+				"kind":"skill",
+				"title":"iOS build runbook",
+				"preview":"steps",
+				"score":0.7,
+				"created_at":"2026-06-23T00:00:00Z",
+				"age_days":12,
+				"stale":true,
+				"stale_reason":"re-verify",
+				"salience":0.91,
+				"trust_reason":"skill runbook; high reuse"
+			}],
+			"_meta":{"total":1,"returned":1,"ranking_mode":"hybrid","applied_scope":"project","latency_ms":1}
+		}`))
+	}))
+	defer ts.Close()
+	c := newTestClient(ts)
+
+	resp, err := c.FindMemories(FindMemoriesOptions{Term: "ios build"})
+	if err != nil {
+		t.Fatalf("FindMemories: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(resp.Items))
+	}
+	item := resp.Items[0]
+	if item.AgeDays != 12 || !item.Stale || item.StaleReason != "re-verify" {
+		t.Fatalf("staleness fields not preserved: %+v", item)
+	}
+	if item.Salience != 0.91 || item.TrustReason != "skill runbook; high reuse" {
+		t.Fatalf("trust fields not preserved: salience=%v reason=%q", item.Salience, item.TrustReason)
+	}
+}
+
 func TestFindMemories_OmitsZeroValueFields(t *testing.T) {
 	var capturedBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,13 @@
 package selfupdate
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestNewer(t *testing.T) {
 	cases := []struct {
@@ -36,4 +43,70 @@ func TestMethodString(t *testing.T) {
 			t.Errorf("Method(%d).String() = %q, want %q", m, got, want)
 		}
 	}
+}
+
+func TestHookRefreshBinary_PrefersPathRamorie(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ramorie")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
+	got := hookRefreshBinary("/fallback/ramorie")
+	if got != fake {
+		t.Fatalf("hookRefreshBinary = %q, want PATH binary %q", got, fake)
+	}
+}
+
+func TestHookRefreshBinary_FallsBackToExePath(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	got := hookRefreshBinary("/fallback/ramorie")
+	if got != "/fallback/ramorie" {
+		t.Fatalf("hookRefreshBinary fallback = %q", got)
+	}
+}
+
+func TestRefreshProtocolHooks_RunsSetupHooksInstall(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	fake := filepath.Join(dir, "ramorie")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + shellArg(argsFile) + "\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
+	var out bytes.Buffer
+	refreshProtocolHooks(context.Background(), &out, "")
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("expected fake ramorie to run: %v\noutput:\n%s", err, out.String())
+	}
+	got := strings.TrimSpace(string(data))
+	want := strings.Join([]string{"setup-hooks", "install", "--client", "all"}, "\n")
+	if got != want {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	if !strings.Contains(out.String(), "Protocol hooks refreshed") {
+		t.Fatalf("expected success output, got:\n%s", out.String())
+	}
+}
+
+func TestRefreshProtocolHooks_SkipEnv(t *testing.T) {
+	t.Setenv(skipHookRefreshEnv, "1")
+	t.Setenv("PATH", t.TempDir())
+
+	var out bytes.Buffer
+	refreshProtocolHooks(context.Background(), &out, "/does/not/exist")
+
+	if !strings.Contains(out.String(), "Skipping protocol hook refresh") {
+		t.Fatalf("expected skip message, got:\n%s", out.String())
+	}
+}
+
+func shellArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

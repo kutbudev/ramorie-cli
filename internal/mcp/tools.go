@@ -205,6 +205,7 @@ Just tell me what to remember - I'll figure out the rest.
 
 REQUIRED: content (what to remember), project (name or ID)
 OPTIONAL: force (bool) - Skip similarity check and save anyway
+OPTIONAL runbook fields: trigger, steps, validation
 
 ⚠️ DUPLICATE PREVENTION: By default, remember() checks for similar existing memories.
 If similar content exists (>80% match), you'll get a warning with the existing memory.
@@ -214,11 +215,24 @@ The type is auto-detected from content:
 - "decided X" → decision
 - "fixed bug" → bug_fix
 - "prefer X" → preference
+- trigger/steps/validation present → skill (structured runbook)
 - "todo: X" / "later: X" → auto-creates TASK instead of memory
+
+Before-action runbook triggers are machine-readable and are surfaced automatically by hooks:
+- before:ios-build
+- before:android-build
+- before:mobile-build
+- before:docker-build
+- before:deploy
+- before:test
+- before:migration
+- before:install
+- before:git-publish
 
 💡 Best Practice: Always call find(term) BEFORE remember() to check existing knowledge.
 
 Example: remember(content: "API uses JWT authentication", project: "my-project")
+Example runbook: remember(content: "iOS build fix", project: "Turna React", type: "skill", trigger: "before:ios-build", steps: ["Set OTHER_LDFLAGS ...", "pod install"], validation: "xcodebuild succeeds")
 Example with force: remember(content: "...", project: "...", force: true)`,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Remember",
@@ -229,7 +243,7 @@ Example with force: remember(content: "...", project: "...", force: true)`,
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "surface_skills",
-		Description: "🟡 COMMON | Find relevant procedural skills based on context. REQUIRED: context (describe current task/situation). Returns skills with matching triggers, steps, and validation. Use before starting new tasks to check if learned procedures apply.",
+		Description: "🟡 COMMON | Find relevant procedural skills/runbooks based on context. REQUIRED: context (describe current task/situation). Returns skills with matching triggers, steps, and validation. Use before starting new tasks or before build/test/deploy actions. For automatic pre-action surfacing, write triggers like before:ios-build, before:android-build, before:docker-build, before:deploy, before:test, before:migration, before:install.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:         "Surface Relevant Skills",
 			ReadOnlyHint:  true,
@@ -653,6 +667,14 @@ REQUIRED: project (name or ID), trigger, description, steps (array of strings)
 Optional: validation (how to verify success), tags (array)
 
 A skill is a procedural memory that can be surfaced and executed by agents.
+For before-action runbooks, use machine-readable triggers such as:
+- before:ios-build
+- before:android-build
+- before:docker-build
+- before:deploy
+- before:test
+- before:migration
+- before:install
 
 Example: create_skill(project: "Ramorie", trigger: "When deploying to production", description: "Production deployment procedure", steps: ["Run tests", "Build", "Deploy"])`,
 		Annotations: &mcp.ToolAnnotations{
@@ -1531,8 +1553,19 @@ type RememberInput struct {
 	Content string   `json:"content"`           // REQUIRED - what to remember
 	Project string   `json:"project,omitempty"` // OPTIONAL - auto-detected from last used
 	Force   bool     `json:"force,omitempty"`   // Skip similarity check and save anyway
-	Type    string   `json:"type,omitempty"`    // OPTIONAL - override auto-detected type (general, decision, bug_fix, preference, pattern, reference)
+	Type    string   `json:"type,omitempty"`    // OPTIONAL - override auto-detected type (general, decision, bug_fix, preference, pattern, reference, skill)
 	Tags    []string `json:"tags,omitempty"`    // OPTIONAL - tags for categorization
+
+	// Procedural memory fields (type='skill'). Storing these as STRUCTURED data
+	// — rather than burying a recipe in prose Content — is what makes a runbook
+	// re-applicable: an agent can read Steps as a checklist and re-verify via
+	// Validation before relying on it. Providing any of these auto-promotes the
+	// memory to type='skill'. The backend already persists all three
+	// (repository.CreateMemory) and the API client already serializes them
+	// (CreateMemoryOptions); this just opens the MCP write path.
+	Trigger    string   `json:"trigger,omitempty"`    // OPTIONAL - when this skill applies, e.g. "before:ios-build"
+	Steps      []string `json:"steps,omitempty"`      // OPTIONAL - ordered, executable steps (the runbook)
+	Validation string   `json:"validation,omitempty"` // OPTIONAL - how to confirm the skill worked
 }
 
 // checkForSimilarMemories checks if similar memories already exist in the project
@@ -1667,11 +1700,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		return nil, nil, err
 	}
 
-	// Use explicit type if provided, otherwise auto-detect
-	memoryType := input.Type
-	if memoryType == "" {
-		memoryType = DetectMemoryType(content)
-	}
+	memoryType := effectiveRememberMemoryType(content, input.Type, input.Trigger, input.Steps, input.Validation)
 
 	// Check encryption based on project scope (org vs personal).
 	// Personal project only — encrypt with personal key (org projects skip
@@ -1682,7 +1711,17 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 
 		encryptedContent, nonce, isEncrypted, err := crypto.EncryptContent(content)
 		if err == nil && isEncrypted {
-			memory, err := apiClient.CreateEncryptedMemory(projectID, encryptedContent, nonce, contentHash)
+			memory, err := apiClient.CreateEncryptedMemoryWithOptions(api.CreateEncryptedMemoryOptions{
+				ProjectID:        projectID,
+				EncryptedContent: encryptedContent,
+				ContentNonce:     nonce,
+				ContentHash:      contentHash,
+				Type:             memoryType,
+				Tags:             input.Tags,
+				Trigger:          input.Trigger,
+				Steps:            input.Steps,
+				Validation:       input.Validation,
+			})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1704,18 +1743,25 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 	// pass through similar_memories (soft-dupe merge candidates) and
 	// recent_in_project (work-unit suggestions) to the agent.
 	resp, err := apiClient.CreateMemoryWithOptionsFull(api.CreateMemoryOptions{
-		ProjectID: projectID,
-		Content:   content,
-		Type:      memoryType,
-		Tags:      input.Tags,
+		ProjectID:  projectID,
+		Content:    content,
+		Type:       memoryType,
+		Tags:       input.Tags,
+		Trigger:    input.Trigger,
+		Steps:      input.Steps,
+		Validation: input.Validation,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
+	savedMsg := fmt.Sprintf("💾 Remembered as %s", memoryType)
+	if memoryType == MemoryTypeSkill && (input.Trigger != "" || len(input.Steps) > 0 || input.Validation != "") {
+		savedMsg = fmt.Sprintf("💾 Remembered as %s runbook (%d step(s)) — re-applicable, not buried in prose", memoryType, len(input.Steps))
+	}
 	result := map[string]interface{}{
 		"action":        "memory_saved",
-		"message":       fmt.Sprintf("💾 Remembered as %s", memoryType),
+		"message":       savedMsg,
 		"memory":        resp.Memory,
 		"type":          memoryType,
 		"auto_detected": true,
@@ -1731,6 +1777,18 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		result["_hint_recent"] = "💡 This project saw another memory in the last 10 minutes — these may be part of the same work unit."
 	}
 	return mustTextResult(result), nil, nil
+}
+
+func effectiveRememberMemoryType(content, explicitType, trigger string, steps []string, validation string) string {
+	memoryType := strings.TrimSpace(explicitType)
+	if memoryType == "" {
+		memoryType = DetectMemoryType(content)
+	}
+	hasSkillFields := strings.TrimSpace(trigger) != "" || len(steps) > 0 || strings.TrimSpace(validation) != ""
+	if hasSkillFields {
+		return MemoryTypeSkill
+	}
+	return memoryType
 }
 
 // shouldBeTask checks if the content is an explicit task rather than a memory.
@@ -2988,6 +3046,37 @@ func normalizePriority(s string) string {
 // (recent_memories, in_progress_tasks, last_session) is included. When a
 // detectedProjectID is provided, those queries are scoped to that project to
 // avoid cross-project noise.
+func BuildSessionStartContext(client *api.Client, full bool) (map[string]interface{}, error) {
+	if client == nil {
+		return nil, errors.New("api client is required")
+	}
+	detected, cwd, _ := detectCwdProject(client)
+	detectedProjectID := ""
+	if detected != nil {
+		detectedProjectID = detected.ID.String()
+	}
+
+	result, err := setupAgent(client, detectedProjectID, full)
+	if err != nil {
+		return nil, err
+	}
+	if detected != nil {
+		result["detected_project"] = map[string]interface{}{
+			"id":     detected.ID.String(),
+			"name":   detected.Name,
+			"source": "cwd",
+			"hint":   fmt.Sprintf("Detected from %s", cwd),
+		}
+	}
+
+	next := "Call find(term, project) before responding; remember(content, project) after durable learning."
+	if detected != nil {
+		next = fmt.Sprintf("Use project=%q. Call find(term, project) before responding; remember(content, project) after durable learning.", detected.Name)
+	}
+	result["next_action"] = next
+	return result, nil
+}
+
 func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",

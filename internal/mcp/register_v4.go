@@ -89,6 +89,19 @@ Type is auto-detected from content words:
 - "prefer X" / "always" / "never" → preference
 - "skill:" / "how to"      → skill
 
+SKILL / RUNBOOK (structured, re-applicable knowledge — prefer this for build/deploy
+recipes and any "before doing X, do these steps" procedure):
+Pass STRUCTURED fields instead of burying the recipe in prose so a future agent reads
+it as an executable checklist, not a paragraph it skims:
+  trigger    (string)   — when this applies, e.g. "before:ios-build"
+  steps      (string[]) — ordered, executable steps (the runbook)
+  validation (string)   — how to confirm it worked
+Providing any of these auto-promotes the memory to type=skill.
+  remember(content: "iOS release build fix", project: "turna",
+           trigger: "before:ios-build",
+           steps: ["Add -lswiftCompatibility56 to OTHER_LDFLAGS", "pod install", "archive"],
+           validation: "Archive succeeds without swiftCompatibility linker error")
+
 TASK vs MEMORY promotion:
 Content that STARTS with one of these prefixes is promoted to a task instead:
   todo: | TODO: | later: | task: | action: | reminder: | followup:

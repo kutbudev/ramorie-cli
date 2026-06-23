@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"slices"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/kutbudev/ramorie-cli/internal/api"
 	"github.com/kutbudev/ramorie-cli/internal/cli/display"
@@ -28,6 +30,7 @@ func NewMemoryCommand() *cli.Command {
 		Usage:   "Manage memories (knowledge base)",
 		Subcommands: []*cli.Command{
 			memoriesCmd(),
+			memoryHygieneCmd(),
 			getCmd(),
 			forgetCmd(),
 			memoryLinkCmd(),
@@ -383,6 +386,356 @@ func memoriesCmd() *cli.Command {
 			return nil
 		},
 	}
+}
+
+type memoryHygieneReport struct {
+	ProjectID  string               `json:"project_id,omitempty"`
+	Scanned    int                  `json:"scanned"`
+	IssueCount int                  `json:"issue_count"`
+	Counts     map[string]int       `json:"counts"`
+	Issues     []memoryHygieneIssue `json:"issues"`
+	DryRun     bool                 `json:"dry_run"`
+}
+
+type memoryHygieneIssue struct {
+	Kind      string `json:"kind"`
+	Severity  string `json:"severity"`
+	MemoryID  string `json:"memory_id"`
+	Type      string `json:"type"`
+	AgeDays   int    `json:"age_days"`
+	Reason    string `json:"reason"`
+	Preview   string `json:"preview,omitempty"`
+	RelatedID string `json:"related_id,omitempty"`
+}
+
+func memoryHygieneCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "hygiene",
+		Usage: "Dry-run memory hygiene report (stale, duplicate, low-value, unstructured runbooks)",
+		Description: `Scans memories and reports hygiene risks without changing anything.
+
+No archive, delete, merge, or consolidation is performed. Use this before manual
+cleanup or before deciding whether to run a consolidation job.`,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "project",
+				Aliases: []string{"p"},
+				Usage:   "Project (name | short id | UUID). Optional: auto-detected when omitted.",
+			},
+			&cli.IntFlag{
+				Name:  "max",
+				Usage: "Maximum memories to scan",
+				Value: 500,
+			},
+			&cli.BoolFlag{
+				Name:  "json",
+				Usage: "Print machine-readable JSON report",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			client := api.NewClient()
+			projectID, err := resolve.AutoResolveProject(c.String("project"), client)
+			if err != nil {
+				return err
+			}
+
+			maxItems := c.Int("max")
+			if maxItems <= 0 {
+				maxItems = 500
+			}
+			memories, err := fetchMemoryHygienePageSet(client, projectID, maxItems)
+			if err != nil {
+				return err
+			}
+			report := analyzeMemoryHygiene(projectID, memories, time.Now())
+
+			if c.Bool("json") {
+				b, err := json.MarshalIndent(report, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(b))
+				return nil
+			}
+
+			printMemoryHygieneReport(report)
+			return nil
+		},
+	}
+}
+
+func fetchMemoryHygienePageSet(client *api.Client, projectID string, maxItems int) ([]models.Memory, error) {
+	pageSize := 100
+	if maxItems < pageSize {
+		pageSize = maxItems
+	}
+	var out []models.Memory
+	for page := 1; len(out) < maxItems; page++ {
+		items, hasMore, err := client.ListMemoriesPage(projectID, "", page, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, items...)
+		if !hasMore || len(items) == 0 {
+			break
+		}
+		remaining := maxItems - len(out)
+		if remaining <= 0 {
+			break
+		}
+		if remaining < pageSize {
+			pageSize = remaining
+		}
+	}
+	if len(out) > maxItems {
+		out = out[:maxItems]
+	}
+	return out, nil
+}
+
+func analyzeMemoryHygiene(projectID string, memories []models.Memory, now time.Time) memoryHygieneReport {
+	report := memoryHygieneReport{
+		ProjectID: projectID,
+		Scanned:   len(memories),
+		Counts:    map[string]int{},
+		DryRun:    true,
+	}
+
+	byNormalizedContent := map[string]models.Memory{}
+	for _, m := range memories {
+		content := strings.TrimSpace(decryptMemoryForCLI(&m))
+		ageDays := int(now.Sub(m.CreatedAt).Hours()/24 + 0.5)
+		if ageDays < 0 {
+			ageDays = 0
+		}
+
+		if stale, reason := memoryLooksStale(m, now); stale {
+			report.addIssue(memoryHygieneIssue{
+				Kind:     "stale",
+				Severity: staleSeverity(m),
+				MemoryID: m.ID.String(),
+				Type:     m.Type,
+				AgeDays:  ageDays,
+				Reason:   reason,
+				Preview:  display.SingleLine(content),
+			})
+		}
+
+		if m.Type == "skill" && (strings.TrimSpace(valueOrEmpty(m.Trigger)) == "" || len(m.Steps) == 0) {
+			report.addIssue(memoryHygieneIssue{
+				Kind:     "skill_unstructured",
+				Severity: "high",
+				MemoryID: m.ID.String(),
+				Type:     m.Type,
+				AgeDays:  ageDays,
+				Reason:   "skill memory is missing trigger or steps; before-action hooks cannot reliably surface it",
+				Preview:  display.SingleLine(content),
+			})
+		}
+
+		if m.Type != "skill" && looksLikeRunbookProse(content) {
+			report.addIssue(memoryHygieneIssue{
+				Kind:     "runbook_prose",
+				Severity: "high",
+				MemoryID: m.ID.String(),
+				Type:     m.Type,
+				AgeDays:  ageDays,
+				Reason:   "procedural runbook appears stored as prose instead of type=skill with trigger/steps/validation",
+				Preview:  display.SingleLine(content),
+			})
+		}
+
+		if looksLowValueMemory(m, content, now) {
+			report.addIssue(memoryHygieneIssue{
+				Kind:     "thin_low_value",
+				Severity: "low",
+				MemoryID: m.ID.String(),
+				Type:     m.Type,
+				AgeDays:  ageDays,
+				Reason:   "short general memory with no tags and no reuse; review before consolidating or archiving",
+				Preview:  display.SingleLine(content),
+			})
+		}
+
+		if norm := normalizeMemoryForHygiene(content); norm != "" {
+			if prev, ok := byNormalizedContent[norm]; ok && prev.ID != m.ID {
+				report.addIssue(memoryHygieneIssue{
+					Kind:      "duplicate_exact",
+					Severity:  "medium",
+					MemoryID:  m.ID.String(),
+					Type:      m.Type,
+					AgeDays:   ageDays,
+					Reason:    "normalized content exactly matches another memory; review and merge manually if redundant",
+					Preview:   display.SingleLine(content),
+					RelatedID: prev.ID.String(),
+				})
+			} else {
+				byNormalizedContent[norm] = m
+			}
+		}
+	}
+
+	sort.SliceStable(report.Issues, func(i, j int) bool {
+		if severityRank(report.Issues[i].Severity) != severityRank(report.Issues[j].Severity) {
+			return severityRank(report.Issues[i].Severity) > severityRank(report.Issues[j].Severity)
+		}
+		if report.Issues[i].Kind != report.Issues[j].Kind {
+			return report.Issues[i].Kind < report.Issues[j].Kind
+		}
+		return report.Issues[i].AgeDays > report.Issues[j].AgeDays
+	})
+	report.IssueCount = len(report.Issues)
+	return report
+}
+
+func (r *memoryHygieneReport) addIssue(issue memoryHygieneIssue) {
+	r.Issues = append(r.Issues, issue)
+	r.Counts[issue.Kind]++
+}
+
+func memoryLooksStale(m models.Memory, now time.Time) (bool, string) {
+	touch := m.CreatedAt
+	if m.LastAccessedAt != nil && m.LastAccessedAt.After(touch) {
+		touch = *m.LastAccessedAt
+	} else if m.UpdatedAt.After(touch) {
+		touch = m.UpdatedAt
+	}
+	window := 30 * 24 * time.Hour
+	class := "transient"
+	if isHygieneEvergreenType(m.Type) {
+		window = 90 * 24 * time.Hour
+		class = "evergreen"
+	}
+	idle := now.Sub(touch)
+	if idle <= window {
+		return false, ""
+	}
+	return true, fmt.Sprintf("untouched for %dd (>%dd %s freshness window); re-verify before relying on it",
+		int(idle.Hours()/24+0.5), int(window.Hours()/24), class)
+}
+
+func staleSeverity(m models.Memory) string {
+	if isHygieneEvergreenType(m.Type) || m.AccessCount >= 5 {
+		return "medium"
+	}
+	return "low"
+}
+
+func isHygieneEvergreenType(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "decision", "reference", "skill":
+		return true
+	default:
+		return false
+	}
+}
+
+func looksLowValueMemory(m models.Memory, content string, now time.Time) bool {
+	if strings.ToLower(strings.TrimSpace(m.Type)) != "general" {
+		return false
+	}
+	if m.AccessCount > 0 || len(getTagsAsStrings(m.Tags)) > 0 {
+		return false
+	}
+	if now.Sub(m.CreatedAt) < 7*24*time.Hour {
+		return false
+	}
+	return len(strings.Fields(content)) < 8
+}
+
+func looksLikeRunbookProse(content string) bool {
+	lower := strings.ToLower(content)
+	if strings.Contains(lower, "before:") || strings.Contains(lower, "runbook") {
+		return true
+	}
+	return strings.Contains(lower, "steps") && (strings.Contains(lower, "build") || strings.Contains(lower, "deploy") || strings.Contains(lower, "test"))
+}
+
+func normalizeMemoryForHygiene(content string) string {
+	words := strings.Fields(strings.ToLower(content))
+	if len(words) < 6 {
+		return ""
+	}
+	for i, w := range words {
+		words[i] = strings.Trim(w, ".,;:!?()[]{}\"'`")
+	}
+	return strings.Join(words, " ")
+}
+
+func valueOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func severityRank(s string) int {
+	switch strings.ToLower(s) {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func printMemoryHygieneReport(report memoryHygieneReport) {
+	fmt.Println(display.Header("Memory hygiene", fmt.Sprintf("dry-run · scanned %d · issues %d", report.Scanned, report.IssueCount)))
+	fmt.Println(display.Dim.Render("No changes were made. Review these candidates manually before archive, merge, or skill conversion."))
+	fmt.Println()
+
+	if report.IssueCount == 0 {
+		fmt.Println(display.Dim.Render("  no hygiene issues found"))
+		return
+	}
+
+	kinds := make([]string, 0, len(report.Counts))
+	for k := range report.Counts {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	parts := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, report.Counts[k]))
+	}
+	fmt.Println(display.Dim.Render("Counts: " + strings.Join(parts, ", ")))
+	fmt.Println()
+
+	cols := []display.Column{
+		{Title: "SEV", Min: 6, Weight: 0},
+		{Title: "KIND", Min: 18, Weight: 0},
+		{Title: "ID", Min: 8, Weight: 0},
+		{Title: "TYPE", Min: 12, Weight: 0},
+		{Title: "AGE", Min: 8, Weight: 0},
+		{Title: "REASON", Min: 30, Weight: 3},
+	}
+	rows := make([][]string, 0, len(report.Issues))
+	for _, issue := range report.Issues {
+		id := issue.MemoryID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		reason := issue.Reason
+		if issue.RelatedID != "" {
+			rel := issue.RelatedID
+			if len(rel) > 8 {
+				rel = rel[:8]
+			}
+			reason += " (related " + rel + ")"
+		}
+		rows = append(rows, []string{
+			issue.Severity,
+			issue.Kind,
+			display.Dim.Render(id),
+			display.TypeBadge(issue.Type),
+			display.Dim.Render(fmt.Sprintf("%dd", issue.AgeDays)),
+			reason,
+		})
+	}
+	fmt.Println(display.NewResponsiveTable(cols, rows))
 }
 
 // getCmd retrieves a memory item by ID.

@@ -60,14 +60,15 @@ type Task struct {
 
 // Memory represents a memory/knowledge item
 type Memory struct {
-	ID           uuid.UUID   `json:"id"`
-	ProjectID    uuid.UUID   `json:"project_id"`
-	Content      string      `json:"content"`
-	Tags         interface{} `json:"tags"`                     // Can be array or object from backend
-	LinkedTaskID *uuid.UUID  `json:"linked_task_id,omitempty"` // Active task it was linked to
-	Project      *Project    `json:"project,omitempty"`
-	CreatedAt    time.Time   `json:"created_at"`
-	UpdatedAt    time.Time   `json:"updated_at"`
+	ID             uuid.UUID   `json:"id"`
+	ProjectID      uuid.UUID   `json:"project_id"`
+	Content        string      `json:"content"`
+	Tags           interface{} `json:"tags"`                     // Can be array or object from backend
+	LinkedTaskID   *uuid.UUID  `json:"linked_task_id,omitempty"` // Active task it was linked to
+	Project        *Project    `json:"project,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+	LastAccessedAt *time.Time  `json:"last_accessed_at,omitempty"`
 	// Memory categorization
 	Type string `json:"type"` // general, decision, bug_fix, preference, pattern, reference, skill
 	// Importance scoring

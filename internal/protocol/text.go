@@ -8,13 +8,13 @@ package protocol
 // Version is the protocol revision embedded into installed surfaces. Update
 // this when SessionStartText / reminder strings change so the rules
 // installers know to refresh the managed block.
-const Version = "1.0"
+const Version = "1.1"
 
 // SessionStartText is the canonical protocol prompt injected at the start of
 // every agent session via SessionStart hooks (Claude Code / Codex) and via
 // alwaysApply rules (Cursor / Windsurf). Bilingual TR + EN content lives
 // inside the body — keep both languages in sync if you edit.
-const SessionStartText = `🧠 RAMORIE — Persistent Memory Protocol v1.0
+const SessionStartText = `🧠 RAMORIE — Persistent Memory Protocol v1.1
 
 REQUIRED behavior (not optional, not "best practice"):
 
@@ -27,6 +27,7 @@ REQUIRED behavior (not optional, not "best practice"):
    - Sub-agent returns with meaningful work product → IMMEDIATELY after Agent tool result
 3. **NEVER ASK** — do not request user permission to remember. Save proactively.
 4. **DUPLICATE CHECK** — find() before remember() to avoid near-duplicates (>0.9 similarity).
+5. **RUNBOOKS ARE STRUCTURED** — for reusable build/deploy/setup recipes, remember with type=skill plus trigger, steps[], and validation. Do not bury executable steps in prose.
 
 When Agent (sub-agent) returns meaningful work product:
 → Your IMMEDIATE next action is: find() duplicate check → remember() if novel.
@@ -34,11 +35,12 @@ When Agent (sub-agent) returns meaningful work product:
 
 Tools available:
 - find(term, project?) — hybrid retrieval (HyDE + rerank + entity + propositional)
-- remember(content, project) — deliberate durable memory write (type auto-detected)
+- remember(content, project, type?, trigger?, steps?, validation?) — deliberate durable memory write (structured runbooks become type=skill)
 - task(action, ...) — task ops if work deferred
 - setup_agent — FIRST call every session
 
 TR özet: Find ÖNCE. Karar / bug fix / pattern / preference ANINDA remember.
+Build/deploy/setup reçetesi varsa prose'a gömme; type=skill + trigger + steps[] + validation ile yapısal kaydet.
 Sub-agent anlamlı iş ürünü döndürürse remember ile kaydet. Soru sormadan kaydet.
 Duplicate kontrolü için önce find() çağır.
 `
@@ -46,7 +48,7 @@ Duplicate kontrolü için önce find() çağır.
 // EnglishSessionStartText is an English-only variant for surfaces or users
 // that prefer monolingual text. Kept in sync with SessionStartText minus the
 // trailing TR summary block.
-const EnglishSessionStartText = `🧠 RAMORIE — Persistent Memory Protocol v1.0
+const EnglishSessionStartText = `🧠 RAMORIE — Persistent Memory Protocol v1.1
 
 REQUIRED behavior (not optional, not "best practice"):
 
@@ -59,6 +61,7 @@ REQUIRED behavior (not optional, not "best practice"):
    - Sub-agent returns with meaningful work product → IMMEDIATELY after Agent tool result
 3. **NEVER ASK** — do not request user permission to remember. Save proactively.
 4. **DUPLICATE CHECK** — find() before remember() to avoid near-duplicates (>0.9 similarity).
+5. **RUNBOOKS ARE STRUCTURED** — for reusable build/deploy/setup recipes, remember with type=skill plus trigger, steps[], and validation. Do not bury executable steps in prose.
 
 When Agent (sub-agent) returns meaningful work product:
 → Your IMMEDIATE next action is: find() duplicate check → remember() if novel.
@@ -66,7 +69,7 @@ When Agent (sub-agent) returns meaningful work product:
 
 Tools available:
 - find(term, project?) — hybrid retrieval (HyDE + rerank + entity + propositional)
-- remember(content, project) — deliberate durable memory write (type auto-detected)
+- remember(content, project, type?, trigger?, steps?, validation?) — deliberate durable memory write (structured runbooks become type=skill)
 - task(action, ...) — task ops if work deferred
 - setup_agent — FIRST call every session
 `

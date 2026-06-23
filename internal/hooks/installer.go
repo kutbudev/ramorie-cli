@@ -8,6 +8,7 @@ package hooks
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kutbudev/ramorie-cli/internal/protocol"
@@ -22,6 +23,8 @@ type HookEvent string
 const (
 	// SessionStart fires once when the agent session begins.
 	SessionStart HookEvent = "SessionStart"
+	// PreToolUse fires before a tool call; pair with Matcher to scope.
+	PreToolUse HookEvent = "PreToolUse"
 	// PostToolUse fires after a tool call; pair with Matcher to scope.
 	PostToolUse HookEvent = "PostToolUse"
 	// SubagentStop fires when a sub-agent finishes.
@@ -73,8 +76,14 @@ func DefaultEntries() []HookEntry {
 	return []HookEntry{
 		{
 			Event:   SessionStart,
-			Command: makeHookCmd(protocol.SessionStartText, "SessionStart"),
+			Command: makeSessionStartCmd(),
 			ID:      "ramorie-protocol-session-start-v1",
+		},
+		{
+			Event:   PreToolUse,
+			Matcher: "Bash|Shell",
+			Command: makeBeforeActionCmd(),
+			ID:      "ramorie-protocol-before-action-v1",
 		},
 		{
 			Event:   PostToolUse,
@@ -93,6 +102,27 @@ func DefaultEntries() []HookEntry {
 			ID:      "ramorie-protocol-stop-v1",
 		},
 	}
+}
+
+func makeSessionStartCmd() string {
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		return shellQuote(exe) + " hook session-start"
+	}
+	return "ramorie hook session-start"
+}
+
+func makeBeforeActionCmd() string {
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		return shellQuote(exe) + " hook before-action --budget 1200 --limit 3"
+	}
+	return "ramorie hook before-action --budget 1200 --limit 3"
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 // makeHookCmd builds a `cat <<'EOF' … EOF` shell command that emits the

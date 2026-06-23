@@ -989,10 +989,16 @@ type CreateEncryptedMemoryOptions struct {
 	EncryptedContent string   // Required: base64 ciphertext
 	ContentNonce     string   // Required: base64 nonce
 	ContentHash      string   // Optional: SHA-256 hash of plaintext for duplicate detection
+	Type             string   // Optional: memory type
 	Tags             []string // Optional
 	TTL              int      // Optional: time-to-live in seconds
 	ValidFrom        string   // Optional: RFC3339 timestamp
 	ValidUntil       string   // Optional: RFC3339 timestamp
+
+	// Procedural memory fields (for type='skill')
+	Trigger    string   // Optional: conditions when this skill should be activated
+	Steps      []string // Optional: array of steps to follow
+	Validation string   // Optional: how to verify the skill was applied
 }
 
 // CreateEncryptedMemoryWithOptions creates an encrypted memory with TTL and temporal support
@@ -1007,6 +1013,10 @@ func (c *Client) CreateEncryptedMemoryWithOptions(opts CreateEncryptedMemoryOpti
 	// Add content hash for duplicate detection (computed before encryption)
 	if opts.ContentHash != "" {
 		reqBody["content_hash"] = opts.ContentHash
+	}
+
+	if opts.Type != "" {
+		reqBody["type"] = opts.Type
 	}
 
 	// Add tags if provided
@@ -1025,6 +1035,16 @@ func (c *Client) CreateEncryptedMemoryWithOptions(opts CreateEncryptedMemoryOpti
 	}
 	if opts.ValidUntil != "" {
 		reqBody["valid_until"] = opts.ValidUntil
+	}
+
+	if opts.Trigger != "" {
+		reqBody["trigger"] = opts.Trigger
+	}
+	if len(opts.Steps) > 0 {
+		reqBody["steps"] = opts.Steps
+	}
+	if opts.Validation != "" {
+		reqBody["validation"] = opts.Validation
 	}
 
 	respBody, err := c.makeRequest("POST", "/memories", reqBody)
@@ -1252,6 +1272,20 @@ type FindItem struct {
 	Project        string             `json:"project,omitempty"`
 	ProjectID      *string            `json:"project_id,omitempty"`
 	CreatedAt      time.Time          `json:"created_at"`
+
+	// Lifecycle + staleness trust signals. Without these tags here, json
+	// round-trip through this struct silently DROPS the backend's fields before
+	// the agent ever sees them. Lifecycle ("superseded"/"archived") marks
+	// buried-tail history rows; Stale/AgeDays/StaleReason let an agent tell a
+	// weak match from an old-but-relevant memory it should re-verify before
+	// acting on (e.g. a months-old build recipe). All omitempty — absent on
+	// fresh, active rows.
+	Lifecycle   string  `json:"lifecycle,omitempty"`
+	AgeDays     int     `json:"age_days,omitempty"`
+	Stale       bool    `json:"stale,omitempty"`
+	StaleReason string  `json:"stale_reason,omitempty"`
+	Salience    float64 `json:"salience,omitempty"`
+	TrustReason string  `json:"trust_reason,omitempty"`
 }
 
 type FindMeta struct {

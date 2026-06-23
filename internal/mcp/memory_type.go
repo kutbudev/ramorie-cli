@@ -13,6 +13,7 @@ const (
 	MemoryTypePreference = "preference"
 	MemoryTypePattern    = "pattern"
 	MemoryTypeReference  = "reference"
+	MemoryTypeSkill      = "skill" // Procedural memory: trigger/steps/validation runbook
 )
 
 // DetectMemoryType analyzes content and returns the most appropriate memory type
@@ -100,6 +101,7 @@ func ValidMemoryTypes() []string {
 		MemoryTypePreference,
 		MemoryTypePattern,
 		MemoryTypeReference,
+		MemoryTypeSkill,
 	}
 }
 

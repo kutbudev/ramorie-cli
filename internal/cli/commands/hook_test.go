@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,76 @@ func TestExtractFilePathFromPayload_ToolInputShape(t *testing.T) {
 	}
 }
 
+func TestExtractActionTextFromPayload_CommandShape(t *testing.T) {
+	payload := map[string]interface{}{
+		"tool_name": "Bash",
+		"tool_input": map[string]interface{}{
+			"command":     "cd ios && xcodebuild -workspace App.xcworkspace",
+			"description": "Build iOS app",
+		},
+	}
+	got := extractActionTextFromPayload(payload)
+	if got == "" {
+		t.Fatal("expected command text")
+	}
+	for _, want := range []string{"Bash", "xcodebuild", "Build iOS app"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("extracted text lost %q: %q", want, got)
+		}
+	}
+}
+
+func TestExtractActionTextFromPayload_StringArrayInput(t *testing.T) {
+	payload := map[string]interface{}{
+		"tool_input": map[string]interface{}{
+			"input": []interface{}{"pnpm", "test"},
+		},
+	}
+	got := extractActionTextFromPayload(payload)
+	if !strings.Contains(got, "pnpm") || !strings.Contains(got, "test") {
+		t.Fatalf("extracted text lost command context: %q", got)
+	}
+}
+
+func TestClassifyBeforeActionIntents_iOSBuild(t *testing.T) {
+	got := classifyBeforeActionIntents("npx expo run:ios --device")
+	if len(got) == 0 {
+		t.Fatal("expected at least one intent")
+	}
+	if got[0].Key != "ios-build" {
+		t.Fatalf("first intent = %q, want ios-build; all=%v", got[0].Key, got)
+	}
+	query := buildBeforeActionQuery(got, "npx expo run:ios --device")
+	if !containsAny(query, "before:ios-build", "runbook", "expo") {
+		t.Fatalf("query should carry trigger terms, got %q", query)
+	}
+}
+
+func TestClassifyBeforeActionIntents_NonActionCommand(t *testing.T) {
+	got := classifyBeforeActionIntents("git status --short")
+	if len(got) != 0 {
+		t.Fatalf("non-action command should not trigger runbooks, got %v", got)
+	}
+}
+
+func TestFormatBeforeActionRunbooks(t *testing.T) {
+	got := formatBeforeActionRunbooks(
+		"xcodebuild -scheme App",
+		[]beforeActionIntent{{Key: "ios-build", Label: "iOS build/run"}},
+		[]beforeActionRunbook{{
+			Name:    "ios-swift-compat",
+			Trigger: "before:ios-build",
+			Body:    "1. Check OTHER_LDFLAGS.\n2. Run pod install.",
+		}},
+		300,
+	)
+	for _, want := range []string{"Ramorie BEFORE-ACTION RUNBOOK", "iOS build/run", "before:ios-build", "OTHER_LDFLAGS"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatted runbook missing %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestInstallUninstall_Roundtrip runs the real install/uninstall paths
 // against a temp HOME so we don't touch the user's ~/.claude/settings.json.
 // Verifies settings shape preservation — foreign top-level keys must survive.
@@ -167,17 +238,17 @@ func TestInstallUninstall_Roundtrip(t *testing.T) {
 		t.Error("foreign top-level key `theme` must be preserved")
 	}
 	preUse, _ := raw["hooks"].(map[string]interface{})["PreToolUse"].([]interface{})
-	if len(preUse) != 2 {
-		t.Fatalf("after install expected 2 PreToolUse groups (foreign + ramorie), got %d", len(preUse))
+	if len(preUse) != 3 {
+		t.Fatalf("after install expected 3 PreToolUse groups (foreign + ramorie context + ramorie before-action), got %d", len(preUse))
 	}
 
-	// Install again → must stay at 2 (idempotent, not duplicated).
+	// Install again → must stay at 3 (idempotent, not duplicated).
 	if err := hookInstall(nil); err != nil {
 		t.Fatalf("re-install failed: %v", err)
 	}
 	raw2, _ := loadSettings(settingsPath)
 	preUse2, _ := raw2["hooks"].(map[string]interface{})["PreToolUse"].([]interface{})
-	if len(preUse2) != 2 {
+	if len(preUse2) != 3 {
 		t.Fatalf("re-install must be idempotent; got %d groups", len(preUse2))
 	}
 

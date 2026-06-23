@@ -36,6 +36,8 @@ const (
 	maxBinarySize = 300 << 20 // hard cap on the extracted binary (anti-bomb)
 )
 
+const skipHookRefreshEnv = "RAMORIE_SKIP_HOOK_REFRESH"
+
 // readCapped reads r but refuses to buffer more than maxBinarySize bytes, so a
 // maliciously crafted archive can't exhaust memory on decompression.
 func readCapped(r io.Reader) ([]byte, error) {
@@ -256,14 +258,20 @@ func Update(ctx context.Context, current string, force bool, w io.Writer) error 
 	fmt.Fprintf(w, "Updating ramorie %s → %s\n", current, latest)
 
 	method, exePath := DetectMethod()
+	var updateErr error
 	switch method {
 	case MethodBrew:
-		return runManager(ctx, w, "homebrew", "brew", "upgrade", "kutbudev/tap/ramorie")
+		updateErr = runManager(ctx, w, "homebrew", "brew", "upgrade", "kutbudev/tap/ramorie")
 	case MethodNpm:
-		return runManager(ctx, w, "npm", "npm", "install", "-g", "ramorie@latest")
+		updateErr = runManager(ctx, w, "npm", "npm", "install", "-g", "ramorie@latest")
 	default:
-		return selfReplace(ctx, w, latest, exePath)
+		updateErr = selfReplace(ctx, w, latest, exePath)
 	}
+	if updateErr != nil {
+		return updateErr
+	}
+	refreshProtocolHooks(ctx, w, exePath)
+	return nil
 }
 
 // runManager shells out to a package manager (brew/npm) and streams its output.
@@ -281,6 +289,48 @@ func runManager(ctx context.Context, w io.Writer, label, bin string, args ...str
 	}
 	fmt.Fprintln(w, "✓ Upgrade complete.")
 	return nil
+}
+
+// refreshProtocolHooks re-runs the hook installer after an upgrade so JSON
+// hook commands are replaced with the newly shipped templates. This is
+// deliberately best-effort: a successful binary/package update should not be
+// rolled back just because a local editor settings file is absent or locked.
+func refreshProtocolHooks(ctx context.Context, w io.Writer, fallbackExePath string) {
+	if os.Getenv(skipHookRefreshEnv) != "" {
+		fmt.Fprintf(w, "Skipping protocol hook refresh (%s is set).\n", skipHookRefreshEnv)
+		return
+	}
+
+	bin := hookRefreshBinary(fallbackExePath)
+	if strings.TrimSpace(bin) == "" {
+		fmt.Fprintln(w, "⚠ Could not locate ramorie to refresh protocol hooks. Run `ramorie setup-hooks install` manually.")
+		return
+	}
+
+	fmt.Fprintln(w, "Refreshing protocol hooks…")
+	cmd := exec.CommandContext(ctx, bin, "setup-hooks", "install", "--client", "all")
+	cmd.Stdout = w
+	cmd.Stderr = w
+	cmd.Env = append(os.Environ(), "RAMORIE_NO_UPDATE_CHECK=1")
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(w, "⚠ Hook refresh failed: %v\n", err)
+		fmt.Fprintln(w, "  Run `ramorie setup-hooks install` manually to update hook templates.")
+		return
+	}
+	fmt.Fprintln(w, "✓ Protocol hooks refreshed.")
+}
+
+func hookRefreshBinary(fallbackExePath string) string {
+	if p, err := exec.LookPath("ramorie"); err == nil && strings.TrimSpace(p) != "" {
+		return p
+	}
+	if strings.TrimSpace(fallbackExePath) != "" {
+		return fallbackExePath
+	}
+	if exe, err := os.Executable(); err == nil {
+		return exe
+	}
+	return ""
 }
 
 // selfReplace downloads the release asset matching the current OS/arch and
