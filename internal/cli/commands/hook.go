@@ -650,9 +650,6 @@ func loadBeforeActionRunbooks(client *api.Client, items []api.FindItem, intents 
 		if _, ok := seen[item.ID]; ok {
 			continue
 		}
-		if !beforeActionItemLooksRelevant(item, intents) {
-			continue
-		}
 		seen[item.ID] = struct{}{}
 
 		rb := beforeActionRunbook{
@@ -670,22 +667,35 @@ func loadBeforeActionRunbooks(client *api.Client, items []api.FindItem, intents 
 		if strings.TrimSpace(rb.Body) == "" {
 			rb.Body = item.Preview
 		}
+		if !beforeActionRunbookLooksRelevant(item, rb, intents) {
+			continue
+		}
 		runbooks = append(runbooks, rb)
 	}
 	return runbooks
 }
 
-func beforeActionItemLooksRelevant(item api.FindItem, intents []beforeActionIntent) bool {
-	if item.Score >= 0.15 {
-		return true
-	}
-	haystack := strings.ToLower(item.Title + "\n" + item.Preview + "\n" + item.Kind)
+func beforeActionRunbookLooksRelevant(item api.FindItem, rb beforeActionRunbook, intents []beforeActionIntent) bool {
+	trigger := strings.ToLower(strings.TrimSpace(rb.Trigger))
+	haystack := strings.ToLower(strings.Join([]string{
+		item.Title,
+		item.Preview,
+		item.Kind,
+		rb.Name,
+		rb.Trigger,
+		rb.Body,
+	}, "\n"))
 	for _, intent := range intents {
-		if strings.Contains(haystack, intent.Key) || strings.Contains(haystack, "before:"+intent.Key) {
+		intentKey := strings.ToLower(intent.Key)
+		if strings.Contains(trigger, "before:"+intentKey) || trigger == intentKey {
 			return true
 		}
 		for _, term := range intent.Terms {
-			if strings.Contains(haystack, strings.ToLower(term)) {
+			term = strings.ToLower(strings.TrimSpace(term))
+			if term == "" {
+				continue
+			}
+			if strings.Contains(trigger, term) || strings.Contains(haystack, term) {
 				return true
 			}
 		}

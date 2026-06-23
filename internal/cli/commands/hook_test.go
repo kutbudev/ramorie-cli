@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kutbudev/ramorie-cli/internal/api"
 )
 
 // TestPruneHookEntries_RemovesOwnLeavesForeignAlone ensures uninstall never
@@ -239,6 +241,33 @@ Tests exit 0.`
 		if strings.Contains(got, bad) {
 			t.Fatalf("formatted runbook should omit %q:\n%s", bad, got)
 		}
+	}
+}
+
+func TestBeforeActionRunbookLooksRelevant_RequiresIntentMatch(t *testing.T) {
+	item := api.FindItem{
+		Title: "brainstorming-ideas-into-designs",
+		Kind:  "skill",
+		Score: 0.95,
+	}
+	intents := []beforeActionIntent{{Key: "test", Label: "test", Terms: []string{"before:test", "test", "verification"}}}
+
+	unrelated := beforeActionRunbook{
+		Name:    "brainstorming-ideas-into-designs",
+		Trigger: "Before any creative work",
+		Body:    "1. Ask questions\n2. Write design",
+	}
+	if beforeActionRunbookLooksRelevant(item, unrelated, intents) {
+		t.Fatal("high score alone must not surface an unrelated before-action runbook")
+	}
+
+	matched := beforeActionRunbook{
+		Name:    "go-test-runbook",
+		Trigger: "before:test",
+		Body:    "1. Run go test ./...",
+	}
+	if !beforeActionRunbookLooksRelevant(item, matched, intents) {
+		t.Fatal("matching trigger should surface the before-action runbook")
 	}
 }
 
