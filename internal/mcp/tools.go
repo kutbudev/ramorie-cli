@@ -914,6 +914,27 @@ type ListProjectsInput struct {
 	Verbose bool `json:"verbose,omitempty"` // Include full nested org metadata; default is compact
 }
 
+const (
+	setupAgentPreferenceLimit           = 3
+	setupAgentPreferenceMaxRunes        = 220
+	setupAgentDecisionLimit             = 8
+	setupAgentDecisionTitleMaxRunes     = 96
+	setupAgentDecisionPreviewMaxRunes   = 280
+	setupAgentPreferenceMaxContentRunes = 600
+)
+
+var setupAgentNonPreferencePrefixes = []string{
+	"# changelog",
+	"bug fix",
+	"release shipped",
+	"blueprint",
+	"implementation final",
+	"deployment success",
+	"decision:",
+	"root cause",
+	"qa finding",
+}
+
 // detectCwdProject scans cwd path segments against project names, returns the first match.
 // Also sets session last-project on match.
 //
@@ -3095,24 +3116,29 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 		result["projects_count"] = len(projects)
 	}
 
-	// Top-5 active preferences — surface at session start so agents see
+	// Top active preferences — surface at session start so agents see
 	// durable user rules ("always yarn", "never push without approval") without
 	// needing a find() call on their first turn. Non-fatal: an endpoint outage
 	// just means preferences are absent from this payload; the rest of the
 	// session still opens normally.
-	if prefs, err := client.GetActivePreferences(5, detectedProjectID); err == nil && prefs != nil && len(prefs.Preferences) > 0 {
+	if prefs, err := client.GetActivePreferences(setupAgentPreferenceLimit, detectedProjectID); err == nil && prefs != nil && len(prefs.Preferences) > 0 {
 		compact := make([]map[string]interface{}, 0, len(prefs.Preferences))
 		for _, p := range prefs.Preferences {
+			if !startupPreferenceLooksUseful(p.Content) {
+				continue
+			}
 			compact = append(compact, map[string]interface{}{
-				"content":      p.Content,
+				"content":      compactStartupText(p.Content, setupAgentPreferenceMaxRunes),
 				"access_count": p.AccessCount,
 			})
 		}
-		result["active_preferences"] = compact
+		if len(compact) > 0 {
+			result["active_preferences"] = compact
+		}
 	}
 
 	if !full {
-		result["project_decisions"] = projectDecisionContext(client, detectedProjectID, 30)
+		result["project_decisions"] = projectDecisionContext(client, detectedProjectID, setupAgentDecisionLimit)
 
 		// Compact mode: no context injection, no recommendations.
 		return result, nil
@@ -3120,7 +3146,7 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 
 	// Full mode: include context injection.
 	contextInjection := map[string]interface{}{}
-	result["project_decisions"] = projectDecisionContext(client, detectedProjectID, 30)
+	result["project_decisions"] = projectDecisionContext(client, detectedProjectID, setupAgentDecisionLimit)
 
 	// Recent memories — scoped to detected project when available. 3 items, 120-char preview.
 	if memories, err := client.ListMemories(detectedProjectID, ""); err == nil && len(memories) > 0 {
@@ -3214,7 +3240,7 @@ func projectDecisionContext(client *api.Client, projectID string, limit int) []m
 		return []map[string]interface{}{}
 	}
 	if limit <= 0 {
-		limit = 30
+		limit = setupAgentDecisionLimit
 	}
 	decisions := make([]models.Memory, 0, limit)
 	seen := make(map[string]struct{}, limit)
@@ -3262,7 +3288,7 @@ func projectDecisionContext(client *api.Client, projectID string, limit int) []m
 	out := make([]map[string]interface{}, 0, len(decisions))
 	for _, m := range decisions {
 		content := decryptMemoryContent(&m)
-		title, preview := compactMemoryText(content, 160, 700)
+		title, preview := compactMemoryText(content, setupAgentDecisionTitleMaxRunes, setupAgentDecisionPreviewMaxRunes)
 		entry := map[string]interface{}{
 			"id":           m.ID.String(),
 			"type":         m.Type,
@@ -3311,6 +3337,43 @@ func compactMemoryText(content string, titleMax, previewMax int) (string, string
 		preview = preview[:previewMax] + "..."
 	}
 	return title, preview
+}
+
+func compactStartupText(content string, maxRunes int) string {
+	content = strings.TrimSpace(content)
+	content = strings.Join(strings.Fields(content), " ")
+	return clipRunes(content, maxRunes)
+}
+
+func startupPreferenceLooksUseful(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	if len([]rune(trimmed)) > setupAgentPreferenceMaxContentRunes {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range setupAgentNonPreferencePrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func clipRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(r[:max])
+	}
+	return string(r[:max-3]) + "..."
 }
 
 func compactFirstNLines(s string, n int) string {

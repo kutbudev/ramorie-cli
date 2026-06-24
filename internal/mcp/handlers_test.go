@@ -224,6 +224,9 @@ func TestHandleSetupAgent_CompactIncludesActivePreferences(t *testing.T) {
 		case strings.HasPrefix(r.URL.Path, "/reports/stats"):
 			_, _ = w.Write([]byte(`{"todo":0,"in_progress":0,"completed":0,"total":0}`))
 		case strings.HasPrefix(r.URL.Path, "/memory/preferences"):
+			if got := r.URL.Query().Get("limit"); got != "3" {
+				t.Errorf("setup_agent should request compact preference limit=3, got %q", got)
+			}
 			// Three preferences, descending access_count — matches backend's
 			// ORDER BY access_count DESC ordering.
 			_, _ = w.Write([]byte(`{
@@ -265,6 +268,24 @@ func TestHandleSetupAgent_CompactIncludesActivePreferences(t *testing.T) {
 	// access_count must survive round-trip (json numbers → float64).
 	if ac, _ := first["access_count"].(float64); ac != 42 {
 		t.Errorf("access_count not preserved; got %v", first["access_count"])
+	}
+}
+
+func TestStartupPreferenceHygieneAndCompaction(t *testing.T) {
+	if startupPreferenceLooksUseful("# CHANGELOG: giant release notes") {
+		t.Fatal("changelog-shaped content must not be treated as startup preference")
+	}
+	if startupPreferenceLooksUseful("Bug fix: OAuth state race closed") {
+		t.Fatal("bug-fix prose must not be treated as startup preference")
+	}
+	long := strings.Repeat("word ", 200)
+	if startupPreferenceLooksUseful(long) {
+		t.Fatal("oversized content must not be treated as startup preference")
+	}
+
+	got := compactStartupText("Always   use yarn\nnever npm", 20)
+	if strings.Contains(got, "\n") || strings.Contains(got, "  ") || len([]rune(got)) > 20 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("compactStartupText normalized/clipped wrong: %q", got)
 	}
 }
 
@@ -350,6 +371,44 @@ func TestProjectDecisionContextDedupesRepeatedPages(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("expected two page attempts before duplicate-page guard stops, got %d", calls)
+	}
+}
+
+func TestProjectDecisionContextDefaultLimitAndPreviewBudget(t *testing.T) {
+	projectID := uuid.New()
+	memories := make([]models.Memory, 0, 12)
+	for i := 0; i < 12; i++ {
+		memories = append(memories, models.Memory{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			Type:      "decision",
+			Content:   "Decision: compact startup context\n" + strings.Repeat("details ", 100),
+		})
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/memories" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"memories": memories,
+			"total":    len(memories),
+			"limit":    100,
+			"offset":   0,
+		})
+	}))
+	defer ts.Close()
+
+	client := &api.Client{BaseURL: ts.URL, APIKey: "test-key", HTTPClient: ts.Client()}
+	got := projectDecisionContext(client, projectID.String(), 0)
+	if len(got) != setupAgentDecisionLimit {
+		t.Fatalf("default projectDecisionContext limit = %d, want %d", len(got), setupAgentDecisionLimit)
+	}
+	for _, d := range got {
+		preview, _ := d["preview"].(string)
+		if len([]rune(preview)) > setupAgentDecisionPreviewMaxRunes+3 {
+			t.Fatalf("decision preview too large: %d chars", len([]rune(preview)))
+		}
 	}
 }
 

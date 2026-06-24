@@ -40,8 +40,8 @@ func registerToolsV4(server *mcp.Server) {
 Returns a compact session context (~500 tokens):
 - session info + agent tracking identity
 - project auto-detected from cwd (git remote / dir name)
-- top-5 active user preferences (surfaced so you don't have to remember them)
-- top-30 project decisions from memory(type=decision) as startup context
+- top active user preferences (compact, startup-safe)
+- top project decisions from memory(type=decision) as compact startup context
 - task stats + project count
 - next_action nudge based on current state
 

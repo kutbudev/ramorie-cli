@@ -5,6 +5,22 @@ All notable changes to the Ramorie CLI are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [9.5.5] — 2026-06-24
+
+### Fixed
+
+- `setup_agent` startup context is now compact and startup-safe: active
+  preferences are limited, clipped, and filtered so changelogs, bug-fix prose,
+  blueprints, and release notes do not flood new agent sessions.
+- Startup project decisions are capped to a compact project-local set instead
+  of injecting large decision history into every session.
+
+### Changed
+
+- `setup_agent` requests only three active preferences and eight project
+  decisions by default, with short title/preview budgets.
+- `internal/version.Version` and `npm/package.json` were bumped to `9.5.5`.
+
 ## [8.0.0] — 2026-05-11
 
 ### BREAKING
