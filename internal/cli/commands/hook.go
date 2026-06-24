@@ -383,9 +383,10 @@ func hookContext(c *cli.Context) error {
 }
 
 type beforeActionIntent struct {
-	Key   string
-	Label string
-	Terms []string
+	Key      string
+	Label    string
+	Terms    []string
+	Evidence []string
 }
 
 type beforeActionRunbook struct {
@@ -548,10 +549,12 @@ func classifyBeforeActionIntents(text string) []beforeActionIntent {
 	}
 
 	if containsAny(lower, "go test", "yarn test", "pnpm test", "npm test", "pytest", "vitest", "jest", "playwright test", "cargo test", "swift test") {
+		evidence := testCommandEvidence(lower)
 		out = append(out, beforeActionIntent{
-			Key:   "test",
-			Label: "test",
-			Terms: []string{"before:test", "test", "verification", "e2e", "unit test"},
+			Key:      "test",
+			Label:    "test",
+			Terms:    []string{"before:test", "test", "verification", "e2e", "unit test"},
+			Evidence: evidence,
 		})
 	}
 
@@ -687,7 +690,7 @@ func beforeActionRunbookLooksRelevant(item api.FindItem, rb beforeActionRunbook,
 	}, "\n"))
 	for _, intent := range intents {
 		intentKey := strings.ToLower(intent.Key)
-		if strings.Contains(trigger, "before:"+intentKey) || trigger == intentKey {
+		if (strings.Contains(trigger, "before:"+intentKey) || trigger == intentKey) && beforeActionIntentEvidenceMatches(intent, haystack) {
 			return true
 		}
 		for _, term := range intent.Terms {
@@ -695,7 +698,7 @@ func beforeActionRunbookLooksRelevant(item api.FindItem, rb beforeActionRunbook,
 			if term == "" {
 				continue
 			}
-			if strings.Contains(trigger, term) {
+			if strings.Contains(trigger, term) && beforeActionIntentEvidenceMatches(intent, haystack) {
 				return true
 			}
 		}
@@ -713,6 +716,36 @@ func beforeActionRunbookLooksRelevant(item api.FindItem, rb beforeActionRunbook,
 			if term != "" && strings.Contains(haystack, term) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func testCommandEvidence(lower string) []string {
+	switch {
+	case strings.Contains(lower, "go test"):
+		return []string{"go test", "golang", "go toolchain"}
+	case containsAny(lower, "yarn test", "pnpm test", "npm test", "vitest", "jest", "playwright test"):
+		return []string{"yarn test", "pnpm test", "npm test", "vitest", "jest", "playwright", "node", "javascript", "typescript"}
+	case strings.Contains(lower, "pytest"):
+		return []string{"pytest", "python"}
+	case strings.Contains(lower, "cargo test"):
+		return []string{"cargo test", "rust"}
+	case strings.Contains(lower, "swift test"):
+		return []string{"swift test", "swift"}
+	default:
+		return nil
+	}
+}
+
+func beforeActionIntentEvidenceMatches(intent beforeActionIntent, haystack string) bool {
+	if intent.Key != "test" || len(intent.Evidence) == 0 {
+		return true
+	}
+	for _, evidence := range intent.Evidence {
+		evidence = strings.ToLower(strings.TrimSpace(evidence))
+		if evidence != "" && strings.Contains(haystack, evidence) {
+			return true
 		}
 	}
 	return false

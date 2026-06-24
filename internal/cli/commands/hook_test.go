@@ -271,6 +271,49 @@ func TestBeforeActionRunbookLooksRelevant_RequiresIntentMatch(t *testing.T) {
 	}
 }
 
+func TestBeforeActionRunbookLooksRelevant_GenericTestTriggerRequiresCommandFamily(t *testing.T) {
+	item := api.FindItem{
+		Title:   "go-test-runbook",
+		Kind:    "skill",
+		Preview: "Runbook for Go tests",
+	}
+	goRunbook := beforeActionRunbook{
+		Name:    "go-test-runbook",
+		Trigger: "before:test",
+		Body:    "1. Run go test ./... with a pinned Go toolchain.",
+	}
+
+	goIntent := []beforeActionIntent{{
+		Key:      "test",
+		Label:    "test",
+		Terms:    []string{"before:test", "test", "verification"},
+		Evidence: []string{"go test", "golang", "go toolchain"},
+	}}
+	if !beforeActionRunbookLooksRelevant(item, goRunbook, goIntent) {
+		t.Fatal("go test command evidence should surface a Go before:test runbook")
+	}
+
+	nodeIntent := []beforeActionIntent{{
+		Key:      "test",
+		Label:    "test",
+		Terms:    []string{"before:test", "test", "verification"},
+		Evidence: []string{"yarn test", "vitest", "node", "javascript", "typescript"},
+	}}
+	if beforeActionRunbookLooksRelevant(item, goRunbook, nodeIntent) {
+		t.Fatal("yarn/vitest command evidence must not surface a Go-specific before:test runbook")
+	}
+
+	pythonIntent := []beforeActionIntent{{
+		Key:      "test",
+		Label:    "test",
+		Terms:    []string{"before:test", "test", "verification"},
+		Evidence: []string{"pytest", "python"},
+	}}
+	if beforeActionRunbookLooksRelevant(item, goRunbook, pythonIntent) {
+		t.Fatal("pytest command evidence must not surface a Go-specific before:test runbook")
+	}
+}
+
 // TestInstallUninstall_Roundtrip runs the real install/uninstall paths
 // against a temp HOME so we don't touch the user's ~/.claude/settings.json.
 // Verifies settings shape preservation — foreign top-level keys must survive.
