@@ -247,14 +247,24 @@ func hooksStatusAction(c *cli.Context) error {
 			fmt.Printf("  ⚠ %s: detected but no Ramorie hooks installed\n", inst.Name())
 			continue
 		}
-		fmt.Printf("  ✓ %s: %d hook(s) installed → %s\n",
-			inst.Name(), len(entries), inst.SettingsPath())
+		missing, stale := hooks.DiffEntries(hooks.DefaultEntries(), entries)
+		marker := "✓"
+		suffix := "installed"
+		if len(missing) > 0 || len(stale) > 0 {
+			marker = "⚠"
+			suffix = fmt.Sprintf("outdated/incomplete (missing=%d stale=%d)", len(missing), len(stale))
+		}
+		fmt.Printf("  %s %s: %d hook(s) %s → %s\n",
+			marker, inst.Name(), len(entries), suffix, inst.SettingsPath())
 		for _, e := range entries {
 			matcher := ""
 			if e.Matcher != "" {
 				matcher = " (matcher: " + e.Matcher + ")"
 			}
 			fmt.Printf("       · %s%s — id=%s\n", e.Event, matcher, e.ID)
+		}
+		if len(missing) > 0 || len(stale) > 0 {
+			fmt.Printf("       → run `ramorie setup-hooks install --client %s` to refresh\n", inst.Name())
 		}
 	}
 

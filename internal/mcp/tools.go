@@ -1003,7 +1003,7 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 		detectedProjectID = detected.ID.String()
 	}
 
-	result, err := setupAgent(apiClient, detectedProjectID, input.Full)
+	result, err := setupAgent(apiClient, detectedProjectID, input.Full, session.AgentName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3077,7 +3077,7 @@ func BuildSessionStartContext(client *api.Client, full bool) (map[string]interfa
 		detectedProjectID = detected.ID.String()
 	}
 
-	result, err := setupAgent(client, detectedProjectID, full)
+	result, err := setupAgent(client, detectedProjectID, full, "")
 	if err != nil {
 		return nil, err
 	}
@@ -3098,7 +3098,7 @@ func BuildSessionStartContext(client *api.Client, full bool) (map[string]interfa
 	return result, nil
 }
 
-func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[string]interface{}, error) {
+func setupAgent(client *api.Client, detectedProjectID string, full bool, agentName string) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"status":  "ready",
 		"version": version.Version,
@@ -3114,6 +3114,10 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 
 	if projects, err := client.ListProjects(getActiveOrgIDString()); err == nil {
 		result["projects_count"] = len(projects)
+	}
+
+	if policy := setupAgentPolicyContext(client, agentName); len(policy) > 0 {
+		result["agent_policy"] = policy
 	}
 
 	// Top active preferences — surface at session start so agents see
@@ -3233,6 +3237,48 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool) (map[st
 	result["next_steps"] = []string{"Ready — use task(action=list, project, next_priority=true)"}
 
 	return result, nil
+}
+
+func setupAgentPolicyContext(client *api.Client, agentName string) map[string]interface{} {
+	if client == nil || strings.TrimSpace(agentName) == "" {
+		return nil
+	}
+	agents, err := client.ListAgents()
+	if err != nil {
+		return nil
+	}
+	for _, agent := range agents {
+		if !strings.EqualFold(strings.TrimSpace(agent.AgentName), strings.TrimSpace(agentName)) {
+			continue
+		}
+		policy := map[string]interface{}{
+			"agent_name":           agent.AgentName,
+			"agent_type":           agent.AgentType,
+			"auto_surface_enabled": agent.AutoSurfaceEnabled,
+		}
+		if agent.DisplayName != "" {
+			policy["display_name"] = agent.DisplayName
+		}
+		if agent.Instructions != "" {
+			policy["instructions"] = compactStartupText(agent.Instructions, 700)
+		}
+		if rawJSONHasValue(agent.TriggerRules) {
+			policy["trigger_rules"] = json.RawMessage(agent.TriggerRules)
+		}
+		if rawJSONHasValue(agent.MemoryPolicy) {
+			policy["memory_policy"] = json.RawMessage(agent.MemoryPolicy)
+		}
+		if rawJSONHasValue(agent.KnowledgeScope) {
+			policy["knowledge_scope"] = json.RawMessage(agent.KnowledgeScope)
+		}
+		return policy
+	}
+	return nil
+}
+
+func rawJSONHasValue(raw json.RawMessage) bool {
+	s := strings.TrimSpace(string(raw))
+	return s != "" && s != "null" && s != "{}" && s != "[]"
 }
 
 func projectDecisionContext(client *api.Client, projectID string, limit int) []map[string]interface{} {

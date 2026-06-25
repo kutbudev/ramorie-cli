@@ -61,10 +61,16 @@ func NewDoctorCommand() *cli.Command {
 		Description: "Runs a battery of health checks and reports ✓/⚠/✗ per surface.\n" +
 			"   Filter with a sub-argument: config | vault | mcp | hooks | rules | all (default).",
 		ArgsUsage: "[config|vault|mcp|hooks|rules|all]",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "fix", Usage: "best-effort refresh of Ramorie-owned hooks/rules before re-checking"},
+		},
 		Action: func(c *cli.Context) error {
 			scope := strings.ToLower(strings.TrimSpace(c.Args().First()))
 			if scope == "" {
 				scope = "all"
+			}
+			if c.Bool("fix") {
+				runDoctorFix(scope)
 			}
 			results := runDoctorScope(scope)
 			printDoctorResults(results)
@@ -75,6 +81,29 @@ func NewDoctorCommand() *cli.Command {
 			}
 			return nil
 		},
+	}
+}
+
+func runDoctorFix(scope string) {
+	if scope == "all" || scope == "hooks" {
+		for _, inst := range allHookInstallers() {
+			if !inst.Detect() {
+				continue
+			}
+			if err := inst.Install(hooks.DefaultEntries()); err != nil {
+				fmt.Printf("⚠ hook refresh failed for %s: %v\n", inst.Name(), err)
+			}
+		}
+	}
+	if scope == "all" || scope == "rules" {
+		for _, inst := range allRulesInstallers() {
+			if !inst.Detect() {
+				continue
+			}
+			if err := inst.Install(protocol.EnglishSessionStartText); err != nil {
+				fmt.Printf("⚠ rules refresh failed for %s: %v\n", inst.Name(), err)
+			}
+		}
 	}
 }
 
@@ -307,6 +336,16 @@ func checkHooks() []doctorResult {
 			})
 			continue
 		}
+		missing, stale := hooks.DiffEntries(hooks.DefaultEntries(), entries)
+		if len(missing) > 0 || len(stale) > 0 {
+			results = append(results, doctorResult{
+				Group:   "hooks",
+				Status:  doctorWarn,
+				Message: fmt.Sprintf("%s hooks outdated or incomplete (missing=%d stale=%d)", inst.Name(), len(missing), len(stale)),
+				Remedy:  fmt.Sprintf("ramorie setup hooks install --client %s", inst.Name()),
+			})
+			continue
+		}
 		results = append(results, doctorResult{
 			Group:   "hooks",
 			Status:  doctorOK,
@@ -377,4 +416,3 @@ func checkRules() []doctorResult {
 	}
 	return results
 }
-

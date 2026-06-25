@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // UserProfile is the response of GET /auth/profile.
 // Mirrors the frontend UserProfile shape (src/store/api/authApi.ts).
@@ -19,21 +22,26 @@ type UserProfile struct {
 // AgentProfile is one of the user's registered agent identities
 // (claude_code, cursor, windsurf, ...). Returned by GET /agents.
 type AgentProfile struct {
-	ID             string     `json:"id"`
-	UserID         string     `json:"user_id"`
-	OrganizationID string     `json:"organization_id,omitempty"`
-	AgentName      string     `json:"agent_name"`
-	DisplayName    string     `json:"display_name,omitempty"`
-	AgentType      string     `json:"agent_type"`
-	AgentModel     string     `json:"agent_model,omitempty"`
-	Icon           string     `json:"icon,omitempty"`
-	Color          string     `json:"color,omitempty"`
-	IsActive       bool       `json:"is_active"`
-	LastEventAt    *time.Time `json:"last_event_at,omitempty"`
-	TotalEvents    int        `json:"total_events"`
-	LastSessionID  string     `json:"last_session_id,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID                 string          `json:"id"`
+	UserID             string          `json:"user_id"`
+	OrganizationID     string          `json:"organization_id,omitempty"`
+	AgentName          string          `json:"agent_name"`
+	DisplayName        string          `json:"display_name,omitempty"`
+	AgentType          string          `json:"agent_type"`
+	AgentModel         string          `json:"agent_model,omitempty"`
+	Icon               string          `json:"icon,omitempty"`
+	Color              string          `json:"color,omitempty"`
+	IsActive           bool            `json:"is_active"`
+	Instructions       string          `json:"instructions,omitempty"`
+	TriggerRules       json.RawMessage `json:"trigger_rules,omitempty"`
+	MemoryPolicy       json.RawMessage `json:"memory_policy,omitempty"`
+	KnowledgeScope     json.RawMessage `json:"knowledge_scope,omitempty"`
+	AutoSurfaceEnabled bool            `json:"auto_surface_enabled"`
+	LastEventAt        *time.Time      `json:"last_event_at,omitempty"`
+	TotalEvents        int             `json:"total_events"`
+	LastSessionID      string          `json:"last_session_id,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
 }
 
 // AgentListResponse is the wire envelope of GET /agents.
@@ -43,12 +51,12 @@ type AgentListResponse struct {
 
 // TopAgent is the per-agent summary inside AgentEventStats.
 type TopAgent struct {
-	AgentName    string     `json:"agent_name"`
-	DisplayName  string     `json:"display_name,omitempty"`
-	AgentType    string     `json:"agent_type,omitempty"`
-	EventCount   int        `json:"event_count"`
-	LastEventAt  *time.Time `json:"last_event_at,omitempty"`
-	IsActive     bool       `json:"is_active,omitempty"`
+	AgentName   string     `json:"agent_name"`
+	DisplayName string     `json:"display_name,omitempty"`
+	AgentType   string     `json:"agent_type,omitempty"`
+	EventCount  int        `json:"event_count"`
+	LastEventAt *time.Time `json:"last_event_at,omitempty"`
+	IsActive    bool       `json:"is_active,omitempty"`
 }
 
 // AgentEventStats is the response of GET /agent-events/stats.

@@ -163,3 +163,27 @@ func makeSystemMsg(msg string) string {
 func IsRamorieID(id string) bool {
 	return strings.HasPrefix(id, "ramorie-protocol-")
 }
+
+// DiffEntries compares the canonical hook set with what a client currently
+// reports. Missing means the canonical ID is absent. Stale means the ID exists
+// but event, matcher, or command differs from the current binary's template.
+func DiffEntries(expected, installed []HookEntry) (missing []HookEntry, stale []HookEntry) {
+	byID := make(map[string]HookEntry, len(installed))
+	for _, entry := range installed {
+		if entry.ID == "" {
+			continue
+		}
+		byID[entry.ID] = entry
+	}
+	for _, want := range expected {
+		got, ok := byID[want.ID]
+		if !ok {
+			missing = append(missing, want)
+			continue
+		}
+		if got.Event != want.Event || got.Matcher != want.Matcher || got.Command != want.Command {
+			stale = append(stale, want)
+		}
+	}
+	return missing, stale
+}
