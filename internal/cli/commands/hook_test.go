@@ -190,6 +190,7 @@ func TestFormatBeforeActionRunbooks(t *testing.T) {
 			Body:    "1. Check OTHER_LDFLAGS.\n2. Run pod install.",
 		}},
 		nil,
+		nil,
 		300,
 	)
 	for _, want := range []string{"Ramorie BEFORE-ACTION RUNBOOK", "iOS build/run", "before:ios-build", "OTHER_LDFLAGS"} {
@@ -230,6 +231,7 @@ Tests exit 0.`
 			Trigger: "before:test",
 			Body:    body,
 		}},
+		nil,
 		nil,
 		300,
 	)
@@ -285,14 +287,18 @@ func TestSplitBeforeActionItems_SeparatesByType(t *testing.T) {
 	items := []api.FindItem{
 		{Type: "skill", Title: "s1"},
 		{Type: "preference", Title: "p1"},
+		{Type: "decision", Title: "d1"},
 		{Type: "", Title: "untyped-treated-as-skill"},
 	}
-	skills, prefs := splitBeforeActionItems(items)
+	skills, prefs, decisions := splitBeforeActionItems(items)
 	if len(skills) != 2 {
 		t.Fatalf("expected 2 skill-bucket items, got %d", len(skills))
 	}
 	if len(prefs) != 1 || prefs[0].Title != "p1" {
 		t.Fatalf("expected 1 preference item p1, got %v", prefs)
+	}
+	if len(decisions) != 1 || decisions[0].Title != "d1" {
+		t.Fatalf("expected 1 decision item d1, got %v", decisions)
 	}
 }
 

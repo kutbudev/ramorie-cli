@@ -439,35 +439,36 @@ func hookBeforeAction(c *cli.Context) error {
 	}
 
 	resp, err := client.FindMemories(api.FindMemoriesOptions{
-		Term:             buildBeforeActionQuery(intents, actionText),
-		Project:          project,
-		ProjectHint:      projectHint,
-		Types:            []string{"skill", "preference"},
-		Limit:            beforeActionQueryCandidateN,
-		BudgetTokens:     900,
-		IncludeDecisions: false,
-		Purpose:          "coding",
-		Intent:           "how_to",
-		HyDE:             "off",
-		Rerank:           "off",
-		FastMode:         true,
+		Term:         buildBeforeActionQuery(intents, actionText),
+		Project:      project,
+		ProjectHint:  projectHint,
+		Types:        []string{"skill", "preference", "decision"},
+		Limit:        beforeActionQueryCandidateN,
+		BudgetTokens: 900,
+		Purpose:      "coding",
+		Intent:       "how_to",
+		HyDE:         "off",
+		Rerank:       "off",
+		FastMode:     true,
 	})
 	if err != nil || resp == nil || len(resp.Items) == 0 {
 		return nil
 	}
 
 	// Split the candidate set by type: skills feed the existing (trigger-gated)
-	// runbook pipeline untouched; preferences get a separate, tightly-gated
-	// surfacing so an unrelated rule never spams an unrelated command.
-	skillItems, prefItems := splitBeforeActionItems(resp.Items)
+	// runbook pipeline untouched; preferences and decisions each get a separate,
+	// tightly-gated surfacing so an unrelated rule/decision never spams an
+	// unrelated command.
+	skillItems, prefItems, decisionItems := splitBeforeActionItems(resp.Items)
 
 	runbooks := loadBeforeActionRunbooks(client, skillItems, intents, c.Int("limit"))
 	preferences := selectBeforeActionPreferences(prefItems, intents)
-	if len(runbooks) == 0 && len(preferences) == 0 {
+	decisions := selectBeforeActionDecisions(decisionItems, intents)
+	if len(runbooks) == 0 && len(preferences) == 0 && len(decisions) == 0 {
 		return nil
 	}
 
-	additional := formatBeforeActionRunbooks(actionText, intents, runbooks, preferences, c.Int("budget"))
+	additional := formatBeforeActionRunbooks(actionText, intents, runbooks, preferences, decisions, c.Int("budget"))
 	if strings.TrimSpace(additional) == "" {
 		return nil
 	}
@@ -651,18 +652,22 @@ func buildBeforeActionQuery(intents []beforeActionIntent, actionText string) str
 	return strings.Join(parts, " ")
 }
 
-// splitBeforeActionItems separates retrieval candidates into skills and
-// preferences by type. Anything that is not explicitly a preference stays in
-// the skill bucket so the existing runbook pipeline behaves exactly as before.
-func splitBeforeActionItems(items []api.FindItem) (skills, prefs []api.FindItem) {
+// splitBeforeActionItems separates retrieval candidates into skills,
+// preferences, and decisions by type. Anything that is not explicitly a
+// preference or decision stays in the skill bucket so the existing runbook
+// pipeline behaves exactly as before.
+func splitBeforeActionItems(items []api.FindItem) (skills, prefs, decisions []api.FindItem) {
 	for _, it := range items {
-		if strings.EqualFold(strings.TrimSpace(it.Type), "preference") {
+		switch strings.ToLower(strings.TrimSpace(it.Type)) {
+		case "preference":
 			prefs = append(prefs, it)
-			continue
+		case "decision":
+			decisions = append(decisions, it)
+		default:
+			skills = append(skills, it)
 		}
-		skills = append(skills, it)
 	}
-	return skills, prefs
+	return skills, prefs, decisions
 }
 
 // selectBeforeActionPreferences surfaces only the active preferences whose text
@@ -720,6 +725,43 @@ func beforeActionPreferenceRelevant(haystack string, intents []beforeActionInten
 		}
 	}
 	return false
+}
+
+// selectBeforeActionDecisions surfaces project decisions (ADR-style memories of
+// type=decision) relevant to the detected command family. Decisions carry no
+// before:* trigger, so they are gated exactly like preferences — a concrete
+// command-family term must appear in the decision text — and capped hard so an
+// unrelated decision never attaches to a build/test/deploy/install command.
+func selectBeforeActionDecisions(items []api.FindItem, intents []beforeActionIntent) []string {
+	if len(items) == 0 || len(intents) == 0 {
+		return nil
+	}
+	const maxDecisions = 2
+	out := make([]string, 0, maxDecisions)
+	seen := map[string]struct{}{}
+	for _, it := range items {
+		if len(out) >= maxDecisions {
+			break
+		}
+		haystack := strings.ToLower(strings.Join([]string{it.Title, it.Preview}, "\n"))
+		if !beforeActionPreferenceRelevant(haystack, intents) {
+			continue
+		}
+		text := strings.TrimSpace(firstUsefulLine(it.Preview))
+		if text == "" {
+			text = strings.TrimSpace(it.Title)
+		}
+		if text == "" {
+			continue
+		}
+		key := strings.ToLower(text)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, clipInlineRunes(text, 160))
+	}
+	return out
 }
 
 func loadBeforeActionRunbooks(client *api.Client, items []api.FindItem, intents []beforeActionIntent, limit int) []beforeActionRunbook {
@@ -836,8 +878,8 @@ func beforeActionIntentEvidenceMatches(intent beforeActionIntent, haystack strin
 	return false
 }
 
-func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, runbooks []beforeActionRunbook, preferences []string, budgetTokens int) string {
-	if len(runbooks) == 0 && len(preferences) == 0 {
+func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, runbooks []beforeActionRunbook, preferences []string, decisions []string, budgetTokens int) string {
+	if len(runbooks) == 0 && len(preferences) == 0 && len(decisions) == 0 {
 		return ""
 	}
 	if budgetTokens <= 0 {
@@ -895,6 +937,20 @@ func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, ru
 			}
 			b.WriteString("- ")
 			b.WriteString(p)
+			b.WriteString("\n")
+		}
+	}
+
+	// Relevant project decisions (ADR-style). Same compact, one-line-each
+	// treatment so a surfaced decision informs the command without dominating.
+	if len(decisions) > 0 && b.Len() < maxChars {
+		b.WriteString("\nRelevant decisions (do not silently contradict):\n")
+		for _, d := range decisions {
+			if b.Len() >= maxChars {
+				break
+			}
+			b.WriteString("- ")
+			b.WriteString(d)
 			b.WriteString("\n")
 		}
 	}

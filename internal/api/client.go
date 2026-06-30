@@ -1249,16 +1249,15 @@ type SurfaceContextResponse struct {
 // ProjectHint is passed as X-Project-Hint header so the backend can auto-scope
 // when the agent didn't specify a project explicitly.
 type FindMemoriesOptions struct {
-	Term             string
-	Project          string // Name or UUID — body field
-	ProjectHint      string // cwd-derived fallback — header X-Project-Hint
-	Types            []string
-	Tags             []string
-	Limit            int
-	BudgetTokens     int
-	MinScore         float64
-	IncludeDecisions bool
-	Purpose          string
+	Term         string
+	Project      string // Name or UUID — body field
+	ProjectHint  string // cwd-derived fallback — header X-Project-Hint
+	Types        []string
+	Tags         []string
+	Limit        int
+	BudgetTokens int
+	MinScore     float64
+	Purpose      string
 
 	// Phase A-D knobs. All optional; defaults are set server-side.
 	HyDE              string // "default" | "on" | "off"
@@ -1393,9 +1392,6 @@ func (c *Client) FindMemories(opts FindMemoriesOptions) (*FindResponse, error) {
 	}
 	if opts.MinScore > 0 {
 		body["min_score"] = opts.MinScore
-	}
-	if opts.IncludeDecisions {
-		body["include_decisions"] = true
 	}
 	if opts.Purpose != "" {
 		body["purpose"] = opts.Purpose
@@ -1588,6 +1584,15 @@ func (c *Client) ListMemories(projectID, search string) ([]models.Memory, error)
 // Returns (items, hasMore, error). hasMore is true when len(items) == pageSize,
 // which means another page may exist.
 func (c *Client) ListMemoriesPage(projectID, search string, page, pageSize int) ([]models.Memory, bool, error) {
+	return c.ListMemoriesByTypePage(projectID, "", search, page, pageSize)
+}
+
+// ListMemoriesByTypePage returns one page of memories filtered server-side by
+// type (e.g. "decision"). The backend's GET /memories endpoint honors a `type`
+// query param, so callers that want only one type should use this instead of
+// fetching every row and filtering client-side. An empty memoryType behaves
+// exactly like ListMemoriesPage.
+func (c *Client) ListMemoriesByTypePage(projectID, memoryType, search string, page, pageSize int) ([]models.Memory, bool, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -1597,6 +1602,9 @@ func (c *Client) ListMemoriesPage(projectID, search string, page, pageSize int) 
 	params := url.Values{}
 	if projectID != "" {
 		params.Add("project_id", projectID)
+	}
+	if memoryType != "" {
+		params.Add("type", memoryType)
 	}
 	if search != "" {
 		params.Add("search", search)

@@ -81,7 +81,7 @@ func (c *ClaudeCodeInstaller) Install(entries []HookEntry) error {
 	}
 
 	// Group entries by event so we can write one matcher-group per (event,
-	// matcher) pair. PostToolUse with matcher "Agent" stays distinct from a
+	// matcher) pair. PostToolUse with matcher "Task" stays distinct from a
 	// matcher-less PostToolUse, mirroring Claude Code's own structure.
 	byEvent := map[string][]HookEntry{}
 	for _, e := range entries {

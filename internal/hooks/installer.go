@@ -15,9 +15,10 @@ import (
 )
 
 // HookEvent enumerates the lifecycle hook points Ramorie cares about.
-// SessionStart fires once at agent boot; PostToolUse with matcher "Agent"
-// fires after each sub-agent call; SubagentStop and Stop wrap up nested and
-// top-level sessions respectively.
+// SessionStart fires once at agent boot; PostToolUse with matcher "Task"
+// fires after each sub-agent call (the Task tool is Claude Code's sub-agent
+// dispatcher); SubagentStop and Stop wrap up nested and top-level sessions
+// respectively.
 type HookEvent string
 
 const (
@@ -38,8 +39,9 @@ const (
 type HookEntry struct {
 	// Event is the lifecycle phase this hook listens to.
 	Event HookEvent
-	// Matcher narrows PostToolUse to a specific tool name (e.g. "Agent").
-	// Empty matcher means "all" — most events leave this blank.
+	// Matcher narrows PostToolUse to a specific tool name (e.g. "Task", the
+	// Claude Code sub-agent dispatcher). Empty matcher means "all" — most
+	// events leave this blank.
 	Matcher string
 	// Command is the shell command emitted into settings.json. Must produce
 	// the JSON shape the client expects on stdout (hookSpecificOutput) for
@@ -86,8 +88,21 @@ func DefaultEntries() []HookEntry {
 			ID:      "ramorie-protocol-before-action-v1",
 		},
 		{
+			// Per-file context injection: opening/editing a file surfaces the
+			// decisions + bug_fix + pattern memories tied to that module. The
+			// legacy `ramorie hook install` wired this only on the deprecated
+			// single-client path; the canonical installer now ships it too.
+			Event:   PreToolUse,
+			Matcher: "Edit|Write|Read",
+			Command: makeFileContextCmd(),
+			ID:      "ramorie-protocol-file-context-v1",
+		},
+		{
+			// Matcher is "Task" — Claude Code dispatches sub-agents through the
+			// Task tool, not a tool literally named "Agent". A mismatched matcher
+			// here means the post-subagent remember() reminder never fires.
 			Event:   PostToolUse,
-			Matcher: "Agent",
+			Matcher: "Task",
 			Command: makeHookCmd(protocol.PostAgentToolReminder, "PostToolUse"),
 			ID:      "ramorie-protocol-post-agent-v1",
 		},
@@ -105,10 +120,13 @@ func DefaultEntries() []HookEntry {
 }
 
 func makeSessionStartCmd() string {
+	// --full opts into the richer startup payload (recent_memories,
+	// in_progress_tasks, last_session). Without it those fields stay behind the
+	// compact path and no installer ever surfaces them at session start.
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
-		return shellQuote(exe) + " hook session-start"
+		return shellQuote(exe) + " hook session-start --full"
 	}
-	return "ramorie hook session-start"
+	return "ramorie hook session-start --full"
 }
 
 func makeBeforeActionCmd() string {
@@ -116,6 +134,13 @@ func makeBeforeActionCmd() string {
 		return shellQuote(exe) + " hook before-action --budget 1200 --limit 3"
 	}
 	return "ramorie hook before-action --budget 1200 --limit 3"
+}
+
+func makeFileContextCmd() string {
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		return shellQuote(exe) + " hook context --budget 500 --limit 2"
+	}
+	return "ramorie hook context --budget 500 --limit 2"
 }
 
 func shellQuote(s string) string {
@@ -181,9 +206,27 @@ func DiffEntries(expected, installed []HookEntry) (missing []HookEntry, stale []
 			missing = append(missing, want)
 			continue
 		}
-		if got.Event != want.Event || got.Matcher != want.Matcher || got.Command != want.Command {
+		if got.Event != want.Event || got.Matcher != want.Matcher ||
+			normalizeHookCommand(got.Command) != normalizeHookCommand(want.Command) {
 			stale = append(stale, want)
 		}
 	}
 	return missing, stale
+}
+
+// normalizeHookCommand strips the absolute binary path that the hook shim
+// commands embed (e.g. "'/usr/local/bin/ramorie' hook session-start --full").
+// The path varies by install location, so a literal command comparison would
+// flag every entry as stale whenever the binary moved — even though the shim
+// invocation is identical. Heredoc commands (cat <<'RAMORIE_EOF' ...) carry no
+// path and pass through unchanged.
+func normalizeHookCommand(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if idx := strings.Index(cmd, " hook "); idx != -1 {
+		return "ramorie" + cmd[idx:]
+	}
+	if strings.HasSuffix(cmd, " hook") {
+		return "ramorie hook"
+	}
+	return cmd
 }

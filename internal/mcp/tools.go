@@ -1008,7 +1008,7 @@ func handleSetupAgent(ctx context.Context, req *mcp.CallToolRequest, input Setup
 		detectedProjectID = detected.ID.String()
 	}
 
-	result, err := setupAgent(apiClient, detectedProjectID, input.Full, session.AgentName)
+	result, err := setupAgent(apiClient, detectedProjectID, cwd, input.Full, session.AgentName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3125,7 +3125,7 @@ func BuildSessionStartContext(client *api.Client, full bool, agentName string) (
 	// Thread the agent identity through so setupAgent can inject per-agent
 	// agent_policy at startup. Empty (no known agent) keeps prior behavior:
 	// setupAgentPolicyContext no-ops on a blank name.
-	result, err := setupAgent(client, detectedProjectID, full, strings.TrimSpace(agentName))
+	result, err := setupAgent(client, detectedProjectID, cwd, full, strings.TrimSpace(agentName))
 	if err != nil {
 		return nil, err
 	}
@@ -3146,7 +3146,11 @@ func BuildSessionStartContext(client *api.Client, full bool, agentName string) (
 	return result, nil
 }
 
-func setupAgent(client *api.Client, detectedProjectID string, full bool, agentName string) (map[string]interface{}, error) {
+func setupAgent(client *api.Client, detectedProjectID, cwd string, full bool, agentName string) (map[string]interface{}, error) {
+	// cwd-derived signals let the startup decision injection be task-aware
+	// (relevant decisions float up) instead of dumping the global importance
+	// top-N. Empty when cwd can't be read — falls back to importance ordering.
+	surfaceTerms := cwdSurfaceTerms(cwd)
 	result := map[string]interface{}{
 		"status":  "ready",
 		"version": version.Version,
@@ -3190,7 +3194,7 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool, agentNa
 	}
 
 	if !full {
-		result["project_decisions"] = projectDecisionContext(client, detectedProjectID, setupAgentDecisionLimit)
+		result["project_decisions"] = projectDecisionContext(client, detectedProjectID, surfaceTerms, setupAgentDecisionLimit)
 
 		// Compact mode: no context injection, no recommendations.
 		return result, nil
@@ -3198,7 +3202,7 @@ func setupAgent(client *api.Client, detectedProjectID string, full bool, agentNa
 
 	// Full mode: include context injection.
 	contextInjection := map[string]interface{}{}
-	result["project_decisions"] = projectDecisionContext(client, detectedProjectID, setupAgentDecisionLimit)
+	result["project_decisions"] = projectDecisionContext(client, detectedProjectID, surfaceTerms, setupAgentDecisionLimit)
 
 	// Recent memories — scoped to detected project when available. 3 items, 120-char preview.
 	if memories, err := client.ListMemories(detectedProjectID, ""); err == nil && len(memories) > 0 {
@@ -3329,19 +3333,42 @@ func rawJSONHasValue(raw json.RawMessage) bool {
 	return s != "" && s != "null" && s != "{}" && s != "[]"
 }
 
-func projectDecisionContext(client *api.Client, projectID string, limit int) []map[string]interface{} {
+// projectDecisionContext returns the startup decision injection: memory ROWS of
+// type=decision for the detected project, compacted for the session header.
+//
+// NOTE ON SOURCES: this is distinct from the ADR-style Decisions returned by
+// find()/surface_context (api.DecisionSearchResult, a separate `decisions`
+// table). This source is `memory(type=decision)` — durable decision notes the
+// agent wrote via remember(). Keep the two straight: this one feeds the session
+// header; find/surface_context feed query-time retrieval.
+//
+// Selection is task-aware: when surfaceTerms (cwd-derived signals) are present,
+// decisions whose text overlaps the current work scope float above the global
+// importance/access/recency ordering. With no signals it degrades to the prior
+// importance-first ordering. The candidate scan is bounded and uses the
+// server-side type=decision filter so we no longer page through up to 1000
+// mixed rows to find the decisions client-side.
+func projectDecisionContext(client *api.Client, projectID string, surfaceTerms []string, limit int) []map[string]interface{} {
 	if client == nil || strings.TrimSpace(projectID) == "" {
 		return []map[string]interface{}{}
 	}
 	if limit <= 0 {
 		limit = setupAgentDecisionLimit
 	}
-	decisions := make([]models.Memory, 0, limit)
-	seen := make(map[string]struct{}, limit)
+
+	// Server-side type=decision filter — bounded candidate pool. Two pages of
+	// 100 decisions is a generous pool for a top-N header while staying cheap.
 	const pageSize = 100
-	const maxPages = 10
+	const maxPages = 2
+	type scoredDecision struct {
+		mem       models.Memory
+		decrypted string
+		relevance int
+	}
+	candidates := make([]scoredDecision, 0, limit)
+	seen := make(map[string]struct{}, pageSize)
 	for page := 1; page <= maxPages; page++ {
-		memories, hasMore, err := client.ListMemoriesPage(projectID, "", page, pageSize)
+		memories, hasMore, err := client.ListMemoriesByTypePage(projectID, "decision", "", page, pageSize)
 		if err != nil {
 			break
 		}
@@ -3353,36 +3380,49 @@ func projectDecisionContext(client *api.Client, projectID string, limit int) []m
 			}
 			seen[id] = struct{}{}
 			newItems++
-			if strings.EqualFold(strings.TrimSpace(m.Type), "decision") {
-				decisions = append(decisions, m)
+			// Defensive: keep the type guard in case the backend ever ignores
+			// the filter for a legacy row.
+			if !strings.EqualFold(strings.TrimSpace(m.Type), "decision") {
+				continue
 			}
+			content := decryptMemoryContent(&m)
+			candidates = append(candidates, scoredDecision{
+				mem:       m,
+				decrypted: content,
+				relevance: decisionRelevanceMatches(content, surfaceTerms),
+			})
 		}
 		if !hasMore || newItems == 0 {
 			break
 		}
 	}
-	if len(decisions) == 0 {
+	if len(candidates) == 0 {
 		return []map[string]interface{}{}
 	}
-	sort.SliceStable(decisions, func(i, j int) bool {
-		ii := memoryImportance(decisions[i])
-		ij := memoryImportance(decisions[j])
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		// Task relevance dominates when cwd signals matched any decision.
+		if candidates[i].relevance != candidates[j].relevance {
+			return candidates[i].relevance > candidates[j].relevance
+		}
+		ii := memoryImportance(candidates[i].mem)
+		ij := memoryImportance(candidates[j].mem)
 		if ii != ij {
 			return ii > ij
 		}
-		if decisions[i].AccessCount != decisions[j].AccessCount {
-			return decisions[i].AccessCount > decisions[j].AccessCount
+		if candidates[i].mem.AccessCount != candidates[j].mem.AccessCount {
+			return candidates[i].mem.AccessCount > candidates[j].mem.AccessCount
 		}
-		return decisions[i].UpdatedAt.After(decisions[j].UpdatedAt)
+		return candidates[i].mem.UpdatedAt.After(candidates[j].mem.UpdatedAt)
 	})
-	if len(decisions) > limit {
-		decisions = decisions[:limit]
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
 	}
 
-	out := make([]map[string]interface{}, 0, len(decisions))
-	for _, m := range decisions {
-		content := decryptMemoryContent(&m)
-		title, preview := compactMemoryText(content, setupAgentDecisionTitleMaxRunes, setupAgentDecisionPreviewMaxRunes)
+	out := make([]map[string]interface{}, 0, len(candidates))
+	for _, c := range candidates {
+		m := c.mem
+		title, preview := compactMemoryText(c.decrypted, setupAgentDecisionTitleMaxRunes, setupAgentDecisionPreviewMaxRunes)
 		entry := map[string]interface{}{
 			"id":           m.ID.String(),
 			"type":         m.Type,
@@ -3390,6 +3430,9 @@ func projectDecisionContext(client *api.Client, projectID string, limit int) []m
 			"preview":      preview,
 			"access_count": m.AccessCount,
 			"updated_at":   m.UpdatedAt,
+		}
+		if c.relevance > 0 {
+			entry["relevance_matches"] = c.relevance
 		}
 		if m.Importance != nil {
 			entry["importance"] = *m.Importance
@@ -3400,6 +3443,75 @@ func projectDecisionContext(client *api.Client, projectID string, limit int) []m
 		out = append(out, entry)
 	}
 	return out
+}
+
+// decisionRelevanceMatches counts how many distinct cwd-derived surface terms
+// appear in the decision content. Zero when there are no terms (the global
+// importance ordering then governs) or no overlap.
+func decisionRelevanceMatches(content string, surfaceTerms []string) int {
+	if len(surfaceTerms) == 0 {
+		return 0
+	}
+	hay := strings.ToLower(content)
+	matches := 0
+	for _, term := range surfaceTerms {
+		if term != "" && strings.Contains(hay, term) {
+			matches++
+		}
+	}
+	return matches
+}
+
+// cwdSurfaceTerms derives lightweight task signals from the working directory:
+// the last few path segments, tokenized and stripped of generic scaffolding
+// words. These bias the startup decision injection toward the module the agent
+// is actually working in. Returns nil when nothing useful can be extracted.
+func cwdSurfaceTerms(cwd string) []string {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return nil
+	}
+	segments := strings.FieldsFunc(cwd, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	// Only the deepest few segments carry task signal; ancestors like
+	// /Users/<name>/Documents are noise.
+	if len(segments) > 3 {
+		segments = segments[len(segments)-3:]
+	}
+	seen := make(map[string]struct{}, 6)
+	out := make([]string, 0, 6)
+	for _, seg := range segments {
+		for _, tok := range strings.FieldsFunc(strings.ToLower(seg), func(r rune) bool {
+			return r == '-' || r == '_' || r == '.' || r == ' '
+		}) {
+			if len(tok) < 3 {
+				continue
+			}
+			if _, skip := cwdStopwords[tok]; skip {
+				continue
+			}
+			if _, dup := seen[tok]; dup {
+				continue
+			}
+			seen[tok] = struct{}{}
+			out = append(out, tok)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// cwdStopwords are generic path/scaffolding tokens that carry no task signal.
+var cwdStopwords = map[string]struct{}{
+	"users": {}, "documents": {}, "github": {}, "desktop": {}, "downloads": {},
+	"src": {}, "internal": {}, "cmd": {}, "pkg": {}, "lib": {}, "app": {},
+	"apps": {}, "packages": {}, "node_modules": {}, "dist": {}, "build": {},
+	"com": {}, "org": {}, "home": {}, "repos": {}, "code": {}, "projects": {},
+	"main": {}, "master": {}, "tmp": {}, "var": {}, "usr": {}, "opt": {},
+	"bin": {}, "sbin": {}, "local": {}, "etc": {}, "private": {}, "library": {},
 }
 
 func memoryImportance(m models.Memory) float64 {
@@ -3486,15 +3598,14 @@ func compactFirstNLines(s string, n int) string {
 // ============================================================================
 
 type FindInput struct {
-	Term             string   `json:"term"`
-	Project          string   `json:"project,omitempty"`
-	Types            []string `json:"types,omitempty"`
-	Tags             []string `json:"tags,omitempty"`
-	Limit            int      `json:"limit,omitempty"`
-	BudgetTokens     int      `json:"budget_tokens,omitempty"`
-	MinScore         float64  `json:"min_score,omitempty"`
-	IncludeDecisions *bool    `json:"include_decisions,omitempty"`
-	Purpose          string   `json:"purpose,omitempty"`
+	Term         string   `json:"term"`
+	Project      string   `json:"project,omitempty"`
+	Types        []string `json:"types,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	Limit        int      `json:"limit,omitempty"`
+	BudgetTokens int      `json:"budget_tokens,omitempty"`
+	MinScore     float64  `json:"min_score,omitempty"`
+	Purpose      string   `json:"purpose,omitempty"`
 
 	// Phase A-D knobs. All optional — server has sensible defaults.
 	HyDE              string `json:"hyde,omitempty"`               // "default" | "on" | "off"
@@ -3530,11 +3641,6 @@ func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) 
 		}
 	}
 
-	includeDecisions := true
-	if input.IncludeDecisions != nil {
-		includeDecisions = *input.IncludeDecisions
-	}
-
 	opts := api.FindMemoriesOptions{
 		Term:              term,
 		Project:           strings.TrimSpace(input.Project),
@@ -3544,7 +3650,6 @@ func handleFind(ctx context.Context, req *mcp.CallToolRequest, input FindInput) 
 		Limit:             input.Limit,
 		BudgetTokens:      input.BudgetTokens,
 		MinScore:          input.MinScore,
-		IncludeDecisions:  includeDecisions,
 		HyDE:              input.HyDE,
 		Rerank:            input.Rerank,
 		Intent:            input.Intent,

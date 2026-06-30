@@ -159,7 +159,6 @@ OPTIONAL (common):
 - tags ([]string)
 - limit (default 30, max 50)
 - budget_tokens (default 12000) — response trimmed to fit
-- include_decisions (bool, default true)
 - purpose ("coding" | "research" | "review") — type-preference nudge
 
 OPTIONAL (tuning):
@@ -175,7 +174,7 @@ Each item: {id, type, title, preview, score, breakdown, access_count, project}
 
 Examples:
   find(term: "RTK query cache invalidation")
-  find(term: "why did we migrate from Material UI", include_decisions: true)
+  find(term: "why did we migrate from Material UI")   // "why" intent auto-includes decisions
   find(term: "yarn rule", types: ["preference"])
   find(term: "ui framework", include_superseded: true)   // see history
   find(term: "bootstrap auth flow", hyde: "off", rerank: "off")  // raw hybrid`,

@@ -113,7 +113,6 @@ header (cwd-derived project name).`,
 				EntityHops:        entityHops,
 				IncludeSuperseded: includeSuperseded,
 				FastMode:          fastMode,
-				IncludeDecisions:  true,
 			}
 
 			resp, err := client.FindMemories(opts)

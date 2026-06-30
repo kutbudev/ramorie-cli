@@ -52,11 +52,10 @@ func findRelatedAction(c *cli.Context) error {
 	}
 
 	resp, err := client.FindMemories(api.FindMemoriesOptions{
-		Term:             term,
-		ProjectHint:      projectHint,
-		Limit:            c.Int("limit"),
-		BudgetTokens:     c.Int("budget"),
-		IncludeDecisions: true,
+		Term:         term,
+		ProjectHint:  projectHint,
+		Limit:        c.Int("limit"),
+		BudgetTokens: c.Int("budget"),
 	})
 	if err != nil || resp == nil || len(resp.Items) == 0 {
 		return nil // silent on no-hit / errors

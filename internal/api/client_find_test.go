@@ -116,16 +116,15 @@ func TestFindMemories_BuildsExpectedBody(t *testing.T) {
 	c := newTestClient(ts)
 
 	resp, err := c.FindMemories(FindMemoriesOptions{
-		Term:             "rtk query pattern",
-		Project:          "Ramorie Frontend",
-		ProjectHint:      "ramorie-frontend",
-		Types:            []string{"pattern", "skill"},
-		Tags:             []string{"frontend"},
-		Limit:            5,
-		BudgetTokens:     1500,
-		MinScore:         0.2,
-		IncludeDecisions: true,
-		Purpose:          "coding",
+		Term:         "rtk query pattern",
+		Project:      "Ramorie Frontend",
+		ProjectHint:  "ramorie-frontend",
+		Types:        []string{"pattern", "skill"},
+		Tags:         []string{"frontend"},
+		Limit:        5,
+		BudgetTokens: 1500,
+		MinScore:     0.2,
+		Purpose:      "coding",
 	})
 	if err != nil {
 		t.Fatalf("FindMemories: %v", err)
@@ -150,7 +149,10 @@ func TestFindMemories_BuildsExpectedBody(t *testing.T) {
 	mustEq("term", "rtk query pattern")
 	mustEq("project", "Ramorie Frontend")
 	mustEq("purpose", "coding")
-	mustEq("include_decisions", true)
+	// include_decisions is a removed dead knob — it must never be serialized.
+	if _, present := capturedBody["include_decisions"]; present {
+		t.Errorf("include_decisions is a removed knob and must not be in body; got %v", capturedBody["include_decisions"])
+	}
 
 	// limit/budget are JSON numbers (float64)
 	if capturedBody["limit"] != float64(5) {

@@ -362,7 +362,7 @@ func TestProjectDecisionContextDedupesRepeatedPages(t *testing.T) {
 	defer ts.Close()
 
 	client := &api.Client{BaseURL: ts.URL, APIKey: "test-key", HTTPClient: ts.Client()}
-	got := projectDecisionContext(client, projectID.String(), 30)
+	got := projectDecisionContext(client, projectID.String(), nil, 30)
 	if len(got) != 1 {
 		t.Fatalf("projectDecisionContext returned %d decisions, want 1 unique item: %+v", len(got), got)
 	}
@@ -400,7 +400,7 @@ func TestProjectDecisionContextDefaultLimitAndPreviewBudget(t *testing.T) {
 	defer ts.Close()
 
 	client := &api.Client{BaseURL: ts.URL, APIKey: "test-key", HTTPClient: ts.Client()}
-	got := projectDecisionContext(client, projectID.String(), 0)
+	got := projectDecisionContext(client, projectID.String(), nil, 0)
 	if len(got) != setupAgentDecisionLimit {
 		t.Fatalf("default projectDecisionContext limit = %d, want %d", len(got), setupAgentDecisionLimit)
 	}
@@ -539,15 +539,13 @@ func TestHandleFind_BodyForwardingAndProjectHint(t *testing.T) {
 	noMatch := t.TempDir()
 	_ = os.Chdir(noMatch)
 
-	incl := true
 	res, _, err := handleFind(context.Background(), nil, FindInput{
-		Term:             "rtk pattern",
-		Project:          "Ramorie Frontend",
-		Types:            []string{"pattern"},
-		Limit:            3,
-		BudgetTokens:     1500,
-		IncludeDecisions: &incl,
-		Purpose:          "coding",
+		Term:         "rtk pattern",
+		Project:      "Ramorie Frontend",
+		Types:        []string{"pattern"},
+		Limit:        3,
+		BudgetTokens: 1500,
+		Purpose:      "coding",
 	})
 	if err != nil {
 		t.Fatalf("handleFind: %v", err)
@@ -564,8 +562,9 @@ func TestHandleFind_BodyForwardingAndProjectHint(t *testing.T) {
 	if capturedBody["project"] != "Ramorie Frontend" {
 		t.Errorf("project not forwarded: %v", capturedBody["project"])
 	}
-	if capturedBody["include_decisions"] != true {
-		t.Errorf("include_decisions true should forward; got %v", capturedBody["include_decisions"])
+	// include_decisions is a removed dead knob — it must never be serialized.
+	if _, present := capturedBody["include_decisions"]; present {
+		t.Errorf("include_decisions is a removed knob and must not be forwarded; got %v", capturedBody["include_decisions"])
 	}
 
 	// No cwd match → no X-Project-Hint header.
