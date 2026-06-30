@@ -863,6 +863,13 @@ type CreateMemoryOptions struct {
 	Visibility string   // Optional: private, project, organization (default), public
 	Readers    []string // Optional: user IDs with explicit read access
 	Writers    []string // Optional: user IDs with explicit write access
+
+	// Scope routes the memory to a backend visibility scope. "personal" marks a
+	// GLOBAL, cross-project, user-private memory: the backend nulls project_id +
+	// organization_id and forces visibility=private so the fact applies across
+	// every one of the user's projects. Empty = default project-scoped write.
+	// (GetActivePreferences now reads this scope column, not the scope:global tag.)
+	Scope string // Optional: "personal" (global/cross-project) or "" (project-scoped)
 }
 
 // SimilarMemory is a soft-duplicate suggestion returned alongside a
@@ -968,6 +975,12 @@ func buildCreateMemoryReqBody(opts CreateMemoryOptions) map[string]interface{} {
 	if len(opts.Writers) > 0 {
 		reqBody["writers"] = opts.Writers
 	}
+	// scope="personal" is the authoritative GLOBAL signal — backend nulls
+	// project_id + org_id and forces visibility=private. Only send when set so
+	// default project-scoped writes keep the existing wire shape.
+	if opts.Scope != "" {
+		reqBody["scope"] = opts.Scope
+	}
 	return reqBody
 }
 
@@ -999,6 +1012,10 @@ type CreateEncryptedMemoryOptions struct {
 	Trigger    string   // Optional: conditions when this skill should be activated
 	Steps      []string // Optional: array of steps to follow
 	Validation string   // Optional: how to verify the skill was applied
+
+	// Scope routes a GLOBAL (cross-project, user-private) write — see
+	// CreateMemoryOptions.Scope. "personal" or "".
+	Scope string // Optional: "personal" (global/cross-project) or "" (project-scoped)
 }
 
 // CreateEncryptedMemoryWithOptions creates an encrypted memory with TTL and temporal support
@@ -1045,6 +1062,11 @@ func (c *Client) CreateEncryptedMemoryWithOptions(opts CreateEncryptedMemoryOpti
 	}
 	if opts.Validation != "" {
 		reqBody["validation"] = opts.Validation
+	}
+	// scope="personal" → GLOBAL cross-project memory (backend nulls project_id +
+	// org_id, forces visibility=private). Personal-scope encryption stays valid.
+	if opts.Scope != "" {
+		reqBody["scope"] = opts.Scope
 	}
 
 	respBody, err := c.makeRequest("POST", "/memories", reqBody)

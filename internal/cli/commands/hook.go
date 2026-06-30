@@ -292,7 +292,15 @@ func hookSessionStart(c *cli.Context) error {
 
 	client := api.NewClient()
 	if strings.TrimSpace(client.APIKey) != "" {
-		if ctx, err := mcpcontext.BuildSessionStartContext(client, c.Bool("full")); err == nil && len(ctx) > 0 {
+		// Source the agent identity so per-agent agent_policy is injected at
+		// startup. The hook runs in a separate process from the MCP server, so
+		// prefer an explicit env override, then fall back to the agent name the
+		// MCP server persisted via setup_agent.
+		agentName := strings.TrimSpace(os.Getenv("RAMORIE_AGENT_NAME"))
+		if agentName == "" {
+			agentName = mcpcontext.ReadPersistedAgentName()
+		}
+		if ctx, err := mcpcontext.BuildSessionStartContext(client, c.Bool("full"), agentName); err == nil && len(ctx) > 0 {
 			if b, err := json.MarshalIndent(ctx, "", "  "); err == nil {
 				additional += "\n\n<ramorie_startup_context>\n"
 				additional += string(b)
@@ -434,7 +442,7 @@ func hookBeforeAction(c *cli.Context) error {
 		Term:             buildBeforeActionQuery(intents, actionText),
 		Project:          project,
 		ProjectHint:      projectHint,
-		Types:            []string{"skill"},
+		Types:            []string{"skill", "preference"},
 		Limit:            beforeActionQueryCandidateN,
 		BudgetTokens:     900,
 		IncludeDecisions: false,
@@ -448,12 +456,18 @@ func hookBeforeAction(c *cli.Context) error {
 		return nil
 	}
 
-	runbooks := loadBeforeActionRunbooks(client, resp.Items, intents, c.Int("limit"))
-	if len(runbooks) == 0 {
+	// Split the candidate set by type: skills feed the existing (trigger-gated)
+	// runbook pipeline untouched; preferences get a separate, tightly-gated
+	// surfacing so an unrelated rule never spams an unrelated command.
+	skillItems, prefItems := splitBeforeActionItems(resp.Items)
+
+	runbooks := loadBeforeActionRunbooks(client, skillItems, intents, c.Int("limit"))
+	preferences := selectBeforeActionPreferences(prefItems, intents)
+	if len(runbooks) == 0 && len(preferences) == 0 {
 		return nil
 	}
 
-	additional := formatBeforeActionRunbooks(actionText, intents, runbooks, c.Int("budget"))
+	additional := formatBeforeActionRunbooks(actionText, intents, runbooks, preferences, c.Int("budget"))
 	if strings.TrimSpace(additional) == "" {
 		return nil
 	}
@@ -637,6 +651,77 @@ func buildBeforeActionQuery(intents []beforeActionIntent, actionText string) str
 	return strings.Join(parts, " ")
 }
 
+// splitBeforeActionItems separates retrieval candidates into skills and
+// preferences by type. Anything that is not explicitly a preference stays in
+// the skill bucket so the existing runbook pipeline behaves exactly as before.
+func splitBeforeActionItems(items []api.FindItem) (skills, prefs []api.FindItem) {
+	for _, it := range items {
+		if strings.EqualFold(strings.TrimSpace(it.Type), "preference") {
+			prefs = append(prefs, it)
+			continue
+		}
+		skills = append(skills, it)
+	}
+	return skills, prefs
+}
+
+// selectBeforeActionPreferences surfaces only the active preferences whose text
+// is relevant to the detected command family. Preferences carry no before:*
+// trigger, so they are gated purely on command-family term overlap and capped
+// hard — this hook has a history of false-positive spam, so an unrelated rule
+// must never attach to a build/test/deploy/install command.
+func selectBeforeActionPreferences(items []api.FindItem, intents []beforeActionIntent) []string {
+	if len(items) == 0 || len(intents) == 0 {
+		return nil
+	}
+	const maxPrefs = 2
+	out := make([]string, 0, maxPrefs)
+	seen := map[string]struct{}{}
+	for _, it := range items {
+		if len(out) >= maxPrefs {
+			break
+		}
+		haystack := strings.ToLower(strings.Join([]string{it.Title, it.Preview}, "\n"))
+		if !beforeActionPreferenceRelevant(haystack, intents) {
+			continue
+		}
+		text := strings.TrimSpace(firstUsefulLine(it.Preview))
+		if text == "" {
+			text = strings.TrimSpace(it.Title)
+		}
+		if text == "" {
+			continue
+		}
+		key := strings.ToLower(text)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, clipInlineRunes(text, 160))
+	}
+	return out
+}
+
+// beforeActionPreferenceRelevant requires a concrete command-family term from
+// the detected intent (e.g. "yarn", "npm", "docker build", "gradle", "deploy")
+// to appear in the preference text. The "before:*" trigger tokens are skipped
+// since preferences never carry them — this keeps gating as strict as the
+// no-trigger skill path and avoids generic-word spam.
+func beforeActionPreferenceRelevant(haystack string, intents []beforeActionIntent) bool {
+	for _, intent := range intents {
+		for _, term := range intent.Terms {
+			term = strings.ToLower(strings.TrimSpace(term))
+			if term == "" || strings.HasPrefix(term, "before:") {
+				continue
+			}
+			if strings.Contains(haystack, term) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func loadBeforeActionRunbooks(client *api.Client, items []api.FindItem, intents []beforeActionIntent, limit int) []beforeActionRunbook {
 	if limit <= 0 {
 		limit = 3
@@ -751,8 +836,8 @@ func beforeActionIntentEvidenceMatches(intent beforeActionIntent, haystack strin
 	return false
 }
 
-func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, runbooks []beforeActionRunbook, budgetTokens int) string {
-	if len(runbooks) == 0 {
+func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, runbooks []beforeActionRunbook, preferences []string, budgetTokens int) string {
+	if len(runbooks) == 0 && len(preferences) == 0 {
 		return ""
 	}
 	if budgetTokens <= 0 {
@@ -778,7 +863,9 @@ func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, ru
 		b.WriteString(clipped)
 		b.WriteString("\n")
 	}
-	b.WriteString("Apply the relevant checklist before running this command. If it is stale or unsafe, verify first; do not silently skip it.\n")
+	if len(runbooks) > 0 {
+		b.WriteString("Apply the relevant checklist before running this command. If it is stale or unsafe, verify first; do not silently skip it.\n")
+	}
 
 	for i, rb := range runbooks {
 		if b.Len() >= maxChars {
@@ -794,6 +881,20 @@ func formatBeforeActionRunbooks(command string, intents []beforeActionIntent, ru
 		body := clipRunes(formatRunbookChecklist(rb.Body), beforeActionMaxRunbookRunes)
 		if body != "" {
 			b.WriteString(body)
+			b.WriteString("\n")
+		}
+	}
+
+	// Compact, relevance-gated user preferences (e.g. "always use yarn"). One
+	// short line each so they never dominate the runbook payload.
+	if len(preferences) > 0 && b.Len() < maxChars {
+		b.WriteString("\nActive preferences (apply if relevant):\n")
+		for _, p := range preferences {
+			if b.Len() >= maxChars {
+				break
+			}
+			b.WriteString("- ")
+			b.WriteString(p)
 			b.WriteString("\n")
 		}
 	}

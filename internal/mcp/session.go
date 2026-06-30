@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -289,3 +290,23 @@ func ClearPersistedSession() {
 	os.Remove(getSessionFilePath())
 }
 
+// ReadPersistedAgentName returns the agent name from the persisted MCP session
+// file WITHOUT mutating the in-memory session manager. Out-of-process callers
+// (e.g. the SessionStart hook, which runs in a separate `ramorie` process from
+// the MCP server) use this to recover the agent identity recorded by
+// setup_agent, so per-agent context (agent_policy) can be injected at startup.
+// Returns "" when no valid (unexpired) session file exists.
+func ReadPersistedAgentName() string {
+	data, err := os.ReadFile(getSessionFilePath())
+	if err != nil {
+		return ""
+	}
+	var persisted PersistedSession
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		return ""
+	}
+	if persisted.ExpiresAt > 0 && time.Now().Unix() > persisted.ExpiresAt {
+		return ""
+	}
+	return strings.TrimSpace(persisted.AgentName)
+}

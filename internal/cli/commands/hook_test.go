@@ -189,6 +189,7 @@ func TestFormatBeforeActionRunbooks(t *testing.T) {
 			Trigger: "before:ios-build",
 			Body:    "1. Check OTHER_LDFLAGS.\n2. Run pod install.",
 		}},
+		nil,
 		300,
 	)
 	for _, want := range []string{"Ramorie BEFORE-ACTION RUNBOOK", "iOS build/run", "before:ios-build", "OTHER_LDFLAGS"} {
@@ -229,6 +230,7 @@ Tests exit 0.`
 			Trigger: "before:test",
 			Body:    body,
 		}},
+		nil,
 		300,
 	)
 
@@ -241,6 +243,56 @@ Tests exit 0.`
 		if strings.Contains(got, bad) {
 			t.Fatalf("formatted runbook should omit %q:\n%s", bad, got)
 		}
+	}
+}
+
+func TestSelectBeforeActionPreferences_RelevantOnly(t *testing.T) {
+	installIntents := classifyBeforeActionIntents("yarn install")
+	if len(installIntents) == 0 {
+		t.Fatal("expected install intent for 'yarn install'")
+	}
+
+	items := []api.FindItem{
+		{Type: "preference", Title: "yarn only", Preview: "Always use yarn, never npm, for dependency installs."},
+		{Type: "preference", Title: "tabs", Preview: "Prefer tabs over spaces in source files."},
+	}
+
+	got := selectBeforeActionPreferences(items, installIntents)
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 relevant preference, got %d: %v", len(got), got)
+	}
+	if !strings.Contains(strings.ToLower(got[0]), "yarn") {
+		t.Fatalf("expected the yarn preference to surface, got %q", got[0])
+	}
+}
+
+func TestSelectBeforeActionPreferences_UnrelatedCommandStaysSilent(t *testing.T) {
+	deployIntents := classifyBeforeActionIntents("railway deploy")
+	if len(deployIntents) == 0 {
+		t.Fatal("expected deploy intent for 'railway deploy'")
+	}
+
+	// A package-manager preference must NOT attach to a deploy command.
+	items := []api.FindItem{
+		{Type: "preference", Title: "yarn only", Preview: "Always use yarn, never npm."},
+	}
+	if got := selectBeforeActionPreferences(items, deployIntents); len(got) != 0 {
+		t.Fatalf("unrelated preference must not surface on deploy, got %v", got)
+	}
+}
+
+func TestSplitBeforeActionItems_SeparatesByType(t *testing.T) {
+	items := []api.FindItem{
+		{Type: "skill", Title: "s1"},
+		{Type: "preference", Title: "p1"},
+		{Type: "", Title: "untyped-treated-as-skill"},
+	}
+	skills, prefs := splitBeforeActionItems(items)
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 skill-bucket items, got %d", len(skills))
+	}
+	if len(prefs) != 1 || prefs[0].Title != "p1" {
+		t.Fatalf("expected 1 preference item p1, got %v", prefs)
 	}
 }
 

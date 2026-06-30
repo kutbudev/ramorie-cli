@@ -50,6 +50,55 @@ func TestBuildCreateMemoryReqBody_OmitsEmptyStructuredSkillFields(t *testing.T) 
 	}
 }
 
+func TestBuildCreateMemoryReqBody_ForwardsPersonalScope(t *testing.T) {
+	body := buildCreateMemoryReqBody(CreateMemoryOptions{
+		ProjectID: "project-1",
+		Content:   "always use yarn",
+		Scope:     "personal",
+	})
+
+	if body["scope"] != "personal" {
+		t.Fatalf("scope = %v, want personal", body["scope"])
+	}
+}
+
+func TestBuildCreateMemoryReqBody_OmitsEmptyScope(t *testing.T) {
+	body := buildCreateMemoryReqBody(CreateMemoryOptions{
+		ProjectID: "project-1",
+		Content:   "project-scoped memory",
+	})
+
+	if _, ok := body["scope"]; ok {
+		t.Fatalf("empty scope must be omitted, got %v", body["scope"])
+	}
+}
+
+func TestCreateEncryptedMemoryWithOptions_ForwardsPersonalScope(t *testing.T) {
+	var captured map[string]interface{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"11111111-1111-1111-1111-111111111111","content":"[Encrypted]","is_encrypted":true}`))
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	_, err := c.CreateEncryptedMemoryWithOptions(CreateEncryptedMemoryOptions{
+		ProjectID:        "project-1",
+		EncryptedContent: "ciphertext",
+		ContentNonce:     "nonce",
+		Scope:            "personal",
+	})
+	if err != nil {
+		t.Fatalf("CreateEncryptedMemoryWithOptions: %v", err)
+	}
+	if captured["scope"] != "personal" {
+		t.Fatalf("scope = %v, want personal", captured["scope"])
+	}
+}
+
 func TestCreateEncryptedMemoryWithOptions_ForwardsTypeAndStructuredSkillFields(t *testing.T) {
 	var captured map[string]interface{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

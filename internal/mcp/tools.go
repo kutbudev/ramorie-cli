@@ -205,6 +205,11 @@ Just tell me what to remember - I'll figure out the rest.
 
 REQUIRED: content (what to remember), project (name or ID)
 OPTIONAL: force (bool) - Skip similarity check and save anyway
+OPTIONAL: tags (string[]) - categorization labels, e.g. ["agent:bob", "bug_fix"]
+OPTIONAL: scope ("personal") / global (true) - mark this as a GLOBAL memory that
+  applies across ALL your projects (e.g. "always use yarn", "never push to main
+  without approval"). Global memories are user-private and injected at every
+  session start. (Legacy: a "scope:global" tag also marks a memory global.)
 OPTIONAL runbook fields: trigger, steps, validation
 
 ⚠️ DUPLICATE PREVENTION: By default, remember() checks for similar existing memories.
@@ -1587,6 +1592,40 @@ type RememberInput struct {
 	Trigger    string   `json:"trigger,omitempty"`    // OPTIONAL - when this skill applies, e.g. "before:ios-build"
 	Steps      []string `json:"steps,omitempty"`      // OPTIONAL - ordered, executable steps (the runbook)
 	Validation string   `json:"validation,omitempty"` // OPTIONAL - how to confirm the skill worked
+
+	// Scope marks a memory as GLOBAL (cross-project, user-private). Set
+	// scope="personal" (or "global"), or global=true, to make the memory apply
+	// across ALL of the user's projects — the backend nulls project_id +
+	// organization_id and forces visibility=private, and it is injected at every
+	// session start (GetActivePreferences reads the scope column). A legacy
+	// "scope:global" tag also triggers this. Empty = default project-scoped.
+	Scope  string `json:"scope,omitempty"`  // OPTIONAL - "personal"/"global" → cross-project user memory
+	Global bool   `json:"global,omitempty"` // OPTIONAL - alias for scope="personal"
+}
+
+// resolveMemoryScope maps the user-facing "global memory" signals to the
+// backend `scope` field. Returns "personal" when ANY global signal is present
+// (explicit scope="personal"/"global", global=true, or a legacy "scope:global"
+// tag), otherwise "" to preserve the default project-scoped write.
+//
+// scope="personal" is the authoritative cross-project signal: the backend nulls
+// project_id + organization_id and forces visibility=private so the memory is
+// injected into every one of the user's sessions. The legacy scope:global tag
+// alone is NO LONGER sufficient on the backend, so we surface it here.
+func resolveMemoryScope(scope string, global bool, tags []string) string {
+	if global {
+		return "personal"
+	}
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "personal", "global":
+		return "personal"
+	}
+	for _, t := range tags {
+		if strings.EqualFold(strings.TrimSpace(t), "scope:global") {
+			return "personal"
+		}
+	}
+	return ""
 }
 
 // checkForSimilarMemories checks if similar memories already exist in the project
@@ -1723,6 +1762,10 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 
 	memoryType := effectiveRememberMemoryType(content, input.Type, input.Trigger, input.Steps, input.Validation)
 
+	// GLOBAL memory signal → backend scope="personal" (cross-project,
+	// user-private). Empty preserves default project-scoped behavior.
+	memoryScope := resolveMemoryScope(input.Scope, input.Global, input.Tags)
+
 	// Check encryption based on project scope (org vs personal).
 	// Personal project only — encrypt with personal key (org projects skip
 	// encryption). Gate on the server's CURRENT encryption status (encstate)
@@ -1742,6 +1785,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 				Trigger:          input.Trigger,
 				Steps:            input.Steps,
 				Validation:       input.Validation,
+				Scope:            memoryScope,
 			})
 			if err != nil {
 				return nil, nil, err
@@ -1771,6 +1815,7 @@ func handleRemember(ctx context.Context, req *mcp.CallToolRequest, input Remembe
 		Trigger:    input.Trigger,
 		Steps:      input.Steps,
 		Validation: input.Validation,
+		Scope:      memoryScope,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -3067,7 +3112,7 @@ func normalizePriority(s string) string {
 // (recent_memories, in_progress_tasks, last_session) is included. When a
 // detectedProjectID is provided, those queries are scoped to that project to
 // avoid cross-project noise.
-func BuildSessionStartContext(client *api.Client, full bool) (map[string]interface{}, error) {
+func BuildSessionStartContext(client *api.Client, full bool, agentName string) (map[string]interface{}, error) {
 	if client == nil {
 		return nil, errors.New("api client is required")
 	}
@@ -3077,7 +3122,10 @@ func BuildSessionStartContext(client *api.Client, full bool) (map[string]interfa
 		detectedProjectID = detected.ID.String()
 	}
 
-	result, err := setupAgent(client, detectedProjectID, full, "")
+	// Thread the agent identity through so setupAgent can inject per-agent
+	// agent_policy at startup. Empty (no known agent) keeps prior behavior:
+	// setupAgentPolicyContext no-ops on a blank name.
+	result, err := setupAgent(client, detectedProjectID, full, strings.TrimSpace(agentName))
 	if err != nil {
 		return nil, err
 	}
