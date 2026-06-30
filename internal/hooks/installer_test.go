@@ -239,6 +239,28 @@ func TestDefaultEntries_SessionStartRequestsFullPayload(t *testing.T) {
 	}
 }
 
+// TestDefaultEntries_IncludePromptSubmitHook locks the UserPromptSubmit hook
+// (T1.4) into the canonical installer set: each user prompt is used to inject
+// prompt-relevant memories. It is a non-tool event, so it must carry no matcher.
+func TestDefaultEntries_IncludePromptSubmitHook(t *testing.T) {
+	for _, e := range DefaultEntries() {
+		if e.ID != "ramorie-protocol-prompt-submit-v1" {
+			continue
+		}
+		if e.Event != UserPromptSubmit {
+			t.Fatalf("prompt-submit event = %s, want %s", e.Event, UserPromptSubmit)
+		}
+		if e.Matcher != "" {
+			t.Fatalf("prompt-submit must have no matcher (not a tool event), got %q", e.Matcher)
+		}
+		if !strings.Contains(e.Command, " hook prompt-submit") {
+			t.Fatalf("prompt-submit command must call the shim, got %q", e.Command)
+		}
+		return
+	}
+	t.Fatal("DefaultEntries missing UserPromptSubmit prompt-submit hook")
+}
+
 // TestDiffEntries_BinaryPathMoveNotStale verifies DiffEntries treats two hook
 // commands that differ only by embedded binary path as identical — a moved
 // binary must not flag every entry as stale.

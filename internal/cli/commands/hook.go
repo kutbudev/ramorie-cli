@@ -67,6 +67,17 @@ func NewHookCommand() *cli.Command {
 				Action: hookBeforeAction,
 			},
 			{
+				Name:   "prompt-submit",
+				Usage:  "Hook shim: read UserPromptSubmit JSON from stdin, inject prompt-relevant memories",
+				Hidden: true,
+				Flags: []cli.Flag{
+					&cli.IntFlag{Name: "budget", Value: 700},
+					&cli.IntFlag{Name: "limit", Value: 4},
+					&cli.StringFlag{Name: "project", Usage: "Optional project name/UUID override"},
+				},
+				Action: hookPromptSubmit,
+			},
+			{
 				Name:   "context",
 				Usage:  "Hook shim: read PreToolUse JSON from stdin, emit system-reminder",
 				Hidden: true, // called from the shim, not humans
@@ -89,6 +100,10 @@ const (
 	beforeActionMaxCommandRunes = 180
 	beforeActionMaxRunbookRunes = 2200
 	hookCooldownSecs            = 30
+
+	promptSubmitMinWords      = 3
+	promptSubmitMaxQueryRunes = 400
+	promptSubmitMaxItemRunes  = 160
 )
 
 type claudeSettings struct {
@@ -473,6 +488,150 @@ func hookBeforeAction(c *cli.Context) error {
 		return nil
 	}
 	return emitHookAdditionalContext("PreToolUse", additional)
+}
+
+// hookPromptSubmit is invoked by Claude Code as a UserPromptSubmit shim. It
+// reads the submitted prompt from stdin, uses it as a retrieval query, and
+// injects the most relevant active preferences / decisions / skills as context
+// before the model answers. Any failure is silent (exit 0, empty output) so a
+// hook hiccup never blocks the user's prompt.
+//
+// Anti-spam: trivial prompts (fewer than promptSubmitMinWords words, or bare
+// acknowledgements) are skipped so we don't surface noise on "ok", "thanks",
+// "evet". A short per-prompt cooldown prevents re-injecting on an immediate
+// resubmit of the same text.
+func hookPromptSubmit(c *cli.Context) error {
+	payload := map[string]interface{}{}
+	dec := json.NewDecoder(os.Stdin)
+	_ = dec.Decode(&payload) // hook failures must never block the prompt
+
+	prompt := extractPromptFromPayload(payload)
+	if !promptWorthSurfacing(prompt) {
+		return nil
+	}
+
+	cooldownKey := "prompt-submit:" + prompt
+	if wasRecentlyProcessed(cooldownKey) {
+		return nil
+	}
+	markProcessed(cooldownKey)
+
+	client := api.NewClient()
+	if strings.TrimSpace(client.APIKey) == "" {
+		return nil // not authenticated — stay silent, never leak
+	}
+
+	project := strings.TrimSpace(c.String("project"))
+	projectHint := ""
+	if project == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			projectHint = filepath.Base(cwd)
+		}
+	}
+
+	limit := c.Int("limit")
+	if limit <= 0 {
+		limit = 4
+	}
+
+	resp, err := client.FindMemories(api.FindMemoriesOptions{
+		Term:         clipRunes(prompt, promptSubmitMaxQueryRunes),
+		Project:      project,
+		ProjectHint:  projectHint,
+		Types:        []string{"preference", "decision", "skill"},
+		Limit:        limit,
+		BudgetTokens: c.Int("budget"),
+		Purpose:      "coding",
+		// FastMode: this fires on EVERY prompt and blocks it until we return,
+		// so skip the slow HyDE+rerank stages to stay well under a second.
+		FastMode: true,
+	})
+	if err != nil || resp == nil || len(resp.Items) == 0 {
+		return nil
+	}
+
+	additional := formatPromptSubmitContext(resp.Items, c.Int("budget"))
+	if strings.TrimSpace(additional) == "" {
+		return nil
+	}
+	return emitHookAdditionalContext("UserPromptSubmit", additional)
+}
+
+// extractPromptFromPayload pulls the user's prompt text out of the Claude Code
+// UserPromptSubmit payload. The canonical field is `prompt`; `user_prompt` is
+// accepted defensively.
+func extractPromptFromPayload(p map[string]interface{}) string {
+	for _, key := range []string{"prompt", "user_prompt"} {
+		if s, ok := p[key].(string); ok {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+// promptWorthSurfacing gates the prompt-submit hook so trivial input never
+// triggers a retrieval round-trip or context injection.
+func promptWorthSurfacing(prompt string) bool {
+	p := strings.TrimSpace(prompt)
+	if p == "" {
+		return false
+	}
+	if len(strings.Fields(p)) < promptSubmitMinWords {
+		return false
+	}
+	switch strings.ToLower(strings.TrimRight(p, ".!? ")) {
+	case "ok thanks", "okay thanks", "yes please", "no thanks", "sounds good",
+		"looks good", "thank you", "thanks man", "evet lütfen", "tamam teşekkürler":
+		return false
+	}
+	return true
+}
+
+// formatPromptSubmitContext renders a compact, budget-bounded context block of
+// the prompt-relevant memories. One short line per item, tagged by type, so the
+// injection informs the answer without dominating the prompt.
+func formatPromptSubmitContext(items []api.FindItem, budgetTokens int) string {
+	if len(items) == 0 {
+		return ""
+	}
+	if budgetTokens <= 0 {
+		budgetTokens = 700
+	}
+	maxChars := budgetTokens * 4
+	if maxChars < 600 {
+		maxChars = 600
+	}
+
+	var b strings.Builder
+	seen := map[string]struct{}{}
+	for _, it := range items {
+		if b.Len() >= maxChars {
+			break
+		}
+		text := strings.TrimSpace(firstUsefulLine(it.Preview))
+		if text == "" {
+			text = strings.TrimSpace(it.Title)
+		}
+		if text == "" {
+			continue
+		}
+		key := strings.ToLower(text)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		typeTag := strings.ToLower(strings.TrimSpace(it.Type))
+		if typeTag == "" {
+			typeTag = "memory"
+		}
+		if b.Len() == 0 {
+			b.WriteString("Ramorie relevant context (apply if pertinent; do not silently contradict):\n")
+		}
+		fmt.Fprintf(&b, "- [%s] %s\n", typeTag, clipInlineRunes(text, promptSubmitMaxItemRunes))
+	}
+	return clipRunes(b.String(), maxChars)
 }
 
 func emitHookAdditionalContext(eventName, additional string) error {

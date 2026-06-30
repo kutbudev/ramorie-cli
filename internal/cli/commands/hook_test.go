@@ -11,6 +11,74 @@ import (
 	"github.com/kutbudev/ramorie-cli/internal/api"
 )
 
+// TestPromptWorthSurfacing_SkipsTrivial verifies the prompt-submit anti-spam
+// gate: trivial / too-short prompts must stay silent (no retrieval, no inject),
+// while substantive prompts pass.
+func TestPromptWorthSurfacing_SkipsTrivial(t *testing.T) {
+	silent := []string{
+		"", "ok", "yes", "evet", "thanks", "ok thanks", "looks good",
+		"thank you", "  yes please  ",
+	}
+	for _, p := range silent {
+		if promptWorthSurfacing(p) {
+			t.Errorf("promptWorthSurfacing(%q) = true, want false (trivial)", p)
+		}
+	}
+	surface := []string{
+		"how does the rerank cache eviction work",
+		"add a UserPromptSubmit hook to the installer",
+		"why did we drop org switching",
+	}
+	for _, p := range surface {
+		if !promptWorthSurfacing(p) {
+			t.Errorf("promptWorthSurfacing(%q) = false, want true (substantive)", p)
+		}
+	}
+}
+
+// TestExtractPromptFromPayload checks both the canonical `prompt` field and the
+// defensive `user_prompt` fallback, plus the empty-payload case.
+func TestExtractPromptFromPayload(t *testing.T) {
+	cases := []struct {
+		payload map[string]interface{}
+		want    string
+	}{
+		{map[string]interface{}{"prompt": "  fix the auth bug  "}, "fix the auth bug"},
+		{map[string]interface{}{"user_prompt": "deploy to railway"}, "deploy to railway"},
+		{map[string]interface{}{"other": "x"}, ""},
+		{map[string]interface{}{}, ""},
+	}
+	for _, c := range cases {
+		if got := extractPromptFromPayload(c.payload); got != c.want {
+			t.Errorf("extractPromptFromPayload(%v) = %q, want %q", c.payload, got, c.want)
+		}
+	}
+}
+
+// TestFormatPromptSubmitContext verifies the injected block is type-tagged,
+// deduped, and bounded.
+func TestFormatPromptSubmitContext(t *testing.T) {
+	items := []api.FindItem{
+		{Type: "preference", Title: "yarn", Preview: "Always use yarn, never npm."},
+		{Type: "decision", Title: "pg", Preview: "Use pgvector for embeddings."},
+		{Type: "preference", Title: "dup", Preview: "Always use yarn, never npm."}, // duplicate text
+	}
+	got := formatPromptSubmitContext(items, 700)
+	if !strings.Contains(got, "Ramorie relevant context") {
+		t.Fatalf("missing header:\n%s", got)
+	}
+	if !strings.Contains(got, "[preference]") || !strings.Contains(got, "[decision]") {
+		t.Fatalf("type tags missing:\n%s", got)
+	}
+	if strings.Count(got, "Always use yarn") != 1 {
+		t.Fatalf("duplicate preview must be deduped:\n%s", got)
+	}
+	// Empty input → empty output (silent).
+	if out := formatPromptSubmitContext(nil, 700); out != "" {
+		t.Fatalf("empty items must yield empty output, got %q", out)
+	}
+}
+
 // TestPruneHookEntries_RemovesOwnLeavesForeignAlone ensures uninstall never
 // clobbers hooks installed by other tools that happen to share the matcher.
 func TestPruneHookEntries_RemovesOwnLeavesForeignAlone(t *testing.T) {

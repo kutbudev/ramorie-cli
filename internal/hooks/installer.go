@@ -24,6 +24,10 @@ type HookEvent string
 const (
 	// SessionStart fires once when the agent session begins.
 	SessionStart HookEvent = "SessionStart"
+	// UserPromptSubmit fires each time the user submits a prompt, before the
+	// model sees it — lets us inject prompt-relevant memories as context. It is
+	// not a tool event, so it carries no Matcher.
+	UserPromptSubmit HookEvent = "UserPromptSubmit"
 	// PreToolUse fires before a tool call; pair with Matcher to scope.
 	PreToolUse HookEvent = "PreToolUse"
 	// PostToolUse fires after a tool call; pair with Matcher to scope.
@@ -80,6 +84,15 @@ func DefaultEntries() []HookEntry {
 			Event:   SessionStart,
 			Command: makeSessionStartCmd(),
 			ID:      "ramorie-protocol-session-start-v1",
+		},
+		{
+			// Prompt-relevant memory injection: each user prompt is used as a
+			// retrieval query so active preferences + related decisions/skills
+			// surface as context before the model answers. Silent on trivial
+			// prompts (see `hook prompt-submit`).
+			Event:   UserPromptSubmit,
+			Command: makePromptSubmitCmd(),
+			ID:      "ramorie-protocol-prompt-submit-v1",
 		},
 		{
 			Event:   PreToolUse,
@@ -141,6 +154,13 @@ func makeFileContextCmd() string {
 		return shellQuote(exe) + " hook context --budget 500 --limit 2"
 	}
 	return "ramorie hook context --budget 500 --limit 2"
+}
+
+func makePromptSubmitCmd() string {
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		return shellQuote(exe) + " hook prompt-submit --budget 700 --limit 4"
+	}
+	return "ramorie hook prompt-submit --budget 700 --limit 4"
 }
 
 func shellQuote(s string) string {
