@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="https://ramorie.com/logo.png" alt="Ramorie" width="120" height="120">
+  <img src="https://ramorie.com/apple-icon.png" alt="Ramorie" width="120" height="120">
 </p>
 
 <h1 align="center">Ramorie CLI</h1>
 
 <p align="center">
-  <strong>AI-powered task and memory management for developers and AI agents</strong>
+  <strong>Long-term memory for AI agents over MCP — one shared memory for Claude Code, Cursor, Codex and more</strong>
 </p>
 
 <p align="center">
   <a href="https://ramorie.com">Website</a> •
-  <a href="https://ramorie.com/docs">Documentation</a> •
+  <a href="https://ramorie.com/docs/cli/">Documentation</a> •
   <a href="https://github.com/kutbudev/ramorie-cli/releases">Releases</a>
 </p>
 
@@ -26,7 +26,11 @@
 
 ## ✨ What is Ramorie?
 
-**Ramorie** is a productivity platform that combines task management with an intelligent memory system. The CLI provides:
+**Ramorie** gives AI agents long-term memory. Coding agents forget everything when a session ends; Ramorie is an MCP memory server they can write decisions to and search again later, so Claude Code, Cursor, Codex, Windsurf, VS Code and other MCP clients share one persistent, project-scoped memory.
+
+> **Want it on your Mac with zero setup?** [Ramorie Desktop](https://ramorie.com/desktop/) bundles the database, a local embedding model and this MCP server, detects your AI tools and configures them for you. It is free for 6 months. See [Long-term memory for AI agents](https://ramorie.com/guides/long-term-memory-for-ai-agents/).
+
+The CLI provides:
 
 - **🎯 Smart Task Management** — Create, organize, and track tasks with priorities, tags, and progress
 - **🧠 Memory System** — Store and retrieve knowledge, insights, and learnings with semantic search
